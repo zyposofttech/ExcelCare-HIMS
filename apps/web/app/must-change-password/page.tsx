@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-// Define the response type for safety
 type ChangePasswordResponse = {
   ok: boolean;
   access_token?: string;
@@ -20,6 +19,7 @@ export default function MustChangePasswordPage() {
   const next = sp.get("next") || "/superadmin";
 
   const user = useAuthStore((s) => s.user);
+  const isHydrated = useAuthStore((s) => s._hasHydrated); //  Check hydration
   const updateUser = useAuthStore((s) => s.updateUser);
   const login = useAuthStore((s) => s.login);
   const logout = useAuthStore((s) => s.logout);
@@ -31,12 +31,15 @@ export default function MustChangePasswordPage() {
   const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    // If not logged in → back to login
-    if (!user) {
-      // Cast to 'any' to satisfy typed routes
+    //  Only redirect if hydration is complete AND user is missing
+    if (isHydrated && !user) {
       router.replace(`/login?next=${encodeURIComponent(next)}` as any);
     }
-  }, [user, router, next]);
+  }, [user, isHydrated, router, next]);
+
+  //  Show nothing while waiting for storage
+  if (!isHydrated) return null; 
+  if (!user) return null;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -51,39 +54,29 @@ export default function MustChangePasswordPage() {
       const res = await fetch("/api/auth/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Ensure you send the token if your backend requires it (usually via Cookie, but sometimes header)
-        // If your backend relies on the cookie, this is fine. 
-        // If it needs a header: Authorization: `Bearer ${token}`
         body: JSON.stringify({ currentPassword, newPassword }),
       });
 
       const data = (await res.json()) as ChangePasswordResponse;
 
       if (!res.ok) {
-        const msg =
-          (data as any)?.message ||
-          (Array.isArray((data as any)?.errors) ? (data as any).errors.join(" ") : null) ||
-          "Password change failed.";
-        throw new Error(msg);
+        throw new Error((data as any)?.message || "Password change failed.");
       }
 
-      // Store new token (important: backend returns fresh token with mustChangePassword=false)
       if (data.access_token) {
         try {
           localStorage.setItem("access_token", data.access_token);
         } catch {}
       }
 
-      // Update store user
       if (data.user) {
         login(data.user, data.access_token ?? null);
       } else {
         updateUser({ mustChangePassword: false });
       }
 
-      // FIX: Cast 'next' to 'any' here to resolve the error
-      router.replace(next as any);
-      
+      // Hard redirect to clear any state artifacts
+      window.location.href = next;
     } catch (e: any) {
       if (String(e?.message || "").toLowerCase().includes("invalid token")) {
         logout();
@@ -97,15 +90,15 @@ export default function MustChangePasswordPage() {
   }
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md rounded-2xl border bg-card p-6 shadow-sm">
+    <div className="min-h-screen w-full flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 px-4">
+      <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
         <h1 className="text-2xl font-semibold tracking-tight">Change your password</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
+        <p className="mt-2 text-sm text-zinc-500">
           This account requires a password change before you can continue.
         </p>
 
         {err && (
-          <div className="mt-4 rounded-xl border border-destructive/25 bg-destructive/10 p-3 text-sm text-destructive">
+          <div className="mt-4 rounded-xl border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">
             {err}
           </div>
         )}
@@ -133,8 +126,8 @@ export default function MustChangePasswordPage() {
               className="h-11"
               autoComplete="new-password"
             />
-            <p className="text-xs text-muted-foreground">
-              Minimum 10 characters, 1 number, 1 special character, no spaces.
+            <p className="text-xs text-zinc-500">
+              Minimum 8 characters.
             </p>
           </div>
 
@@ -150,7 +143,7 @@ export default function MustChangePasswordPage() {
             />
           </div>
 
-          <Button type="submit" className="h-11 w-full" disabled={busy}>
+          <Button type="submit" className="h-11 w-full bg-indigo-600 hover:bg-indigo-700 text-white" disabled={busy}>
             {busy ? "Updating..." : "Update password & continue"}
           </Button>
         </form>

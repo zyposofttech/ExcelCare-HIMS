@@ -25,9 +25,11 @@ export type AuthUser = {
 type AuthState = {
   user: AuthUser | null;
   token: string | null;
+  _hasHydrated: boolean; //  New Flag
   login: (user: AuthUser, token: string | null) => void;
   updateUser: (patch: Partial<AuthUser>) => void;
   logout: () => void;
+  setHydrated: (state: boolean) => void;
 };
 
 function setAuthCookie() {
@@ -43,6 +45,7 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null,
       token: null,
+      _hasHydrated: false, // Default false
 
       login: (user, token) => {
         setAuthCookie();
@@ -60,16 +63,20 @@ export const useAuthStore = create<AuthState>()(
         try {
           localStorage.removeItem("access_token");
           sessionStorage.removeItem("access_token");
-        } catch {
-          // ignore
-        }
+        } catch {}
         set({ user: null, token: null });
       },
+
+      setHydrated: (state) => set({ _hasHydrated: state }),
     }),
     {
       name: "excelcare-auth",
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({ user: s.user, token: s.token }),
+      //  Update flag when storage is loaded
+      onRehydrateStorage: () => (state) => {
+        state?.setHydrated(true);
+      },
     }
   )
 );

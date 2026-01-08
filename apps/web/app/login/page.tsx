@@ -20,7 +20,6 @@ import {
 } from "lucide-react";
 
 // --- Configuration ---
-// Note: API_URL might still be needed for other calls, or you can remove if everything is proxy
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
 
 type AuthView = "LOGIN" | "FORGOT";
@@ -55,34 +54,39 @@ export default function LoginPage() {
   const next = searchParams.get("next") || "/superadmin";
 
   const { user, login } = useAuthStore();
+  const isHydrated = useAuthStore((s) => s._hasHydrated);
   const [view, setView] = React.useState<AuthView>("LOGIN");
 
   // Form State
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
-  const [remember, setRemember] = React.useState(false); // Added state for 'remember'
+  const [remember, setRemember] = React.useState(false);
 
   // UX State
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Redirect Logic if user is already logged in (optional check)
+  // ✅ FIXED: Centralized Redirect Logic
+  // This hook now acts as the SINGLE source of truth for navigation.
   React.useEffect(() => {
-    if (user) {
-       router.replace(next as any);
+    if (isHydrated && user) {
+      if (user.mustChangePassword) {
+        // Safe cast
+        router.replace(`/must-change-password?next=${encodeURIComponent(next)}` as any);
+      } else {
+        router.replace(next as any);
+      }
     }
-  }, [user, router, next]);
+  }, [user, isHydrated, router, next]);
 
-  // Handlers
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setIsLoading(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 600)); // Premium feel delay
+      await new Promise((resolve) => setTimeout(resolve, 600));
 
-      // 1. UPDATED FETCH URL
       const res = await fetch(`/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -92,7 +96,6 @@ export default function LoginPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.message || "Invalid credentials.");
 
-      // 2. UPDATED LOGIN HANDLING BLOCK
       const accessToken = (data as any)?.access_token;
       const loggedInUser = (data as any)?.user;
 
@@ -101,16 +104,18 @@ export default function LoginPage() {
         else sessionStorage.setItem("access_token", accessToken);
       }
 
-      if (loggedInUser) login(loggedInUser, accessToken ?? null);
+      if (loggedInUser) {
+        // 1. Update store
+        login(loggedInUser, accessToken ?? null);
 
-      const mustChange = !!loggedInUser?.mustChangePassword;
-      if (mustChange) {
-        router.replace(`/must-change-password?next=${encodeURIComponent(next)}` as any);
-        return;
+        // 2. HARD REDIRECT to break the loop and ensure middleware sees cookies
+        const target = loggedInUser.mustChangePassword
+           ? `/must-change-password?next=${encodeURIComponent(next)}`
+           : next;
+        
+        window.location.href = target;
+        return; // Stop here
       }
-
-      router.replace(next as any);
-
     } catch (err: any) {
       setError(err.message);
       setIsLoading(false);
@@ -236,7 +241,6 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* Added checkbox binding for 'remember' variable */}
               <div className="flex items-center justify-between text-xs">
                 <label className="flex items-center gap-2 text-zinc-500 cursor-pointer">
                   <input 
