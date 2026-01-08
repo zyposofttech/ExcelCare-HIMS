@@ -1,0 +1,278 @@
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import type { PrismaClient } from "@excelcare/db";
+import { AuditService } from "../audit/audit.service";
+import type { Principal } from "../auth/access-policy.service";
+import { PERM, ROLE } from "./iam.constants";
+import { CreateUserDto, UpdateUserDto } from "./iam.dto";
+import { generateTempPassword, hashPassword } from "./password.util";
+
+function lowerEmail(e: string) {
+  return (e || "").trim().toLowerCase();
+}
+
+@Injectable()
+export class IamService {
+  constructor(
+    @Inject("PRISMA") private prisma: PrismaClient,
+    private audit: AuditService,
+  ) {}
+
+  private ensureBranchScope(principal: Principal, branchId: string | null | undefined) {
+    if (principal.roleScope === "BRANCH") {
+      if (!principal.branchId) throw new ForbiddenException("Branch-scoped user missing branchId");
+      if (!branchId) throw new BadRequestException("branchId is required for branch-scoped operations");
+      if (branchId !== principal.branchId) throw new ForbiddenException("Cross-branch access is not allowed");
+    }
+  }
+
+  async listRoles(principal: Principal) {
+    // Read roles/templates that are ACTIVE; branch users will only see BRANCH roles.
+    const where =
+  principal.roleScope === "BRANCH"
+    ? ({ roleTemplate: { scope: "BRANCH" }, status: "ACTIVE" } as const)
+    : ({ status: "ACTIVE" } as const);
+
+
+    const versions = await this.prisma.roleTemplateVersion.findMany({
+      where,
+      include: {
+        roleTemplate: true,
+        permissions: { include: { permission: true } },
+      },
+      orderBy: [{ roleTemplate: { code: "asc" } }, { version: "desc" }],
+    });
+
+    return versions.map((v: any) => ({
+      roleCode: v.roleTemplate.code,
+      roleName: v.roleTemplate.name,
+      scope: v.roleTemplate.scope,
+      version: v.version,
+       permissions: v.permissions.map((p: any) => p.permission.code),
+    }));
+  }
+
+  async listUsers(principal: Principal, q?: string) {
+    if (!principal.permissions.includes(PERM.IAM_USER_READ)) throw new ForbiddenException("Missing IAM_USER_READ");
+
+    const query = (q || "").trim();
+    const where: any = {};
+    if (query) {
+      where.OR = [
+        { email: { contains: query, mode: "insensitive" } },
+        { name: { contains: query, mode: "insensitive" } },
+      ];
+    }
+    if (principal.roleScope === "BRANCH") {
+      where.branchId = principal.branchId ?? "__none__";
+    }
+
+    const rows = await this.prisma.user.findMany({
+      where,
+      include: {
+        branch: true,
+        roleVersion: { include: { roleTemplate: true } },
+      },
+      orderBy: [{ createdAt: "desc" }],
+      take: 200,
+    });
+
+    return rows.map((u: any) => ({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      roleCode: u.roleVersion?.roleTemplate?.code ?? u.role,
+      branchId: u.branchId ?? null,
+      branchName: u.branch?.name ?? null,
+      isActive: u.isActive,
+      mustChangePassword: u.mustChangePassword,
+      createdAt: u.createdAt,
+      updatedAt: u.updatedAt,
+    }));
+  }
+
+  async createUser(principal: Principal, dto: CreateUserDto) {
+    if (!principal.permissions.includes(PERM.IAM_USER_CREATE)) throw new ForbiddenException("Missing IAM_USER_CREATE");
+
+    const email = lowerEmail(dto.email);
+    if (!email) throw new BadRequestException("Email required");
+
+    // Find ACTIVE role version by template code
+    const roleCode = (dto.roleCode || "").trim().toUpperCase();
+    const roleV = await this.prisma.roleTemplateVersion.findFirst({
+      where: { status: "ACTIVE", roleTemplate: { code: roleCode } },
+      include: { roleTemplate: true },
+    });
+    if (!roleV) throw new BadRequestException(`Active role not found: ${roleCode}`);
+
+    // Branch isolation: branch-scoped principals may only create users in their own branch
+    const branchId = dto.branchId ?? principal.branchId ?? null;
+    if (roleV.roleTemplate.scope === "BRANCH") {
+      if (!branchId) throw new BadRequestException("branchId is required for BRANCH role users");
+    }
+    this.ensureBranchScope(principal, branchId);
+
+    // Additional safety: BRANCH principals cannot assign GLOBAL roles (e.g., SUPER_ADMIN)
+    if (principal.roleScope === "BRANCH" && roleV.roleTemplate.scope === "GLOBAL") {
+      throw new ForbiddenException("Branch admins cannot assign global roles");
+    }
+
+    // Temp password + must-change-password
+    const tempPassword = generateTempPassword();
+    const passwordHash = hashPassword(tempPassword);
+
+    try {
+      const user = await this.prisma.user.create({
+        data: {
+          email,
+          name: dto.name,
+          role: roleCode, // keep in sync
+          branchId,
+          staffId: dto.staffId ?? null,
+          roleVersionId: roleV.id,
+          passwordHash,
+          mustChangePassword: true,
+        },
+      });
+
+      await this.audit.log({
+        branchId: branchId ?? principal.branchId ?? null,
+        actorUserId: principal.userId,
+        action: "IAM_USER_CREATED",
+        entity: "User",
+        entityId: user.id,
+        meta: { email, roleCode, roleVersionId: roleV.id, branchId },
+      });
+
+      const returnTemp =
+        process.env.IAM_RETURN_TEMP_PASSWORD === "true" || process.env.NODE_ENV !== "production";
+
+      return {
+        userId: user.id,
+        email: user.email,
+        tempPassword: returnTemp ? tempPassword : undefined,
+      };
+    } catch (e: any) {
+      // Prisma unique constraint
+      if (String(e?.code) === "P2002") throw new ConflictException("Email already exists");
+      throw e;
+    }
+  }
+
+  async updateUser(principal: Principal, id: string, dto: UpdateUserDto) {
+    if (!principal.permissions.includes(PERM.IAM_USER_UPDATE)) throw new ForbiddenException("Missing IAM_USER_UPDATE");
+
+    const existing = await this.prisma.user.findUnique({
+      where: { id },
+      include: { roleVersion: { include: { roleTemplate: true } } },
+    });
+    if (!existing) throw new NotFoundException("User not found");
+
+    // Branch isolation
+    if (principal.roleScope === "BRANCH") {
+      if ((existing.branchId ?? null) !== (principal.branchId ?? null)) {
+        throw new ForbiddenException("Cross-branch access is not allowed");
+      }
+    }
+
+    let newRoleVersionId: string | undefined;
+    let newRoleCode: string | undefined;
+
+    if (dto.roleCode) {
+      const roleCode = dto.roleCode.trim().toUpperCase();
+      const roleV = await this.prisma.roleTemplateVersion.findFirst({
+        where: { status: "ACTIVE", roleTemplate: { code: roleCode } },
+        include: { roleTemplate: true },
+      });
+      if (!roleV) throw new BadRequestException(`Active role not found: ${roleCode}`);
+
+      if (principal.roleScope === "BRANCH" && roleV.roleTemplate.scope === "GLOBAL") {
+        throw new ForbiddenException("Branch admins cannot assign global roles");
+      }
+
+      newRoleVersionId = roleV.id;
+      newRoleCode = roleCode;
+    }
+
+    const branchId = dto.branchId === undefined ? existing.branchId : dto.branchId;
+    // if moving branches, enforce branch scope rules
+    this.ensureBranchScope(principal, branchId ?? null);
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: {
+        name: dto.name ?? undefined,
+        isActive: dto.isActive ?? undefined,
+        staffId: dto.staffId === undefined ? undefined : dto.staffId,
+        branchId: dto.branchId === undefined ? undefined : dto.branchId,
+        roleVersionId: newRoleVersionId ?? undefined,
+        role: newRoleCode ?? undefined,
+      },
+    });
+
+    await this.audit.log({
+      branchId: (updated.branchId ?? principal.branchId ?? null) as any,
+      actorUserId: principal.userId,
+      action: "IAM_USER_UPDATED",
+      entity: "User",
+      entityId: updated.id,
+      meta: { changes: dto },
+    });
+
+    if (dto.roleCode) {
+      await this.audit.log({
+        branchId: (updated.branchId ?? principal.branchId ?? null) as any,
+        actorUserId: principal.userId,
+        action: "IAM_USER_ROLE_ASSIGNED",
+        entity: "User",
+        entityId: updated.id,
+        meta: { roleCode: dto.roleCode },
+      });
+    }
+
+    return { ok: true };
+  }
+
+  async resetPassword(principal: Principal, id: string) {
+    if (!principal.permissions.includes(PERM.IAM_USER_RESET_PASSWORD)) {
+      throw new ForbiddenException("Missing IAM_USER_RESET_PASSWORD");
+    }
+
+    const existing = await this.prisma.user.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("User not found");
+
+    if (principal.roleScope === "BRANCH") {
+      if ((existing.branchId ?? null) !== (principal.branchId ?? null)) {
+        throw new ForbiddenException("Cross-branch access is not allowed");
+      }
+    }
+
+    const tempPassword = generateTempPassword();
+    const passwordHash = hashPassword(tempPassword);
+
+    await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash, mustChangePassword: true },
+    });
+
+    await this.audit.log({
+      branchId: (existing.branchId ?? principal.branchId ?? null) as any,
+      actorUserId: principal.userId,
+      action: "IAM_USER_PASSWORD_RESET",
+      entity: "User",
+      entityId: id,
+      meta: { email: existing.email },
+    });
+
+    const returnTemp =
+      process.env.IAM_RETURN_TEMP_PASSWORD === "true" || process.env.NODE_ENV !== "production";
+
+    return { ok: true, tempPassword: returnTemp ? tempPassword : undefined };
+  }
+}

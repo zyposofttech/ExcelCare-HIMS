@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: excelcare-postgres
+    environment:
+      POSTGRES_DB: excelcare
+      POSTGRES_USER: excelcare
+      POSTGRES_PASSWORD: excelcare_dev_password
+    ports: ["5432:5432"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: excelcare-redis
+    ports: ["6379:6379"]
+
+  nats:
+    image: nats:2
+    container_name: excelcare-nats
+    command: ["-js"]
+    ports: ["4222:4222", "8222:8222"]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    container_name: excelcare-keycloak
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports: ["8080:8080"]
+    volumes:
+      - ./keycloak/import:/opt/keycloak/data/import
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.101.0
+    container_name: excelcare-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel/collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports: ["4317:4317", "4318:4318", "8889:8889"]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: excelcare-prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: excelcare-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports: ["3001:3000"]
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.58
+    container_name: excelcare-jaeger
+    ports: ["16686:16686", "14250:14250", "14268:14268"]
+
+volumes:
+  postgres_data:
+  grafana_data:

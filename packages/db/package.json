@@ -1,0 +1,19 @@
+{
+  "name": "@excelcare/db",
+  "private": true,
+  "version": "0.1.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "biome check .",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev --name init",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.18.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.18.0"
+  }
+}

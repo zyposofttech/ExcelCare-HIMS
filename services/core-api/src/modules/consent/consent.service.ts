@@ -1,0 +1,68 @@
+import { Inject, Injectable } from "@nestjs/common";
+import type { PrismaClient } from "@excelcare/db";
+import { AuditService } from "../audit/audit.service";
+
+type GrantConsentDto = {
+  patientId: string;
+  scope: "VIEW" | "STORE" | "SHARE";
+  purpose: string;
+};
+
+type RtbfRequestDto = {
+  patientId: string;
+  reason: string;
+};
+
+@Injectable()
+export class ConsentService {
+  constructor(
+    @Inject("PRISMA") private readonly prisma: PrismaClient,
+    private readonly audit: AuditService,
+  ) {}
+
+  async list(patientId: string) {
+    return this.prisma.consentRecord.findMany({
+      where: { patientId },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  // ✅ matches ConsentController.grant()
+  async grant(dto: GrantConsentDto) {
+    const rec = await this.prisma.consentRecord.create({
+      data: {
+        patientId: dto.patientId,
+        scope: dto.scope as any,
+        purpose: dto.purpose,
+        status: "GRANTED" as any,
+      },
+    });
+
+    await this.audit.log({
+      action: "CONSENT_GRANT",
+      entity: "ConsentRecord",
+      entityId: rec.id,
+      meta: { patientId: dto.patientId, scope: dto.scope, purpose: dto.purpose },
+    });
+
+    return rec;
+  }
+
+  async rtbf(dto: RtbfRequestDto) {
+    const req = await this.prisma.rtbfRequest.create({
+      data: {
+        patientId: dto.patientId,
+        reason: dto.reason,
+      },
+    });
+
+    await this.audit.log({
+      action: "RTBF_REQUEST",
+      entity: "RtbfRequest",
+      entityId: req.id,
+      meta: { patientId: dto.patientId, reason: dto.reason },
+    });
+
+    return req;
+  }
+}

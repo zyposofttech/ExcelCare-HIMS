@@ -1,0 +1,84 @@
+{
+  "realm": "excelcare",
+  "enabled": true,
+  "displayName": "ExcelCare",
+  "clients": [
+    {
+      "clientId": "excelcare-web",
+      "enabled": true,
+      "publicClient": true,
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true
+    },
+    {
+      "clientId": "excelcare-api",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "SUPER_ADMIN"
+      },
+      {
+        "name": "BRANCH_ADMIN"
+      },
+      {
+        "name": "FRONT_OFFICE"
+      },
+      {
+        "name": "DOCTOR"
+      },
+      {
+        "name": "NURSE"
+      },
+      {
+        "name": "BILLING"
+      },
+      {
+        "name": "DIAGNOSTICS"
+      },
+      {
+        "name": "PHARMACY"
+      },
+      {
+        "name": "OPS"
+      },
+      {
+        "name": "SURVEILLANCE_OFFICER"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "superadmin",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "superadmin@excelcare.local",
+      "firstName": "Super",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "SUPER_ADMIN"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@excelcare/types",
+  "private": true,
+  "version": "0.1.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "biome check .",
+    "build": "node -e \"console.log('no build step')\""
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

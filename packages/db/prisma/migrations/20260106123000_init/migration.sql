@@ -1,0 +1,1 @@
+-- Scaffold migration placeholder; run `pnpm -C packages/db prisma:migrate` to generate proper SQL.
