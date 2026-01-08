@@ -1,45 +1,50 @@
-// services/core-api/src/modules/auth/auth.guard.ts
 import {
   CanActivate,
   ExecutionContext,
   Injectable,
   UnauthorizedException,
+  ForbiddenException,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { JwtService } from "@nestjs/jwt"; // <--- Key change: Use JwtService
+import { JwtService } from "@nestjs/jwt";
 import { IS_PUBLIC_KEY } from "./public.decorator";
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
-    private readonly jwtService: JwtService, // <--- Inject JwtService
+    private readonly jwtService: JwtService,
     private readonly reflector: Reflector
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    // 1. Check for @Public() decorator
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
-    if (isPublic) {
-      return true;
-    }
+    if (isPublic) return true;
 
-    // 2. Extract Token
     const request = context.switchToHttp().getRequest();
     const token = this.extractTokenFromHeader(request);
 
-    if (!token) {
-      throw new UnauthorizedException("Missing Bearer token");
-    }
+    if (!token) throw new UnauthorizedException("Missing Bearer token");
 
-    // 3. Verify Token Locally
     try {
       const payload = await this.jwtService.verifyAsync(token);
-      // 💡 We assign the payload to the request object so we can access it in route handlers
       request.user = payload;
-    } catch {
+
+      // ✅ Enforce mustChangePassword
+      const mustChangePassword = payload?.mustChangePassword === true;
+      if (mustChangePassword) {
+        const url = request.originalUrl || request.url || "";
+        const allowed =
+          url.includes("/auth/change-password"); // only allow password change endpoint
+
+        if (!allowed) {
+          throw new ForbiddenException("Password change required");
+        }
+      }
+    } catch (e: any) {
+      if (e instanceof ForbiddenException) throw e;
       throw new UnauthorizedException("Invalid or Expired Token");
     }
 

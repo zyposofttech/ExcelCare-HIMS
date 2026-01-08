@@ -1,17 +1,18 @@
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
-import { JwtModule } from "@nestjs/jwt"; // <--- Required
+import { JwtModule } from "@nestjs/jwt";
 import { JwtAuthGuard } from "./auth.guard";
 import { RolesGuard } from "./roles.guard";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
+import { AuditModule } from "../audit/audit.module";
 
 @Module({
   imports: [
-    // This configures the JWT signer AND verifier for local dev
+    AuditModule,
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET || "dev-secret-key", 
+      secret: process.env.JWT_SECRET || "dev-secret-key",
       signOptions: { expiresIn: "1d" },
     }),
   ],

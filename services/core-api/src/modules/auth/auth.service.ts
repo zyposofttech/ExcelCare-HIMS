@@ -1,106 +1,134 @@
-import { Inject, Injectable, UnauthorizedException, BadRequestException, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import type { PrismaClient } from "@excelcare/db";
-import { verifyPassword, hashPassword } from "../iam/password.util";
-import { randomBytes } from "crypto";
+import { AuditService } from "../audit/audit.service";
+import { hashPassword, validatePassword, verifyPassword } from "../iam/password.util";
+
+function lowerEmail(e: string) {
+  return (e || "").trim().toLowerCase();
+}
+
+type AuthUserPayload = {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  branchId: string | null;
+  mustChangePassword: boolean;
+  isActive: boolean;
+};
 
 @Injectable()
 export class AuthService {
   constructor(
     @Inject("PRISMA") private readonly prisma: PrismaClient,
     private readonly jwtService: JwtService,
+    private readonly audit: AuditService
   ) {}
 
-  async validateUser(email: string, pass: string): Promise<any> {
-    const user = await this.prisma.user.findUnique({ where: { email } });
-    if (user && user.passwordHash && verifyPassword(pass, user.passwordHash)) {
-      const { passwordHash, ...result } = user;
-      return result;
-    }
-    return null;
+  private toAuthUser(u: any): AuthUserPayload {
+    return {
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      role: u.role,
+      branchId: u.branchId ?? null,
+      mustChangePassword: !!u.mustChangePassword,
+      isActive: !!u.isActive,
+    };
   }
 
-  async login(userDto: any) {
-    const user = await this.validateUser(userDto.email, userDto.password);
+  private signToken(user: AuthUserPayload) {
+    // IMPORTANT: Include mustChangePassword in token so guard can enforce it
+    return this.jwtService.sign({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      branchId: user.branchId,
+      mustChangePassword: user.mustChangePassword,
+    });
+  }
+
+  async validateUser(emailRaw: string, pass: string): Promise<AuthUserPayload | null> {
+    const email = lowerEmail(emailRaw);
+
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user || !user.passwordHash) return null;
+    if (!user.isActive) return null;
+
+    const ok = verifyPassword(pass, user.passwordHash);
+    if (!ok) return null;
+
+    return this.toAuthUser(user);
+  }
+
+  async login(dto: any) {
+    const user = await this.validateUser(dto.email, dto.password);
     if (!user) throw new UnauthorizedException("Invalid credentials");
 
-    const payload = { 
-      sub: user.id, 
-      email: user.email, 
-      role: user.role,
-      branchId: user.branchId 
-    };
-
     return {
-      access_token: this.jwtService.sign(payload),
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-      }
+      access_token: this.signToken(user),
+      user, // includes mustChangePassword
     };
   }
 
-  // --- NEW: FORGOT PASSWORD LOGIC ---
-  async forgotPassword(email: string) {
-    const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      // Security: Do not reveal if user exists. Pretend success.
-      return { message: "If that email exists, a reset link has been sent." };
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    if (!userId) throw new UnauthorizedException("Invalid token");
+
+    if (!currentPassword?.trim()) {
+      throw new BadRequestException("Current password is required");
+    }
+    if (!newPassword?.trim()) {
+      throw new BadRequestException("New password is required");
     }
 
-    // 1. Generate a secure random token
-    const resetToken = randomBytes(32).toString("hex");
-    const resetExpires = new Date(Date.now() + 3600000); // 1 hour from now
+    const policyErrors = validatePassword(newPassword);
+    if (policyErrors.length) {
+      throw new BadRequestException({
+        message: "Password policy violation",
+        errors: policyErrors,
+      });
+    }
 
-    // 2. Save hash of token to DB (Best practice: store hash, send raw to user)
-    // For simplicity here, we storing raw token. In high security, hash it.
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { 
-        passwordResetToken: resetToken,
-        passwordResetExpires: resetExpires
-      }
-    });
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.passwordHash) throw new UnauthorizedException("User not found");
+    if (!user.isActive) throw new ForbiddenException("User is inactive");
 
-    // 3. Mock Email Sending (Since we don't have an SMTP setup)
-    // In production, use @nestjs-modules/mailer to send this link:
-    // Link: http://localhost:3000/auth/reset-password?token=${resetToken}
-    console.log(`[MOCK EMAIL] To: ${email} | Reset Link: http://localhost:3000/auth/reset-password?token=${resetToken}`);
+    const ok = verifyPassword(currentPassword, user.passwordHash);
+    if (!ok) throw new UnauthorizedException("Current password is incorrect");
 
-    return { 
-      message: "Reset link sent (check console)", 
-      // DEV ONLY: returning token so you can test it immediately
-      dev_token: resetToken 
-    };
-  }
-
-  async resetPassword(token: string, newPass: string) {
-    // 1. Find user with valid token and non-expired date
-    const user = await this.prisma.user.findFirst({
-      where: {
-        passwordResetToken: token,
-        passwordResetExpires: { gt: new Date() }
-      }
-    });
-
-    if (!user) throw new BadRequestException("Invalid or expired reset token");
-
-    // 2. Hash new password
-    const newHash = hashPassword(newPass);
-
-    // 3. Update User & Clear Token
-    await this.prisma.user.update({
-      where: { id: user.id },
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
       data: {
-        passwordHash: newHash,
-        passwordResetToken: null,
-        passwordResetExpires: null,
-        mustChangePassword: false // They just changed it, so they are good
-      }
+        passwordHash: hashPassword(newPassword),
+        mustChangePassword: false,
+      },
     });
 
-    return { message: "Password reset successfully. You may now login." };
+    await this.audit.log({
+      branchId: updated.branchId ?? null,
+      actorUserId: updated.id,
+      action: "AUTH_PASSWORD_CHANGED",
+      entity: "User",
+      entityId: updated.id,
+      meta: { forced: !!user.mustChangePassword },
+    });
+
+    const authUser = this.toAuthUser(updated);
+
+    return {
+      access_token: this.signToken(authUser), // NEW token with mustChangePassword=false
+      user: authUser,
+      ok: true,
+    };
   }
 }

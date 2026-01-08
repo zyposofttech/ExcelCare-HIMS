@@ -3,474 +3,301 @@
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/lib/auth/store";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import {
-  Activity,
-  ArrowLeft,
-  CheckCircle2,
+  Building2,
+  ChevronLeft,
+  Command,
+  Globe,
+  LayoutGrid,
   Loader2,
   Lock,
   Mail,
   ShieldCheck,
-  Wifi,
-  XCircle,
 } from "lucide-react";
 
+// --- Configuration ---
+// Note: API_URL might still be needed for other calls, or you can remove if everything is proxy
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
 
-type AuthView = "LOGIN" | "FORGOT_PASSWORD" | "RESET_SUBMITTED";
-type BusyPhase = "IDLE" | "CONNECTING" | "VERIFYING" | "FINALIZING";
+type AuthView = "LOGIN" | "FORGOT";
 
-function cx(...cls: Array<string | false | undefined | null>) {
-  return cls.filter(Boolean).join(" ");
+// --- Components ---
+
+function BrandPattern() {
+  return (
+    <div className="absolute inset-0 z-0 overflow-hidden opacity-30 dark:opacity-20">
+      <div className="absolute -left-[10%] -top-[10%] h-[120%] w-[120%] bg-[radial-gradient(#000_1px,transparent_1px)] dark:bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:24px_24px] [mask-image:radial-gradient(ellipse_60%_60%_at_50%_50%,#000_70%,transparent_100%)]" />
+    </div>
+  );
 }
 
-function nowMs() {
-  try {
-    return performance.now();
-  } catch {
-    return Date.now();
-  }
+function StatusBadge() {
+  return (
+    <div className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white/50 px-3 py-1 text-[11px] font-medium text-zinc-600 backdrop-blur-md transition hover:bg-white/80 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300 dark:hover:bg-white/10 cursor-help" title="All systems operational">
+      <span className="relative flex h-2 w-2">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75"></span>
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+      </span>
+      Systems Operational
+    </div>
+  );
 }
+
+// --- Main Page ---
 
 export default function LoginPage() {
   const router = useRouter();
-  const sp = useSearchParams();
-  const next = sp.get("next") || "/superadmin";
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next") || "/superadmin";
 
   const { user, login } = useAuthStore();
-
   const [view, setView] = React.useState<AuthView>("LOGIN");
 
-  // Form
+  // Form State
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
+  const [remember, setRemember] = React.useState(false); // Added state for 'remember'
 
-  // UX / state
-  const [busy, setBusy] = React.useState(false);
-  const [phase, setPhase] = React.useState<BusyPhase>("IDLE");
+  // UX State
+  const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = React.useState<string | null>(null);
 
-  const [slowHint, setSlowHint] = React.useState<string | null>(null);
-  const [elapsedMs, setElapsedMs] = React.useState<number>(0);
-
-  const abortRef = React.useRef<AbortController | null>(null);
-  const elapsedTimerRef = React.useRef<number | null>(null);
-
+  // Redirect Logic if user is already logged in (optional check)
   React.useEffect(() => {
-    if (user) router.replace(next);
+    if (user) {
+       router.replace(next as any);
+    }
   }, [user, router, next]);
 
-  // Prefetch destination to reduce “post-login blank time”
-  React.useEffect(() => {
-    router.prefetch(next);
-  }, [router, next]);
-
-  function startElapsedClock() {
-    const start = nowMs();
-    if (elapsedTimerRef.current) window.clearInterval(elapsedTimerRef.current);
-    elapsedTimerRef.current = window.setInterval(() => {
-      setElapsedMs(Math.max(0, Math.round(nowMs() - start)));
-    }, 120);
-    return () => {
-      if (elapsedTimerRef.current) window.clearInterval(elapsedTimerRef.current);
-      elapsedTimerRef.current = null;
-    };
-  }
-
-  function cancelInFlight() {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setBusy(false);
-    setPhase("IDLE");
-    setSlowHint(null);
-    if (elapsedTimerRef.current) window.clearInterval(elapsedTimerRef.current);
-    elapsedTimerRef.current = null;
-  }
-
+  // Handlers
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setSlowHint(null);
-    setElapsedMs(0);
-
-    // Reset any prior inflight requests
-    abortRef.current?.abort();
-    abortRef.current = new AbortController();
-
-    setBusy(true);
-    setPhase("CONNECTING");
-
-    const stopClock = startElapsedClock();
-
-    // Step-up messages for “it’s taking time” perception
-    const t1 = window.setTimeout(() => setPhase("VERIFYING"), 450);
-    const tSlow = window.setTimeout(() => {
-      setSlowHint("Still working… verifying credentials and loading your workspace.");
-    }, 1200);
-    const tVerySlow = window.setTimeout(() => {
-      setSlowHint(
-        "This is taking longer than usual. Please check network/backend status if it persists."
-      );
-    }, 5500);
+    setIsLoading(true);
 
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
+      await new Promise((resolve) => setTimeout(resolve, 600)); // Premium feel delay
+
+      // 1. UPDATED FETCH URL
+      const res = await fetch(`/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
-        signal: abortRef.current.signal,
       });
 
       const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || "Invalid credentials.");
 
-      if (!res.ok) {
-        throw new Error(data?.message || "Login failed. Please check your credentials.");
+      // 2. UPDATED LOGIN HANDLING BLOCK
+      const accessToken = (data as any)?.access_token;
+      const loggedInUser = (data as any)?.user;
+
+      if (accessToken) {
+        if (remember) localStorage.setItem("access_token", accessToken);
+        else sessionStorage.setItem("access_token", accessToken);
       }
 
-      // Finalizing: store session, prefetch route already done, then navigate
-      setPhase("FINALIZING");
-      login(data.user, data.access_token);
-      router.replace(next);
-    } catch (err: any) {
-      if (err?.name === "AbortError") {
-        // user canceled
+      if (loggedInUser) login(loggedInUser, accessToken ?? null);
+
+      const mustChange = !!loggedInUser?.mustChangePassword;
+      if (mustChange) {
+        router.replace(`/must-change-password?next=${encodeURIComponent(next)}` as any);
         return;
       }
-      setError(err?.message || "Login failed.");
-    } finally {
-      window.clearTimeout(t1);
-      window.clearTimeout(tSlow);
-      window.clearTimeout(tVerySlow);
-      stopClock();
 
-      // If success, route will change; leaving busy overlay for a moment is OK.
-      // If error, we should clear busy state.
-      setBusy(false);
-      setPhase("IDLE");
-      abortRef.current = null;
-    }
-  }
+      router.replace(next as any);
 
-  async function handleForgot(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setBusy(true);
-    setPhase("CONNECTING");
-
-    try {
-      const res = await fetch(`${API_URL}/auth/forgot-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-
-      if (!res.ok) throw new Error("Failed to process request.");
-
-      setView("RESET_SUBMITTED");
-      setSuccessMsg("If an account exists, we’ve sent a password reset link.");
     } catch (err: any) {
-      setError(err?.message || "Failed to process request.");
-    } finally {
-      setBusy(false);
-      setPhase("IDLE");
+      setError(err.message);
+      setIsLoading(false);
     }
   }
-
-  const phaseLabel =
-    phase === "CONNECTING"
-      ? "Contacting server"
-      : phase === "VERIFYING"
-      ? "Verifying credentials"
-      : phase === "FINALIZING"
-      ? "Loading workspace"
-      : "";
 
   return (
-    <div className="relative flex min-h-screen w-full bg-zinc-50 dark:bg-zinc-950">
-      {/* Busy overlay (premium feedback) */}
-      {busy ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-[520px] rounded-2xl border border-xc-border bg-xc-card shadow-elev-2">
-            <div className="p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-5 w-5 animate-spin text-xc-accent" />
-                    <div className="text-base font-semibold">Signing you in</div>
-                  </div>
-                  <div className="mt-1 text-sm text-xc-muted" aria-live="polite">
-                    {phaseLabel}
-                    {elapsedMs ? (
-                      <span className="ml-2 inline-flex items-center gap-1 font-mono text-xs text-xc-muted">
-                        <Wifi className="h-3.5 w-3.5" />
-                        {Math.round(elapsedMs / 1000)}s
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
+    <div className="flex h-screen w-full overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
+      
+      {/* --- LEFT PANEL: Brand (67%) --- */}
+      <div className="relative hidden w-2/3 flex-col justify-between border-r border-zinc-200 bg-zinc-50 p-16 text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white lg:flex">
+        <BrandPattern />
+        
+        {/* Header */}
+        <div className="relative z-10 flex items-center justify-between">
+          <div className="flex items-center gap-3 font-bold tracking-tight">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 dark:bg-indigo-500 dark:shadow-indigo-500/30">
+              <Command className="h-6 w-6" />
+            </div>
+            <div className="text-xl">
+              ExcelCare<span className="font-normal text-zinc-500 dark:text-zinc-400">OS</span>
+            </div>
+          </div>
+          <StatusBadge />
+        </div>
 
-                <Button variant="outline" onClick={cancelInFlight}>
-                  <XCircle className="h-4 w-4" />
-                  Cancel
-                </Button>
-              </div>
-
-              <Separator className="my-4" />
-
-              <div className="space-y-2 text-sm">
-                <Step done={phase !== "CONNECTING"} active={phase === "CONNECTING"} label="Contacting API" />
-                <Step done={phase === "FINALIZING"} active={phase === "VERIFYING"} label="Verifying credentials" />
-                <Step done={false} active={phase === "FINALIZING"} label="Preparing your workspace" />
-              </div>
-
-              {slowHint ? (
-                <div className="mt-4 rounded-xl border border-xc-warn/30 bg-xc-warn/10 px-4 py-3 text-sm text-xc-warn">
-                  {slowHint}
-                </div>
-              ) : null}
+        {/* Center Hero */}
+        <div className="relative z-10 max-w-2xl">
+          <div className="mb-8 inline-flex h-16 w-16 items-center justify-center rounded-[2rem] bg-white shadow-xl shadow-zinc-200/50 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:shadow-black/50 dark:ring-zinc-700">
+            <LayoutGrid className="h-8 w-8 text-indigo-600 dark:text-indigo-400" />
+          </div>
+          <h1 className="mb-6 text-5xl font-semibold leading-tight tracking-tight">
+            The Operating System for <br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400">
+              Modern Healthcare.
+            </span>
+          </h1>
+          <p className="max-w-xl text-lg text-zinc-600 dark:text-zinc-400 leading-relaxed">
+            Unified clinical workflows, billing, and patient data in one secure enterprise environment. Designed for speed, compliance, and reliability.
+          </p>
+          
+          <div className="mt-8 flex gap-4">
+            <div className="flex items-center gap-3 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-300">
+               <ShieldCheck className="h-4 w-4 text-emerald-500" />
+               HIPAA Compliant
+            </div>
+            <div className="flex items-center gap-3 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-300">
+               <Lock className="h-4 w-4 text-emerald-500" />
+               SOC2 Type II Ready
             </div>
           </div>
         </div>
-      ) : null}
 
-      {/* LEFT: Brand panel (desktop) */}
-      <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-zinc-900 p-12 text-white lg:flex xl:w-5/12">
-        <div className="absolute inset-0">
-          <div className="absolute -left-24 -top-24 h-[600px] w-[600px] rounded-full bg-indigo-500/20 blur-[120px]" />
-          <div className="absolute bottom-0 right-0 h-[800px] w-[800px] rounded-full bg-emerald-500/10 blur-[120px]" />
-          <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20" />
-        </div>
-
-        <div className="relative z-10 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 backdrop-blur-md ring-1 ring-white/20">
-            <Activity className="h-6 w-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight">ExcelCare HIMS</h1>
-            <p className="text-xs font-medium text-zinc-400">Enterprise Hospital OS</p>
-          </div>
-        </div>
-
-        <div className="relative z-10 max-w-md space-y-6">
-          <div className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium backdrop-blur-md">
-            <ShieldCheck className="mr-2 h-3.5 w-3.5 text-emerald-400" />
-            Audit-ready access control
-          </div>
-
-          <h2 className="text-4xl font-semibold leading-tight tracking-tight text-white">
-            Secure operations for multi-facility hospitals.
-          </h2>
-
-          <p className="text-sm leading-relaxed text-zinc-400">
-            Fast, role-based access with traceable changes and enterprise-grade governance.
-          </p>
-
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <MiniStat title="Sessions" value="Revocable" />
-            <MiniStat title="Access" value="RBAC + Audit" />
-            <MiniStat title="Facilities" value="Multi-branch" />
-            <MiniStat title="Security" value="Policy-driven" />
-          </div>
-        </div>
-
-        <div className="relative z-10 flex justify-between border-t border-white/10 pt-6 text-xs text-zinc-500">
-          <span>© 2026 ExcelCare Systems</span>
-          <span className="flex gap-4">
-            <a href="#" className="hover:text-white">
-              Privacy
-            </a>
-            <a href="#" className="hover:text-white">
-              Terms
-            </a>
-          </span>
+        {/* Footer */}
+        <div className="relative z-10 text-xs text-zinc-400 dark:text-zinc-500">
+           © 2026 ExcelCare Systems Inc. • Enterprise Build v4.2.0
         </div>
       </div>
 
-      {/* RIGHT: Auth */}
-      <div className="flex w-full flex-col items-center justify-center p-6 lg:w-1/2 xl:w-7/12">
-        <div className="absolute right-8 top-8">
+      {/* --- RIGHT PANEL: Auth (33%) --- */}
+      <div className="relative flex flex-1 flex-col items-center justify-center bg-white p-8 dark:bg-zinc-950 lg:w-1/3 lg:flex-none">
+        
+        <div className="absolute right-6 top-6">
           <ThemeToggle />
         </div>
 
-        <div className="w-full max-w-[460px]">
-          <div className="mb-6 flex items-center justify-center lg:hidden">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-900 text-white">
-              <Activity className="h-7 w-7" />
-            </div>
+        <div className="w-full max-w-[360px] space-y-8">
+          
+          <div className="space-y-1.5 text-center lg:text-left">
+            <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">
+              {view === "LOGIN" && "Welcome back"}
+              {view === "FORGOT" && "Reset Password"}
+            </h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              {view === "LOGIN" && "Enter your credentials to access the workspace."}
+              {view === "FORGOT" && "We'll send a recovery link to your email."}
+            </p>
           </div>
 
-          {/* LOGIN */}
-          {view === "LOGIN" ? (
-            <Card className="border-xc-border">
-              <CardHeader>
-                <CardTitle>Sign in</CardTitle>
-                <CardDescription>Access your clinical workspace.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Email address</Label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
-                      <Input
-                        className="h-11 pl-10"
-                        placeholder="user@hospital.com"
-                        type="email"
+          {error && (
+            <div className="flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-50 p-4 text-sm font-medium text-red-600 dark:bg-red-500/10 dark:text-red-400 animate-in slide-in-from-top-2">
+              {error}
+            </div>
+          )}
+
+          {/* --- VIEW: LOGIN --- */}
+          {view === "LOGIN" && (
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Email Address</label>
+                  <div className="group relative">
+                    <Mail className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zinc-400 transition group-focus-within:text-indigo-600 dark:group-focus-within:text-indigo-400" />
+                    <Input 
+                        placeholder="name@hospital.com" 
+                        type="email" 
+                        className="pl-9 h-11 bg-zinc-50 border-zinc-200 focus:border-indigo-500 focus:ring-indigo-500/20 dark:bg-zinc-900 dark:border-zinc-800 dark:focus:border-indigo-400"
                         value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        onChange={e => setEmail(e.target.value)}
                         required
-                        autoComplete="email"
-                      />
-                    </div>
+                    />
                   </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label>Password</Label>
-                      <button
-                        type="button"
-                        onClick={() => setView("FORGOT_PASSWORD")}
-                        className="text-xs font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
-                      >
-                        Forgot password?
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
-                      <Input
-                        className="h-11 pl-10"
-                        type="password"
-                        placeholder="••••••••"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                        autoComplete="current-password"
-                      />
-                    </div>
-                  </div>
-
-                  {error ? (
-                    <div className="rounded-xl border border-xc-danger/30 bg-xc-danger/10 px-4 py-3 text-sm text-xc-danger">
-                      {error}
-                    </div>
-                  ) : null}
-
-                  <Button
-                    type="submit"
-                    className="h-11 w-full bg-indigo-600 text-white hover:bg-indigo-700"
-                    disabled={busy}
-                  >
-                    {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Sign in
-                  </Button>
-
-                  <div className="pt-2 text-center text-xs text-xc-muted">
-                    Tip: If sign-in is slow, check backend logs and DB connectivity.
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {/* FORGOT */}
-          {view === "FORGOT_PASSWORD" ? (
-            <Card className="border-xc-border">
-              <CardHeader>
-                <button
-                  onClick={() => setView("LOGIN")}
-                  className="group mb-2 flex items-center text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-                  type="button"
-                >
-                  <ArrowLeft className="mr-1 h-4 w-4 transition-transform group-hover:-translate-x-1" />
-                  Back to Sign in
-                </button>
-                <CardTitle>Reset password</CardTitle>
-                <CardDescription>
-                  Enter your email address and we’ll send a reset link.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleForgot} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Email address</Label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
-                      <Input
-                        className="h-11 pl-10"
-                        placeholder="user@hospital.com"
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  {error ? (
-                    <div className="rounded-xl border border-xc-danger/30 bg-xc-danger/10 px-4 py-3 text-sm text-xc-danger">
-                      {error}
-                    </div>
-                  ) : null}
-
-                  <Button type="submit" className="h-11 w-full" disabled={busy}>
-                    {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Send reset link
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {/* RESET SUBMITTED */}
-          {view === "RESET_SUBMITTED" ? (
-            <Card className="border-xc-border">
-              <CardHeader className="text-center">
-                <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
-                  <CheckCircle2 className="h-7 w-7 text-green-600 dark:text-green-500" />
                 </div>
-                <CardTitle>Check your email</CardTitle>
-                <CardDescription>{successMsg}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button variant="outline" onClick={() => setView("LOGIN")} className="w-full">
-                  Return to Sign in
-                </Button>
-              </CardContent>
-            </Card>
-          ) : null}
+
+                <div className="space-y-1.5">
+                   <div className="flex items-center justify-between">
+                     <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Password</label>
+                     <button type="button" onClick={() => setView("FORGOT")} className="text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300">
+                        Forgot password?
+                     </button>
+                   </div>
+                  <div className="group relative">
+                    <Lock className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zinc-400 transition group-focus-within:text-indigo-600 dark:group-focus-within:text-indigo-400" />
+                    <Input 
+                        placeholder="••••••••" 
+                        type="password" 
+                        className="pl-9 h-11 bg-zinc-50 border-zinc-200 focus:border-indigo-500 focus:ring-indigo-500/20 dark:bg-zinc-900 dark:border-zinc-800 dark:focus:border-indigo-400"
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
+                        required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Added checkbox binding for 'remember' variable */}
+              <div className="flex items-center justify-between text-xs">
+                <label className="flex items-center gap-2 text-zinc-500 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={remember}
+                    onChange={(e) => setRemember(e.target.checked)}
+                    className="rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800" 
+                  />
+                  Remember device
+                </label>
+              </div>
+
+              <Button type="submit" disabled={isLoading} className="w-full h-11 text-base font-medium bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-600/20 dark:bg-indigo-600 dark:hover:bg-indigo-500">
+                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Sign in"}
+              </Button>
+
+              <div className="relative py-2">
+                <div className="absolute inset-0 flex items-center"><Separator className="w-full border-zinc-200 dark:border-zinc-800" /></div>
+                <div className="relative flex justify-center text-[10px] uppercase tracking-wider font-semibold"><span className="bg-white px-2 text-zinc-400 dark:bg-zinc-950">Or continue with</span></div>
+              </div>
+
+              <Button type="button" variant="outline" className="w-full h-11 border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                <Building2 className="mr-2 h-4 w-4 text-zinc-400" />
+                Enterprise SSO
+              </Button>
+            </form>
+          )}
+
+           {/* --- VIEW: FORGOT PASSWORD --- */}
+           {view === "FORGOT" && (
+            <div className="space-y-6 animate-in slide-in-from-left-4 fade-in duration-300">
+               <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Email Address</label>
+                  <div className="group relative">
+                    <Mail className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zinc-400" />
+                    <Input placeholder="Enter your email" type="email" className="pl-9 h-11 bg-zinc-50 dark:bg-zinc-900" />
+                  </div>
+               </div>
+               
+               <div className="space-y-3">
+                   <Button className="w-full h-11 bg-indigo-600 hover:bg-indigo-700 text-white">Send Reset Link</Button>
+                   <Button variant="ghost" onClick={() => setView("LOGIN")} className="w-full h-11 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200">
+                    <ChevronLeft className="mr-2 h-4 w-4" /> Back to Login
+                   </Button>
+               </div>
+            </div>
+           )}
+
+        </div>
+
+        {/* Footer Links (Right Side) */}
+        <div className="absolute bottom-6 left-0 w-full text-center">
+          <div className="flex justify-center gap-6 text-xs font-medium text-zinc-400 dark:text-zinc-600">
+            <a href="#" className="hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors">Privacy Policy</a>
+            <a href="#" className="hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors">Terms of Service</a>
+            <a href="#" className="flex items-center gap-1 hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors">
+              <Globe className="h-3 w-3" /> Help Center
+            </a>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function Step({ label, active, done }: { label: string; active: boolean; done: boolean }) {
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-xc-border bg-xc-panel px-4 py-2.5">
-      <div className="text-sm font-medium">{label}</div>
-      {done ? (
-        <CheckCircle2 className="h-5 w-5 text-xc-ok" />
-      ) : active ? (
-        <Loader2 className="h-5 w-5 animate-spin text-xc-accent" />
-      ) : (
-        <div className="h-5 w-5 rounded-full border border-xc-border" />
-      )}
-    </div>
-  );
-}
-
-function MiniStat({ title, value }: { title: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 backdrop-blur-md">
-      <div className="text-[11px] text-zinc-400">{title}</div>
-      <div className="mt-0.5 text-sm font-semibold text-white">{value}</div>
     </div>
   );
 }

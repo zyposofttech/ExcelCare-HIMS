@@ -32,9 +32,9 @@
 
 .dark {
   /* ChatGPT dark */
-  --xc-bg: 15 17 20;        /* #0F1114 */
-  --xc-panel: 23 25 28;     /* #17191C */
-  --xc-card: 32 35 39;      /* #202327 */
+  --xc-bg: 33 33 33;        /* #0F1114 */
+  --xc-panel: 30 31 32;     /* #17191C */
+  --xc-card: 34 35 39;      /* #202327 */
   --xc-border: 54 60 72;    /* subtle divider */
   --xc-text: 236 240 241;   /* near-white */
   --xc-muted: 232 232 237;  /* gray-400 */
