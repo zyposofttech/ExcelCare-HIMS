@@ -25,7 +25,7 @@ export class AuthController {
     const password = "ChangeMe@123";
     
     // 2. Generate Hash
-    const hash = hashPassword(password);
+    const hash = await hashPassword(password);
     
     // 3. Upsert User (Create if new, Update if exists)
     try {

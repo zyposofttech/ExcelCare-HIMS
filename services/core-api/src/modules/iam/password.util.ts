@@ -43,12 +43,18 @@ export function hashPassword(pw: string): string {
 export function verifyPassword(pw: string, stored: string): boolean {
   try {
     const parts = stored.split("$");
-    if (parts.length !== 7) return false;
+    
+    // FIX: Changed required length from 7 to 6
+    if (parts.length !== 6) return false; 
+    
     const N = Number(parts[1]);
     const r = Number(parts[2]);
     const p = Number(parts[3]);
-    const salt = Buffer.from(parts[5], "base64");
-    const key = Buffer.from(parts[6], "base64");
+    
+    // FIX: Changed indices from 5/6 to 4/5
+    const salt = Buffer.from(parts[4], "base64"); 
+    const key = Buffer.from(parts[5], "base64");
+    
     const derived = scryptSync(pw, salt, key.length, { N, r, p });
     return timingSafeEqual(key, derived);
   } catch {
