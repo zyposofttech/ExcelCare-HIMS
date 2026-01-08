@@ -2,38 +2,31 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useAuthStore, type AuthUser } from "@/lib/auth/store";
+import { useAuthStore } from "@/lib/auth/store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
-const DEMO_SUPERADMIN: AuthUser = {
-  id: "u_sa_001",
-  name: "Jitendra Prakash",
-  email: "superadmin@excelcare.demo",
-  role: "SUPER_ADMIN",
-  facilityId: "fac_blr_01",
-  facilityName: "ExcelCare Hospital, Bengaluru, India",
-};
+// 1. We define the API URL. (Ideally this comes from process.env.NEXT_PUBLIC_API_BASE_URL)
+const API_URL = "http://localhost:4000/api";
 
 export default function LoginPage() {
   const router = useRouter();
   const sp = useSearchParams();
   const next = sp.get("next") || "/superadmin";
-  // Next.js 15 + Zustand: returning a new object from the selector can trigger
-  // "getServerSnapshot should be cached" warnings / loops. Select fields separately.
+  
   const user = useAuthStore((s) => s.user);
   const login = useAuthStore((s) => s.login);
 
-  const [email, setEmail] = React.useState(DEMO_SUPERADMIN.email);
-  const [password, setPassword] = React.useState("demo");
+  // 2. Clear default values so you can type your real credentials
+  const [email, setEmail] = React.useState(""); 
+  const [password, setPassword] = React.useState("");
   const [err, setErr] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
-    // If already logged in, send them onward.
     if (user) router.replace(next);
   }, [user, router, next]);
 
@@ -41,22 +34,36 @@ export default function LoginPage() {
     e.preventDefault();
     setErr(null);
     setBusy(true);
+
     try {
-      if (!email.trim()) {
-        setErr("Email is required.");
-        return;
+      if (!email.trim()) throw new Error("Email is required.");
+      if (!password.trim()) throw new Error("Password is required.");
+
+      // 3. REAL BACKEND CALL
+      const res = await fetch(`${API_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Login failed");
       }
-      if (!password.trim()) {
-        setErr("Password is required (demo).");
-        return;
-      }
-      // Demo-only: accept only the seeded super admin account.
-      if (email.toLowerCase() !== DEMO_SUPERADMIN.email.toLowerCase()) {
-        setErr("Demo login only: use superadmin@excelcare.demo");
-        return;
-      }
-      login(DEMO_SUPERADMIN);
+
+      // 4. SAVE TOKEN & USER
+      // We store the token in localStorage so 'api.ts' or other tools can pick it up
+      localStorage.setItem("access_token", data.access_token);
+      
+      // Update the UI Store
+      login(data.user);
+      
+      // Redirect
       router.replace(next);
+
+    } catch (error: any) {
+      setErr(error.message);
     } finally {
       setBusy(false);
     }
@@ -75,15 +82,14 @@ export default function LoginPage() {
                 Enterprise Hospital Console
               </h1>
               <p className="mt-4 max-w-md text-sm leading-6 text-xc-muted">
-                Secure, audit-ready operations UI for multi-facility workflows.
-                Demo today. API-ready integration tomorrow.
+                Secure, audit-ready operations for multi-facility workflows.
               </p>
             </div>
 
             <div className="rounded-2xl border border-xc-border bg-xc-card/60 p-5 shadow-elev-2 backdrop-blur">
               <div className="text-sm font-semibold text-xc-text">Dark-first UI</div>
               <div className="mt-1 text-sm text-xc-muted">
-                Toggle light mode anytime. UI tokens stay consistent.
+                Toggle light mode anytime.
               </div>
             </div>
           </div>
@@ -95,11 +101,11 @@ export default function LoginPage() {
             <div className="mb-6 flex items-start justify-between gap-3">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wide text-xc-muted">
-                  ExcelCare Hospital, Bengaluru
+                  ExcelCare Hospital
                 </div>
                 <div className="mt-2 text-2xl font-semibold text-xc-text">Sign in</div>
                 <div className="mt-1 text-sm text-xc-muted">
-                  Demo access for Super Admin.
+                  Enter your credentials to continue.
                 </div>
               </div>
               <ThemeToggle />
@@ -109,7 +115,7 @@ export default function LoginPage() {
               <CardHeader>
                 <CardTitle>Login</CardTitle>
                 <CardDescription>
-                  Use the seeded credentials to continue.
+                  Authenticated access only.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -121,7 +127,7 @@ export default function LoginPage() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       autoComplete="email"
-                      placeholder="superadmin@excelcare.demo"
+                      placeholder="name@excelcare.local"
                     />
                   </div>
 
@@ -133,7 +139,7 @@ export default function LoginPage() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       autoComplete="current-password"
-                      placeholder="demo"
+                      placeholder="••••••••"
                     />
                   </div>
 
@@ -146,15 +152,6 @@ export default function LoginPage() {
                   <Button type="submit" className="w-full" disabled={busy}>
                     {busy ? "Signing in…" : "Sign in"}
                   </Button>
-
-                  <div className="rounded-xl border border-xc-border bg-xc-panel p-3 text-xs text-xc-muted">
-                    <div className="font-semibold text-xc-text">Seeded demo</div>
-                    <div className="mt-1">
-                      Email: <span className="text-xc-text">superadmin@excelcare.demo</span>
-                      <br />
-                      Password: <span className="text-xc-text">any</span>
-                    </div>
-                  </div>
                 </form>
               </CardContent>
             </Card>

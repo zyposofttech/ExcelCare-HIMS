@@ -6,7 +6,7 @@ services:
       POSTGRES_DB: excelcare
       POSTGRES_USER: excelcare
       POSTGRES_PASSWORD: excelcare_dev_password
-    ports: ["5432:5432"]
+    ports: ["5433:5433"]
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
