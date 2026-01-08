@@ -6,11 +6,48 @@ import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
-import { Copy, Eye, Loader2, RefreshCw, Search } from "lucide-react";
+import {
+  Loader2,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Edit,
+  Trash2,
+} from "lucide-react";
 
 type Role = {
   roleCode: string;
@@ -28,31 +65,38 @@ type Permission = {
   description?: string | null;
 };
 
-function safeCopy(text: string) {
-  try {
-    void navigator.clipboard.writeText(text);
-  } catch {
-    // ignore
-  }
-}
+type CreateRoleResponse = { roleCode: string };
+type OkResponse = { ok: true };
 
 function formatScope(scope: Role["scope"]) {
-  return scope === "GLOBAL" ? { label: "Global", variant: "accent" as const } : { label: "Branch", variant: "secondary" as const };
+  return scope === "GLOBAL"
+    ? { label: "Global", variant: "accent" as const }
+    : { label: "Branch", variant: "secondary" as const };
 }
 
 export default function AccessRolesPage() {
   const [q, setQ] = React.useState("");
-  const [permQ, setPermQ] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [roles, setRoles] = React.useState<Role[]>([]);
   const [perms, setPerms] = React.useState<Permission[]>([]);
   const [err, setErr] = React.useState<string | null>(null);
 
-  const permMap = React.useMemo(() => {
-    const m = new Map<string, Permission>();
-    for (const p of perms) m.set(p.code, p);
-    return m;
-  }, [perms]);
+  // --- Create State ---
+  const [openCreate, setOpenCreate] = React.useState(false);
+  const [creating, setCreating] = React.useState(false);
+  const [cName, setCName] = React.useState("");
+  const [cCode, setCCode] = React.useState("");
+  const [cScope, setCScope] = React.useState<"GLOBAL" | "BRANCH">("GLOBAL");
+  const [cPerms, setCPerms] = React.useState<string[]>([]);
+  const [cPermQ, setCPermQ] = React.useState(""); // Search inside dialog
+
+  // --- Edit State ---
+  const [openEdit, setOpenEdit] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
+  const [editTarget, setEditTarget] = React.useState<Role | null>(null);
+  const [eName, setEName] = React.useState("");
+  const [ePerms, setEPerms] = React.useState<string[]>([]);
+  const [ePermQ, setEPermQ] = React.useState("");
 
   const load = React.useCallback(async () => {
     setErr(null);
@@ -75,6 +119,13 @@ export default function AccessRolesPage() {
     void load();
   }, [load]);
 
+  const stats = React.useMemo(() => {
+    const total = roles.length;
+    const global = roles.filter((r) => r.scope === "GLOBAL").length;
+    const branch = roles.filter((r) => r.scope === "BRANCH").length;
+    return { total, global, branch };
+  }, [roles]);
+
   const filtered = React.useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return roles;
@@ -83,6 +134,163 @@ export default function AccessRolesPage() {
       return hay.includes(needle);
     });
   }, [roles, q]);
+
+  // --- Handlers ---
+
+  function generateCode(name: string) {
+    return name
+      .toUpperCase()
+      .replace(/[^A-Z0-9_]/g, "_")
+      .replace(/_+/g, "_");
+  }
+
+  async function createRole() {
+    setErr(null);
+    const name = cName.trim();
+    const code = cCode.trim();
+
+    if (!name) return setErr("Role name is required.");
+    if (!code) return setErr("Role code is required.");
+    if (cPerms.length === 0) return setErr("Select at least one permission.");
+
+    setCreating(true);
+    try {
+      await apiFetch<CreateRoleResponse>("/api/iam/roles", {
+        method: "POST",
+        body: JSON.stringify({
+          roleName: name,
+          roleCode: code,
+          scope: cScope,
+          permissions: cPerms,
+        }),
+      });
+      setOpenCreate(false);
+      resetCreateForm();
+      await load();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Create failed.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function resetCreateForm() {
+    setCName("");
+    setCCode("");
+    setCScope("GLOBAL");
+    setCPerms([]);
+    setCPermQ("");
+  }
+
+  function openEditDialog(role: Role) {
+    setEditTarget(role);
+    setEName(role.roleName);
+    setEPerms([...role.permissions]);
+    setEPermQ("");
+    setOpenEdit(true);
+  }
+
+  async function saveEdit() {
+    if (!editTarget) return;
+    setErr(null);
+    const name = eName.trim();
+    if (!name) return setErr("Role name is required.");
+
+    setEditing(true);
+    try {
+      await apiFetch<OkResponse>(`/api/iam/roles/${editTarget.roleCode}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          roleName: name,
+          permissions: ePerms,
+        }),
+      });
+      setOpenEdit(false);
+      setEditTarget(null);
+      await load();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Update failed.");
+    } finally {
+      setEditing(false);
+    }
+  }
+
+  // --- Render Helpers ---
+
+  // Renders the list of permissions with checkboxes
+  const renderPermissionSelector = (
+    selected: string[],
+    setSelected: (v: string[]) => void,
+    search: string,
+    setSearch: (v: string) => void
+  ) => {
+    const needle = search.trim().toLowerCase();
+    const list = needle
+      ? perms.filter(
+          (p) =>
+            p.name.toLowerCase().includes(needle) ||
+            p.code.toLowerCase().includes(needle) ||
+            (p.category && p.category.toLowerCase().includes(needle))
+        )
+      : perms;
+
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-xc-muted" />
+          <Input
+            placeholder="Filter permissions..."
+            className="pl-9 h-9"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <div className="h-[280px] overflow-y-auto rounded-md border border-xc-border bg-xc-card p-2">
+          {list.length === 0 ? (
+            <div className="py-8 text-center text-xs text-xc-muted">
+              No permissions found.
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {list.map((p) => {
+                const isChecked = selected.includes(p.code);
+                return (
+                  <label
+                    key={p.code}
+                    className="flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-xc-panel transition-colors"
+                  >
+                    <Checkbox
+                      checked={isChecked}
+                      onCheckedChange={(checked) => {
+                        if (checked) setSelected([...selected, p.code]);
+                        else setSelected(selected.filter((x) => x !== p.code));
+                      }}
+                    />
+                    <div className="grid gap-0.5">
+                      <div className="text-sm font-medium leading-none">
+                        {p.name}
+                      </div>
+                      <div className="text-xs text-xc-muted font-mono">
+                        {p.code}
+                      </div>
+                    </div>
+                    {p.category && (
+                      <Badge variant="outline" className="ml-auto text-[10px]">
+                        {p.category}
+                      </Badge>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="text-xs text-xc-muted text-right">
+          Selected: <span className="font-medium text-xc-text">{selected.length}</span>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <AppShell title="Users & Access · Roles">
@@ -93,7 +301,7 @@ export default function AccessRolesPage() {
               <div>
                 <CardTitle>Roles</CardTitle>
                 <CardDescription>
-                  View active role templates and their permission grants.
+                  Define roles and assign fine-grained permissions to control access.
                 </CardDescription>
               </div>
 
@@ -109,9 +317,33 @@ export default function AccessRolesPage() {
                 </div>
 
                 <Button variant="outline" onClick={load} disabled={loading}>
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
                   Refresh
                 </Button>
+
+                <Button onClick={() => setOpenCreate(true)}>
+                  <Plus className="h-4 w-4" />
+                  Create role
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-3">
+              <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900/50 dark:bg-blue-900/10">
+                <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Total Roles</div>
+                <div className="mt-1 text-lg font-semibold">{stats.total}</div>
+              </div>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900/50 dark:bg-emerald-900/10">
+                <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Global Scope</div>
+                <div className="mt-1 text-lg font-semibold">{stats.global}</div>
+              </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/50 dark:bg-amber-900/10">
+                <div className="text-xs font-medium text-amber-600 dark:text-amber-400">Branch Scope</div>
+                <div className="mt-1 text-lg font-semibold">{stats.branch}</div>
               </div>
             </div>
           </CardHeader>
@@ -127,19 +359,21 @@ export default function AccessRolesPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Role</TableHead>
+                    <TableHead>Role Name</TableHead>
                     <TableHead>Code</TableHead>
                     <TableHead>Scope</TableHead>
-                    <TableHead>Version</TableHead>
                     <TableHead>Permissions</TableHead>
-                    <TableHead className="text-right">Details</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
 
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-sm text-xc-muted">
+                      <TableCell
+                        colSpan={5}
+                        className="py-10 text-center text-sm text-xc-muted"
+                      >
                         <Loader2 className="mx-auto mb-3 h-5 w-5 animate-spin" />
                         Loading roles...
                       </TableCell>
@@ -149,101 +383,37 @@ export default function AccessRolesPage() {
                       const s = formatScope(r.scope);
                       return (
                         <TableRow key={`${r.roleCode}:${r.version}`}>
-                          <TableCell className="font-medium">{r.roleName}</TableCell>
-                          <TableCell className="font-mono text-xs">{r.roleCode}</TableCell>
+                          <TableCell className="font-medium">
+                            {r.roleName}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs text-xc-muted">
+                            {r.roleCode}
+                          </TableCell>
                           <TableCell>
                             <Badge variant={s.variant}>{s.label}</Badge>
                           </TableCell>
-                          <TableCell>{r.version}</TableCell>
-                          <TableCell>{r.permissions.length}</TableCell>
+                          <TableCell className="text-xc-muted">
+                            {r.permissions.length} grants
+                          </TableCell>
                           <TableCell className="text-right">
-                            <Dialog onOpenChange={(open) => { if (!open) setPermQ(""); }}>
-                              <DialogTrigger asChild>
-                                <Button size="sm" variant="outline">
-                                  <Eye className="h-4 w-4" />
-                                  View
-                                </Button>
-                              </DialogTrigger>
-
-                              <DialogContent className="sm:max-w-[860px]">
-                                <DialogHeader>
-                                  <DialogTitle className="flex items-center justify-between gap-3">
-                                    <span>
-                                      {r.roleName} <span className="text-xc-muted">({r.roleCode})</span>
-                                    </span>
-                                  </DialogTitle>
-                                  <DialogDescription>
-                                    Scope: <span className="font-medium text-xc-text">{s.label}</span> · Version:{" "}
-                                    <span className="font-medium text-xc-text">{r.version}</span>
-                                  </DialogDescription>
-                                </DialogHeader>
-
-                                <Separator className="my-4" />
-
-                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                  <div className="text-sm font-semibold">
-                                    Permissions <span className="text-xc-muted">({r.permissions.length})</span>
-                                  </div>
-                                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                                    <div className="relative">
-                                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-xc-muted" />
-                                      <Input
-                                        value={permQ}
-                                        onChange={(e) => setPermQ(e.target.value)}
-                                        placeholder="Search permissions"
-                                        className="w-[280px] pl-9"
-                                      />
-                                    </div>
-                                    <Button variant="outline" onClick={() => safeCopy(r.permissions.join("\n"))}>
-                                      <Copy className="h-4 w-4" />
-                                      Copy codes
-                                    </Button>
-                                  </div>
-                                </div>
-
-                                <div className="mt-3 max-h-[420px] overflow-auto rounded-xl border border-xc-border">
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow>
-                                        <TableHead className="w-[220px]">Code</TableHead>
-                                        <TableHead>Name</TableHead>
-                                        <TableHead className="w-[180px]">Category</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {r.permissions
-                                        .filter((code) => {
-                                          const needle = permQ.trim().toLowerCase();
-                                          if (!needle) return true;
-                                          const p = permMap.get(code);
-                                          const hay = `${code} ${p?.name ?? ""} ${p?.category ?? ""}`.toLowerCase();
-                                          return hay.includes(needle);
-                                        })
-                                        .map((code) => {
-                                          const p = permMap.get(code);
-                                          return (
-                                            <TableRow key={code}>
-                                              <TableCell className="font-mono text-xs">{code}</TableCell>
-                                              <TableCell className="text-sm">
-                                                <div className="font-medium">{p?.name ?? "—"}</div>
-                                                <div className="text-xs text-xc-muted">{p?.description ?? "—"}</div>
-                                              </TableCell>
-                                              <TableCell className="text-sm text-xc-muted">{p?.category ?? "—"}</TableCell>
-                                            </TableRow>
-                                          );
-                                        })}
-                                    </TableBody>
-                                  </Table>
-                                </div>
-                              </DialogContent>
-                            </Dialog>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openEditDialog(r)}
+                            >
+                              <Edit className="h-4 w-4 mr-1" />
+                              Edit
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-sm text-xc-muted">
+                      <TableCell
+                        colSpan={5}
+                        className="py-10 text-center text-sm text-xc-muted"
+                      >
                         No roles found.
                       </TableCell>
                     </TableRow>
@@ -253,6 +423,162 @@ export default function AccessRolesPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* --- CREATE ROLE DIALOG --- */}
+        <Dialog
+          open={openCreate}
+          onOpenChange={(v) => {
+            setOpenCreate(v);
+            if (!v) resetCreateForm();
+            setErr(null);
+          }}
+        >
+          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Plus className="h-5 w-5" />
+                Create Role
+              </DialogTitle>
+              <DialogDescription>
+                Create a new role template. Role code must be unique and uppercase.
+              </DialogDescription>
+            </DialogHeader>
+
+            <Separator className="my-2" />
+
+            <div className="flex-1 overflow-y-auto pr-1">
+              <div className="grid gap-4 py-2">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label>Role Name</Label>
+                    <Input
+                      value={cName}
+                      onChange={(e) => {
+                        setCName(e.target.value);
+                        if (!cCode) setCCode(generateCode(e.target.value));
+                      }}
+                      placeholder="e.g. Senior Nurse"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Role Code</Label>
+                    <Input
+                      value={cCode}
+                      onChange={(e) => setCCode(e.target.value.toUpperCase())}
+                      placeholder="e.g. SENIOR_NURSE"
+                      className="font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Scope</Label>
+                  <Select
+                    value={cScope}
+                    onValueChange={(v: any) => setCScope(v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="GLOBAL">Global (All Branches)</SelectItem>
+                      <SelectItem value="BRANCH">Branch Specific</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <div className="text-xs text-xc-muted">
+                    {cScope === "GLOBAL"
+                      ? "User assigned this role will have these permissions across the entire organization."
+                      : "User must be assigned to a specific branch to use this role."}
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Permissions</Label>
+                  {renderPermissionSelector(cPerms, setCPerms, cPermQ, setCPermQ)}
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="mt-2">
+              <Button
+                variant="outline"
+                onClick={() => setOpenCreate(false)}
+                disabled={creating}
+              >
+                Cancel
+              </Button>
+              <Button onClick={() => void createRole()} disabled={creating}>
+                {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Create Role
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* --- EDIT ROLE DIALOG --- */}
+        <Dialog
+          open={openEdit}
+          onOpenChange={(v) => {
+            setOpenEdit(v);
+            if (!v) setEditTarget(null);
+            setErr(null);
+          }}
+        >
+          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5" />
+                Edit Role: {editTarget?.roleCode}
+              </DialogTitle>
+              <DialogDescription>
+                Modify the role name and update permission grants. Code and Scope cannot be changed.
+              </DialogDescription>
+            </DialogHeader>
+
+            <Separator className="my-2" />
+
+            <div className="flex-1 overflow-y-auto pr-1">
+              <div className="grid gap-4 py-2">
+                <div className="grid gap-2">
+                  <Label>Role Name</Label>
+                  <Input
+                    value={eName}
+                    onChange={(e) => setEName(e.target.value)}
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Scope</Label>
+                  <div className="flex items-center gap-2 rounded-md border border-xc-border bg-xc-panel px-3 py-2 text-sm text-xc-muted">
+                    <Badge variant={editTarget?.scope === "GLOBAL" ? "accent" : "secondary"}>
+                      {editTarget?.scope}
+                    </Badge>
+                    <span>(Cannot be changed after creation)</span>
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Permissions</Label>
+                  {renderPermissionSelector(ePerms, setEPerms, ePermQ, setEPermQ)}
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="mt-2">
+              <Button
+                variant="outline"
+                onClick={() => setOpenEdit(false)}
+                disabled={editing}
+              >
+                Cancel
+              </Button>
+              <Button onClick={() => void saveEdit()} disabled={editing}>
+                {editing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppShell>
   );

@@ -223,7 +223,6 @@ export default function AccessUsersPage() {
     patch.roleCode = eRole;
     patch.branchId = eBranch ? eBranch : null;
     patch.isActive = eActive;
-    // staffId: optional; only send if user touched it (we always send current text)
     patch.staffId = eStaffId.trim() ? eStaffId.trim() : null;
 
     setSavingEdit(true);
@@ -314,24 +313,30 @@ export default function AccessUsersPage() {
               </div>
             </div>
 
+            {/* --- UPDATED CARDS WITH COLORS --- */}
             <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-              <div className="rounded-xl border border-xc-border bg-xc-panel p-3">
-                <div className="text-xs text-xc-muted">Total</div>
-                <div className="mt-1 text-lg font-semibold">{stats.total}</div>
+              <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900/50 dark:bg-blue-900/10">
+                <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Total Users</div>
+                <div className="mt-1 text-lg font-bold text-blue-700 dark:text-blue-300">{stats.total}</div>
               </div>
-              <div className="rounded-xl border border-xc-border bg-xc-panel p-3">
-                <div className="text-xs text-xc-muted">Active</div>
-                <div className="mt-1 text-lg font-semibold">{stats.active}</div>
+              
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900/50 dark:bg-emerald-900/10">
+                <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Active Accounts</div>
+                <div className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-300">{stats.active}</div>
               </div>
-              <div className="rounded-xl border border-xc-border bg-xc-panel p-3">
-                <div className="text-xs text-xc-muted">Disabled</div>
-                <div className="mt-1 text-lg font-semibold">{stats.disabled}</div>
+              
+              <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3 dark:border-rose-900/50 dark:bg-rose-900/10">
+                <div className="text-xs font-medium text-rose-600 dark:text-rose-400">Disabled</div>
+                <div className="mt-1 text-lg font-bold text-rose-700 dark:text-rose-300">{stats.disabled}</div>
               </div>
-              <div className="rounded-xl border border-xc-border bg-xc-panel p-3">
-                <div className="text-xs text-xc-muted">Must change password</div>
-                <div className="mt-1 text-lg font-semibold">{stats.mustChange}</div>
+              
+              <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/50 dark:bg-amber-900/10">
+                <div className="text-xs font-medium text-amber-600 dark:text-amber-400">Pending Password</div>
+                <div className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-300">{stats.mustChange}</div>
               </div>
             </div>
+            {/* ------------------------------- */}
+
           </CardHeader>
 
           <CardContent>
@@ -483,23 +488,23 @@ export default function AccessUsersPage() {
               <div className="grid gap-2">
                 <Label>Branch</Label>
                 <Select
-  value={cBranch || undefined}
-  onValueChange={(v) => setCBranch(v === CLEAR_SELECT ? "" : v)}
->
-  <SelectTrigger>
-    <SelectValue
-      placeholder={createRoleScope === "BRANCH" ? "Select branch (required)" : "Select branch (optional)"}
-    />
-  </SelectTrigger>
-  <SelectContent>
-    <SelectItem value={CLEAR_SELECT}>(Not set)</SelectItem>
-    {branches.map((b) => (
-      <SelectItem key={b.id} value={b.id}>
-        {b.name}{b.city ? ` · ${b.city}` : ""}
-      </SelectItem>
-    ))}
-  </SelectContent>
-</Select>
+                  value={cBranch || undefined}
+                  onValueChange={(v) => setCBranch(v === CLEAR_SELECT ? "" : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={createRoleScope === "BRANCH" ? "Select branch (required)" : "Select branch (optional)"}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={CLEAR_SELECT}>(Not set)</SelectItem>
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name}{b.city ? ` · ${b.city}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {createRoleScope === "BRANCH" ? (
                   <div className="text-xs text-xc-muted">Branch is required for branch-scoped roles.</div>
                 ) : (
@@ -572,23 +577,23 @@ export default function AccessUsersPage() {
                   <div className="grid gap-2">
                     <Label>Branch</Label>
                    <Select
-  value={eBranch || undefined}
-  onValueChange={(v) => setEBranch(v === CLEAR_SELECT ? "" : v)}
->
-  <SelectTrigger>
-    <SelectValue
-      placeholder={editRoleScope === "BRANCH" ? "Select branch (required)" : "Select branch (optional)"}
-    />
-  </SelectTrigger>
-  <SelectContent>
-    <SelectItem value={CLEAR_SELECT}>(Not set)</SelectItem>
-    {branches.map((b) => (
-      <SelectItem key={b.id} value={b.id}>
-        {b.name}{b.city ? ` · ${b.city}` : ""}
-      </SelectItem>
-    ))}
-  </SelectContent>
-</Select>
+                      value={eBranch || undefined}
+                      onValueChange={(v) => setEBranch(v === CLEAR_SELECT ? "" : v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue
+                          placeholder={editRoleScope === "BRANCH" ? "Select branch (required)" : "Select branch (optional)"}
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={CLEAR_SELECT}>(Not set)</SelectItem>
+                        {branches.map((b) => (
+                          <SelectItem key={b.id} value={b.id}>
+                            {b.name}{b.city ? ` · ${b.city}` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
 
                     {editRoleScope === "BRANCH" ? (
                       <div className="text-xs text-xc-muted">Branch is required for branch-scoped roles.</div>

@@ -4,10 +4,11 @@ import { NextResponse } from "next/server";
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // ✅ FIXED: Added /must-change-password to the whitelist
+  // ✅ FIXED: Added /api to the whitelist so login requests can pass through
   if (
     pathname.startsWith("/login") ||
     pathname.startsWith("/must-change-password") || 
+    pathname.startsWith("/api") || 
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico"
   ) {

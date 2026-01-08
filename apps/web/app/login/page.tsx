@@ -9,19 +9,21 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
   Building2,
-  ChevronLeft,
   Command,
-  Globe,
   LayoutGrid,
   Loader2,
   Lock,
   Mail,
   ShieldCheck,
+  Globe,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
 type AuthView = "LOGIN" | "FORGOT";
 
+// ... (BrandPattern and StatusBadge components remain the same) ...
 function BrandPattern() {
   return (
     <div className="absolute inset-0 z-0 overflow-hidden opacity-30 dark:opacity-20">
@@ -58,15 +60,12 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // ✅ CENTRALIZED REDIRECT: This handles all navigation
+  // ✅ REDIRECT LOGIC: Only runs when store is ready and user is logged in
   React.useEffect(() => {
-    // Wait for store to hydrate and user to be present
     if (isHydrated && user) {
       if (user.mustChangePassword) {
-        // Redirect to password change if required
         router.replace(`/must-change-password?next=${encodeURIComponent(next)}` as any);
       } else {
-        // Otherwise go to destination
         router.replace(next as any);
       }
     }
@@ -86,8 +85,17 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
+      // Handle non-JSON responses (like 404/500 HTML pages)
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error("Service unavailable. Please try again later.");
+      }
+
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.message || "Invalid credentials.");
+      
+      if (!res.ok) {
+        throw new Error(data?.message || "Invalid credentials.");
+      }
 
       const accessToken = (data as any)?.access_token;
       const loggedInUser = (data as any)?.user;
@@ -98,13 +106,8 @@ export default function LoginPage() {
       }
 
       if (loggedInUser) {
-        // ✅ JUST UPDATE STATE
-        // We simply update the store here. The useEffect above will detect 
-        // the change and perform the redirect automatically.
+        // Just update store. The useEffect will handle the redirect.
         login(loggedInUser, accessToken ?? null);
-        
-        // NOTE: We do NOT use router.push() or window.location here.
-        // This avoids race conditions and double-redirects.
       }
       
     } catch (err: any) {
@@ -113,6 +116,7 @@ export default function LoginPage() {
     }
   }
 
+  // ... (Return JSX same as before) ...
   return (
     <div className="flex h-screen w-full overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
       
@@ -250,6 +254,7 @@ export default function LoginPage() {
             </form>
           )}
 
+           {/* FORGOT PASSWORD VIEW (Keep existing logic) */}
            {view === "FORGOT" && (
             <div className="space-y-6 animate-in slide-in-from-left-4 fade-in duration-300">
                <div className="space-y-1.5">
