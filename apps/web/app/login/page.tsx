@@ -19,12 +19,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-// --- Configuration ---
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
-
 type AuthView = "LOGIN" | "FORGOT";
-
-// --- Components ---
 
 function BrandPattern() {
   return (
@@ -46,8 +42,6 @@ function StatusBadge() {
   );
 }
 
-// --- Main Page ---
-
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -57,23 +51,22 @@ export default function LoginPage() {
   const isHydrated = useAuthStore((s) => s._hasHydrated);
   const [view, setView] = React.useState<AuthView>("LOGIN");
 
-  // Form State
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [remember, setRemember] = React.useState(false);
 
-  // UX State
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // ✅ FIXED: Centralized Redirect Logic
-  // This hook now acts as the SINGLE source of truth for navigation.
+  // ✅ CENTRALIZED REDIRECT: This handles all navigation
   React.useEffect(() => {
+    // Wait for store to hydrate and user to be present
     if (isHydrated && user) {
       if (user.mustChangePassword) {
-        // Safe cast
+        // Redirect to password change if required
         router.replace(`/must-change-password?next=${encodeURIComponent(next)}` as any);
       } else {
+        // Otherwise go to destination
         router.replace(next as any);
       }
     }
@@ -105,17 +98,15 @@ export default function LoginPage() {
       }
 
       if (loggedInUser) {
-        // 1. Update store
+        // ✅ JUST UPDATE STATE
+        // We simply update the store here. The useEffect above will detect 
+        // the change and perform the redirect automatically.
         login(loggedInUser, accessToken ?? null);
-
-        // 2. HARD REDIRECT to break the loop and ensure middleware sees cookies
-        const target = loggedInUser.mustChangePassword
-           ? `/must-change-password?next=${encodeURIComponent(next)}`
-           : next;
         
-        window.location.href = target;
-        return; // Stop here
+        // NOTE: We do NOT use router.push() or window.location here.
+        // This avoids race conditions and double-redirects.
       }
+      
     } catch (err: any) {
       setError(err.message);
       setIsLoading(false);
@@ -125,11 +116,9 @@ export default function LoginPage() {
   return (
     <div className="flex h-screen w-full overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
       
-      {/* --- LEFT PANEL: Brand (67%) --- */}
+      {/* Left Panel */}
       <div className="relative hidden w-2/3 flex-col justify-between border-r border-zinc-200 bg-zinc-50 p-16 text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white lg:flex">
         <BrandPattern />
-        
-        {/* Header */}
         <div className="relative z-10 flex items-center justify-between">
           <div className="flex items-center gap-3 font-bold tracking-tight">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 dark:bg-indigo-500 dark:shadow-indigo-500/30">
@@ -141,8 +130,6 @@ export default function LoginPage() {
           </div>
           <StatusBadge />
         </div>
-
-        {/* Center Hero */}
         <div className="relative z-10 max-w-2xl">
           <div className="mb-8 inline-flex h-16 w-16 items-center justify-center rounded-[2rem] bg-white shadow-xl shadow-zinc-200/50 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:shadow-black/50 dark:ring-zinc-700">
             <LayoutGrid className="h-8 w-8 text-indigo-600 dark:text-indigo-400" />
@@ -154,9 +141,8 @@ export default function LoginPage() {
             </span>
           </h1>
           <p className="max-w-xl text-lg text-zinc-600 dark:text-zinc-400 leading-relaxed">
-            Unified clinical workflows, billing, and patient data in one secure enterprise environment. Designed for speed, compliance, and reliability.
+            Unified clinical workflows, billing, and patient data in one secure enterprise environment.
           </p>
-          
           <div className="mt-8 flex gap-4">
             <div className="flex items-center gap-3 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-300">
                <ShieldCheck className="h-4 w-4 text-emerald-500" />
@@ -168,22 +154,18 @@ export default function LoginPage() {
             </div>
           </div>
         </div>
-
-        {/* Footer */}
         <div className="relative z-10 text-xs text-zinc-400 dark:text-zinc-500">
            © 2026 ExcelCare Systems Inc. • Enterprise Build v4.2.0
         </div>
       </div>
 
-      {/* --- RIGHT PANEL: Auth (33%) --- */}
+      {/* Right Panel */}
       <div className="relative flex flex-1 flex-col items-center justify-center bg-white p-8 dark:bg-zinc-950 lg:w-1/3 lg:flex-none">
-        
         <div className="absolute right-6 top-6">
           <ThemeToggle />
         </div>
 
         <div className="w-full max-w-[360px] space-y-8">
-          
           <div className="space-y-1.5 text-center lg:text-left">
             <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">
               {view === "LOGIN" && "Welcome back"}
@@ -201,7 +183,6 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* --- VIEW: LOGIN --- */}
           {view === "LOGIN" && (
             <form onSubmit={handleLogin} className="space-y-5">
               <div className="space-y-4">
@@ -269,7 +250,6 @@ export default function LoginPage() {
             </form>
           )}
 
-           {/* --- VIEW: FORGOT PASSWORD --- */}
            {view === "FORGOT" && (
             <div className="space-y-6 animate-in slide-in-from-left-4 fade-in duration-300">
                <div className="space-y-1.5">
@@ -290,8 +270,6 @@ export default function LoginPage() {
            )}
 
         </div>
-
-        {/* Footer Links (Right Side) */}
         <div className="absolute bottom-6 left-0 w-full text-center">
           <div className="flex justify-center gap-6 text-xs font-medium text-zinc-400 dark:text-zinc-600">
             <a href="#" className="hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors">Privacy Policy</a>
