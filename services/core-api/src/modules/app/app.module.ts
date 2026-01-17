@@ -13,6 +13,7 @@ import { BranchModule } from "../branch/branch.module";
 import { GovernanceModule } from "../governance/governance.module";
 import { FacilitySetupModule } from "../facility-setup/facility-setup.module";
 import { InfrastructureModule } from "../infrastructure/infrastructure.module";
+import { OtModule } from "../infrastructure/ot/ot.module";
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -28,6 +29,7 @@ import { InfrastructureModule } from "../infrastructure/infrastructure.module";
     GovernanceModule,
     FacilitySetupModule,
     InfrastructureModule,
+    OtModule
   ],
   controllers: [HealthController],
 })

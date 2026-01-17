@@ -86,7 +86,23 @@ export const PERM = {
 
   INFRA_GOLIVE_READ: "INFRA_GOLIVE_READ",
   INFRA_GOLIVE_RUN: "INFRA_GOLIVE_RUN",
+  
+   OT_SUITE_CREATE: "ot.suite.create",
+  OT_SUITE_READ: "ot.suite.read",
+  OT_SUITE_UPDATE: "ot.suite.update",
+  OT_SUITE_DELETE: "ot.suite.delete",
 
+  OT_SPACE_CREATE: "ot.space.create",
+  OT_SPACE_UPDATE: "ot.space.update",
+  OT_SPACE_DELETE: "ot.space.delete",
+
+  OT_TABLE_CREATE: "ot.table.create",
+  OT_TABLE_UPDATE: "ot.table.update",
+  OT_TABLE_DELETE: "ot.table.delete",
+
+  OT_EQUIPMENT_CREATE: "ot.equipment.create",
+  OT_EQUIPMENT_UPDATE: "ot.equipment.update",
+  OT_EQUIPMENT_DELETE: "ot.equipment.delete",
   
 } as const;
 

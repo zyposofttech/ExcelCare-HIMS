@@ -26,7 +26,6 @@ import {
   Database,
   Hammer,
   CalendarClock,
-  Stethoscope,
 } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -131,7 +130,6 @@ const pillTones = {
   indigo:
     "border-indigo-200/70 bg-indigo-50/70 text-indigo-700 dark:border-indigo-900/40 dark:bg-indigo-900/20 dark:text-indigo-200",
 };
-
 
 function Skeleton({ className }: { className?: string }) {
   return <div className={cn("animate-pulse rounded bg-zinc-200 dark:bg-zinc-800", className)} />;
@@ -340,6 +338,13 @@ function ModuleCard({
   );
 }
 
+function fmtDate(s: string | null | undefined) {
+  if (!s) return null;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString();
+}
+
 // ---------------- Page ----------------
 
 export default function SuperAdminInfrastructureOverview() {
@@ -357,8 +362,8 @@ export default function SuperAdminInfrastructureOverview() {
 
   const [goLive, setGoLive] = React.useState<GoLivePreview | null>(null);
   const [locTree, setLocTree] = React.useState<LocationTree | null>(null);
-  const [facilityReadiness, setFacilityReadiness] =
-    React.useState<BranchReadiness | null>(null);
+  const [facilityReadiness, setFacilityReadiness] = React.useState<BranchReadiness | null>(null);
+
   const ctxReqSeq = React.useRef(0);
 
   async function loadBranches(showToast = false) {
@@ -392,42 +397,62 @@ export default function SuperAdminInfrastructureOverview() {
 
   async function loadBranchContext(branchIdParam: string, showToast = false) {
     if (!branchIdParam) return;
-    setFacilityReadiness(null);
+
     const seq = ++ctxReqSeq.current;
     setCtxErr(null);
     setCtxBusy(true);
 
+    // Clear only what’s branch-scoped; keep existing cards until new data arrives.
+    setFacilityReadiness(null);
+
     try {
       const q = encodeURIComponent(branchIdParam);
 
-      const [gl, tree, rd] = await Promise.all([
+      // IMPORTANT: allow partial success so the page stays "live" even if one endpoint isn’t ready yet.
+      const [glRes, treeRes, rdRes] = await Promise.allSettled([
         apiFetch<GoLivePreview>(`/api/infrastructure/branch/go-live?branchId=${q}`),
         apiFetch<LocationTree>(`/api/infrastructure/locations/tree?branchId=${q}`),
         apiFetch<BranchReadiness>(`/api/branches/${q}/readiness`),
       ]);
 
-      if (seq !== ctxReqSeq.current) return;
-
-      setGoLive(gl || null);
-      setLocTree(tree || null);
-      setFacilityReadiness(rd || null);
-
-
-      setFacilityReadiness(rd || null);
-
-
       if (seq !== ctxReqSeq.current) return; // ignore stale responses
 
-      setGoLive(gl || null);
-      setLocTree(tree || null);
+      const partialErrors: string[] = [];
+
+      if (glRes.status === "fulfilled") setGoLive(glRes.value || null);
+      else {
+        setGoLive(null);
+        partialErrors.push("Go-Live preview not available.");
+      }
+
+      if (treeRes.status === "fulfilled") setLocTree(treeRes.value || null);
+      else {
+        setLocTree(null);
+        partialErrors.push("Location tree not available.");
+      }
+
+      if (rdRes.status === "fulfilled") setFacilityReadiness(rdRes.value || null);
+      else {
+        setFacilityReadiness(null);
+        partialErrors.push("Branch readiness not available.");
+      }
+
+      if (partialErrors.length) {
+        setCtxErr(partialErrors.join(" "));
+      }
 
       if (showToast) {
-        toast({ title: "Updated", description: "Loaded latest infrastructure signals.", duration: 1600 });
+        toast({
+          title: partialErrors.length ? "Updated (partial)" : "Updated",
+          description: partialErrors.length
+            ? "Some backend signals are not available yet, but the page updated what it could."
+            : "Loaded latest infrastructure signals.",
+          duration: 1800,
+        });
       }
     } catch (e: any) {
-      const msg = e?.message || "Unable to load infrastructure signals.";
       if (seq !== ctxReqSeq.current) return;
-
+      const msg = e?.message || "Unable to load infrastructure signals.";
       setCtxErr(msg);
       if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
     } finally {
@@ -450,17 +475,6 @@ export default function SuperAdminInfrastructureOverview() {
     () => branches.find((b) => b.id === branchId) || null,
     [branches, branchId]
   );
-
-  const orgMetrics = React.useMemo(() => {
-    return {
-      users: countOf(selected, "users"),
-      departments: countOf(selected, "departments"),
-      specialties: countOf(selected, "specialties"),
-      wards: countOf(selected, "wards"),
-      beds: countOf(selected, "beds"),
-      ots: countOf(selected, "ots"),
-    };
-  }, [selected]);
 
   const locCounts = React.useMemo(() => {
     const campuses = locTree?.campuses ?? [];
@@ -504,12 +518,11 @@ export default function SuperAdminInfrastructureOverview() {
       unitTypes: enabledUnitTypes > 0 ? readinessFlag("ready") : readinessFlag("block"),
       units: units > 0 ? readinessFlag("ready") : readinessFlag("block"),
       rooms: rooms > 0 ? readinessFlag("ready") : readinessFlag("warn"),
-      resources: beds > 0 ? readinessFlag("ready") : readinessFlag("block"),
+      resources: resources > 0 ? readinessFlag("ready") : readinessFlag("block"),
       ot: schedulableOts > 0 ? readinessFlag("ready") : readinessFlag("block"),
       equipment: equipmentCount > 0 ? readinessFlag("ready") : readinessFlag("warn"),
       mapping: fixItsOpen === 0 ? readinessFlag("ready") : readinessFlag("warn", `${fixItsOpen} open`),
 
-      // counts
       enabledUnitTypes,
       units,
       rooms,
@@ -555,9 +568,9 @@ export default function SuperAdminInfrastructureOverview() {
                   readiness, blockers, and module-level progress automatically.
                 </div>
 
-                {generatedAt ? (
+                {fmtDate(generatedAt) ? (
                   <div className="mt-2 text-xs text-zc-muted">
-                    Last signal refresh: <span className="font-mono">{new Date(generatedAt).toLocaleString()}</span>
+                    Last signal refresh: <span className="font-mono">{fmtDate(generatedAt)}</span>
                     {ctxBusy ? <span className="ml-2">(updating…)</span> : null}
                   </div>
                 ) : null}
@@ -678,16 +691,15 @@ export default function SuperAdminInfrastructureOverview() {
                             />
                             <MetricPill
                               label="Departments"
-                              value={facilityReadiness?.summary?.departments ?? 0}
+                              value={facilityReadiness?.summary?.departments ?? countOf(selected, "departments")}
                               tone="emerald"
                             />
                             <MetricPill
                               label="Specialties"
-                              value={facilityReadiness?.summary?.specialties ?? 0}
+                              value={facilityReadiness?.summary?.specialties ?? countOf(selected, "specialties")}
                               tone="violet"
                             />
                           </div>
-
                         </div>
 
                         <div className="grid h-10 w-10 place-items-center rounded-2xl border border-indigo-200/50 bg-indigo-50/40 dark:border-indigo-900/35 dark:bg-indigo-900/15">
@@ -852,7 +864,7 @@ export default function SuperAdminInfrastructureOverview() {
           />
         </div>
 
-        {/* Modules grid (now status + counts are live; Locations is enabled) */}
+        {/* Modules grid */}
         <Card className="overflow-hidden">
           <CardHeader className="pb-0">
             <CardTitle>Infrastructure Modules</CardTitle>
@@ -1042,9 +1054,9 @@ export default function SuperAdminInfrastructureOverview() {
             <div className="mt-6 rounded-2xl border border-zc-border bg-zc-panel/15 p-4 text-sm text-zc-muted">
               <div className="font-semibold text-zc-text">What changed (so it is “live” now)</div>
               <ul className="mt-2 list-disc pl-5 text-sm">
-                <li>Locations card is enabled and shows live location counts from the backend location-tree endpoint.</li>
-                <li>Readiness is computed by backend Go-Live Preview (not hardcoded heuristics).</li>
-                <li>All module cards reflect real counts/status even if their UI pages are not enabled yet.</li>
+                <li>Branch context uses allSettled: partial backend availability no longer breaks the whole page.</li>
+                <li>Removed duplicate state updates causing inconsistent UI refresh.</li>
+                <li>Core counts/flags now render whenever the relevant endpoint is available.</li>
               </ul>
             </div>
           </CardContent>

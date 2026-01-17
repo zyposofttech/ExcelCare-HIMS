@@ -1,8 +1,6 @@
 "use client";
-
 import * as React from "react";
 import Link from "next/link";
-
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,14 +17,6 @@ import { useAuthStore } from "@/lib/auth/store";
 import { IconBuilding, IconChevronRight, IconPlus, IconSearch } from "@/components/icons";
 import { AlertTriangle, Building2, Loader2, Pencil, RefreshCw, Trash2, Wand2 } from "lucide-react";
 
-/**
- * IMPORTANT:
- * Backend counts naming can vary depending on Prisma relations.
- * This UI supports a few common shapes:
- *  - _count.facilities | _count.branchFacilities
- *  - _count.specialties
- *  - _count.departments
- */
 type BranchCounts = Record<string, number | undefined>;
 
 type BranchRow = {

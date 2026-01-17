@@ -306,16 +306,6 @@ exports.Prisma.AdmissionScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
-exports.Prisma.OTScalarFieldEnum = {
-  id: 'id',
-  branchId: 'branchId',
-  code: 'code',
-  name: 'name',
-  isActive: 'isActive',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt'
-};
-
 exports.Prisma.AssetScalarFieldEnum = {
   id: 'id',
   branchId: 'branchId',
@@ -728,6 +718,94 @@ exports.Prisma.GoLiveReportScalarFieldEnum = {
   createdAt: 'createdAt'
 };
 
+exports.Prisma.OtSuiteScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  locationNodeId: 'locationNodeId',
+  code: 'code',
+  name: 'name',
+  status: 'status',
+  config: 'config',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtSpaceScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  type: 'type',
+  code: 'code',
+  name: 'name',
+  locationNodeId: 'locationNodeId',
+  notes: 'notes',
+  meta: 'meta',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtTheatreScalarFieldEnum = {
+  id: 'id',
+  spaceId: 'spaceId',
+  theatreType: 'theatreType',
+  airflow: 'airflow',
+  pressure: 'pressure',
+  isoClass: 'isoClass',
+  meta: 'meta',
+  specialtyCodes: 'specialtyCodes',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtRecoveryBayScalarFieldEnum = {
+  id: 'id',
+  spaceId: 'spaceId',
+  bedCount: 'bedCount',
+  monitorCount: 'monitorCount',
+  oxygenPoints: 'oxygenPoints',
+  meta: 'meta',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtTableScalarFieldEnum = {
+  id: 'id',
+  theatreId: 'theatreId',
+  code: 'code',
+  name: 'name',
+  isPrimary: 'isPrimary',
+  manufacturer: 'manufacturer',
+  model: 'model',
+  serialNo: 'serialNo',
+  installedAt: 'installedAt',
+  meta: 'meta',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtEquipmentScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  spaceId: 'spaceId',
+  category: 'category',
+  name: 'name',
+  qty: 'qty',
+  manufacturer: 'manufacturer',
+  model: 'model',
+  serialNo: 'serialNo',
+  lastServiceAt: 'lastServiceAt',
+  nextServiceAt: 'nextServiceAt',
+  maintenanceIntervalDays: 'maintenanceIntervalDays',
+  meta: 'meta',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
 exports.Prisma.SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -904,6 +982,56 @@ exports.BookingStatus = exports.$Enums.BookingStatus = {
   COMPLETED: 'COMPLETED'
 };
 
+exports.OtSuiteStatus = exports.$Enums.OtSuiteStatus = {
+  DRAFT: 'DRAFT',
+  READY: 'READY',
+  ARCHIVED: 'ARCHIVED'
+};
+
+exports.OtSpaceType = exports.$Enums.OtSpaceType = {
+  THEATRE: 'THEATRE',
+  RECOVERY_BAY: 'RECOVERY_BAY',
+  PREOP_HOLDING: 'PREOP_HOLDING',
+  INDUCTION_ROOM: 'INDUCTION_ROOM',
+  SCRUB_ROOM: 'SCRUB_ROOM',
+  STERILE_STORE: 'STERILE_STORE',
+  ANESTHESIA_STORE: 'ANESTHESIA_STORE',
+  EQUIPMENT_STORE: 'EQUIPMENT_STORE',
+  STAFF_CHANGE: 'STAFF_CHANGE',
+  OTHER: 'OTHER'
+};
+
+exports.OtTheatreType = exports.$Enums.OtTheatreType = {
+  GENERAL: 'GENERAL',
+  MODULAR: 'MODULAR',
+  LAMINAR: 'LAMINAR',
+  HYBRID: 'HYBRID'
+};
+
+exports.OtAirflowType = exports.$Enums.OtAirflowType = {
+  STANDARD: 'STANDARD',
+  LAMINAR: 'LAMINAR'
+};
+
+exports.OtPressureType = exports.$Enums.OtPressureType = {
+  POSITIVE: 'POSITIVE',
+  NEGATIVE: 'NEGATIVE',
+  NEUTRAL: 'NEUTRAL'
+};
+
+exports.OtEquipmentCategory = exports.$Enums.OtEquipmentCategory = {
+  ANESTHESIA: 'ANESTHESIA',
+  MONITORING: 'MONITORING',
+  SURGICAL_LIGHT: 'SURGICAL_LIGHT',
+  DIATHERMY: 'DIATHERMY',
+  SUCTION: 'SUCTION',
+  INFUSION: 'INFUSION',
+  INSTRUMENTS: 'INSTRUMENTS',
+  OT_TABLE: 'OT_TABLE',
+  CSSD: 'CSSD',
+  OTHER: 'OTHER'
+};
+
 exports.Prisma.ModelName = {
   Branch: 'Branch',
   FacilityCatalog: 'FacilityCatalog',
@@ -920,7 +1048,6 @@ exports.Prisma.ModelName = {
   Room: 'Room',
   Bed: 'Bed',
   Admission: 'Admission',
-  OT: 'OT',
   Asset: 'Asset',
   TariffPlan: 'TariffPlan',
   ServiceCatalogItem: 'ServiceCatalogItem',
@@ -953,7 +1080,13 @@ exports.Prisma.ModelName = {
   FixItTask: 'FixItTask',
   BulkImportJob: 'BulkImportJob',
   ProcedureBooking: 'ProcedureBooking',
-  GoLiveReport: 'GoLiveReport'
+  GoLiveReport: 'GoLiveReport',
+  OtSuite: 'OtSuite',
+  OtSpace: 'OtSpace',
+  OtTheatre: 'OtTheatre',
+  OtRecoveryBay: 'OtRecoveryBay',
+  OtTable: 'OtTable',
+  OtEquipment: 'OtEquipment'
 };
 
 /**

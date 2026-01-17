@@ -117,6 +117,25 @@ export class IamSeedService implements OnModuleInit {
 
       { code: PERM.INFRA_GOLIVE_READ, name: "Read go-live checks", category: "Infrastructure" },
       { code: PERM.INFRA_GOLIVE_RUN, name: "Run go-live checks", category: "Infrastructure" },
+      { code: PERM.OT_SUITE_CREATE, name: "Create OT suites", category: "OT" },
+      { code: PERM.OT_SUITE_READ, name: "Read OT suites", category: "OT" },
+      { code: PERM.OT_SUITE_UPDATE, name: "Update OT suites", category: "OT" },
+      { code: PERM.OT_SUITE_DELETE, name: "Delete OT suites", category: "OT" },
+      { code: PERM.OT_SPACE_CREATE, name: "Create OT spaces", category: "OT" },
+      { code: PERM.OT_SPACE_UPDATE, name: "Update OT spaces", category: "OT" },
+      { code: PERM.OT_SPACE_DELETE, name: "Delete OT spaces", category: "OT" },
+      { code: PERM.OT_TABLE_CREATE, name: "Create OT tables", category: "OT" },
+      { code: PERM.OT_TABLE_UPDATE, name: "Update OT tables", category: "OT" },
+      { code: PERM.OT_TABLE_DELETE, name: "Delete OT tables", category: "OT" },
+      { code: PERM.OT_EQUIPMENT_CREATE, name: "Create OT equipment", category: "OT" },
+      { code: PERM.OT_EQUIPMENT_UPDATE, name: "Update OT equipment", category: "OT" },
+      { code: PERM.OT_EQUIPMENT_DELETE, name: "Delete OT equipment", category: "OT" },  
+      { code: PERM.OT_SUITE_READ, name: "Read OT suite readiness", category: "OT" },
+      { code: PERM.OT_SUITE_UPDATE, name: "Update OT suite readiness", category: "OT" },
+      { code: PERM.OT_SUITE_DELETE, name: "Delete OT suite readiness", category: "OT" },
+      { code: PERM.OT_SPACE_UPDATE, name: "Update OT space readiness", category: "OT" },
+      { code: PERM.OT_SPACE_DELETE, name: "Delete OT space readiness", category: "OT" },
+  
     ];
 
     for (const p of permissions) {

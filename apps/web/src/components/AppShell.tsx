@@ -82,7 +82,7 @@ const NAV_WORKSPACES: NavNode[] = [
       { label: "Resources", href: "/superadmin/infrastructure/resources" },
 
       { label: "Housekeeping Gate", href: "/superadmin/infrastructure/bed-policy" },
-      { label: "OT Setup", href: "/superadmin/infrastructure/operation-theatres" },
+      { label: "OT Setup", href: "/superadmin/infrastructure/ot" },
 
       { label: "Diagnostics Configuration", href: "/superadmin/infrastructure/diagnostics" },
       { label: "Equipment Register", href: "/superadmin/infrastructure/equipment" },

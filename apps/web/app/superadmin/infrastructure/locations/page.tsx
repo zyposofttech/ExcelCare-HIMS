@@ -959,7 +959,7 @@ export default function SuperAdminInfrastructureLocations() {
               <CardDescription>Inspect and manage the selected node.</CardDescription>
             </CardHeader>
             <Separator />
-            <CardContent className="pt-6">
+            <CardContent className="pt-6 ">
               {!selectedBranch ? (
                 <div className="rounded-2xl border border-zc-border bg-zc-panel/15 p-4 text-sm text-zc-muted">
                   Select a branch first.
@@ -969,18 +969,18 @@ export default function SuperAdminInfrastructureLocations() {
                   Select a node from the tree.
                 </div>
               ) : (
-                <div className="grid gap-4">
-                  <div className="rounded-2xl border border-zc-border bg-zc-panel/15 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                <div className="grid gap-4 ">
+                  <div className="rounded-2xl border border-zc-border bg-zc-panel/15 p-4 bg-sky-50/50 p-3 dark:border-sky-900/50 dark:bg-sky-900/10">
+                    <div className="flex items-start justify-between gap-3 ">
+                      <div className="min-w-0 ">
+                        <div className="flex items-center gap-2 ">
                           <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones[typeTone(selectedNode.type)])}>
                             {typeLabel(selectedNode.type)}
                           </span>
                           {rowPill(selectedNode)}
                         </div>
 
-                        <div className="mt-2 flex items-center gap-2">
+                        <div className="mt-2 flex items-center gap-2 ">
                           <div className="font-mono text-sm text-zc-muted">{selectedNode.code}</div>
                           <button
                             className="grid h-7 w-7 place-items-center rounded-lg border border-zc-border bg-zc-panel/10 hover:bg-zc-panel/25"

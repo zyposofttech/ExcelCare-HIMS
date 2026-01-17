@@ -73,7 +73,6 @@ model Branch {
   users       User[]
   patients    Patient[]
   wards       Ward[]
-  oTs         OT[]
   tariffPlans TariffPlan[]
   assets      Asset[]
   Specialty   Specialty[]
@@ -107,6 +106,8 @@ model Branch {
   fixItTasks            FixItTask[]
   bulkImportJobs        BulkImportJob[]
   goLiveReports         GoLiveReport[]
+
+  otSuites OtSuite[] @relation("OtSuite_Branch")
 
   infraConfig BranchInfraConfig?
 }
@@ -442,21 +443,6 @@ model Admission {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-}
-
-model OT {
-  id       String @id @default(cuid())
-  branchId String
-  branch   Branch @relation(fields: [branchId], references: [id])
-
-  code     String
-  name     String
-  isActive Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([branchId, code])
 }
 
 model Asset {
@@ -811,6 +797,9 @@ model LocationNode {
   // Units mapped to this location node
   units     Unit[]
   revisions LocationNodeRevision[]
+  // OT Setup mappings
+  otSuites  OtSuite[]              @relation("OtSuite_LocationNode")
+  otSpaces  OtSpace[]              @relation("OtSpace_LocationNode")
 
   @@index([branchId, kind])
   @@index([branchId, parentId])
@@ -1291,4 +1280,212 @@ model GoLiveReport {
   createdAt DateTime @default(now())
 
   @@index([branchId, createdAt])
+}
+
+// =========================
+// Operation Theatre Setup
+// =========================
+
+enum OtSuiteStatus {
+  DRAFT
+  READY
+  ARCHIVED
+}
+
+enum OtSpaceType {
+  THEATRE
+  RECOVERY_BAY
+  PREOP_HOLDING
+  INDUCTION_ROOM
+  SCRUB_ROOM
+  STERILE_STORE
+  ANESTHESIA_STORE
+  EQUIPMENT_STORE
+  STAFF_CHANGE
+  OTHER
+}
+
+enum OtTheatreType {
+  GENERAL
+  MODULAR
+  LAMINAR
+  HYBRID
+}
+
+enum OtAirflowType {
+  STANDARD
+  LAMINAR
+}
+
+enum OtPressureType {
+  POSITIVE
+  NEGATIVE
+  NEUTRAL
+}
+
+enum OtEquipmentCategory {
+  ANESTHESIA
+  MONITORING
+  SURGICAL_LIGHT
+  DIATHERMY
+  SUCTION
+  INFUSION
+  INSTRUMENTS
+  OT_TABLE
+  CSSD
+  OTHER
+}
+
+model OtSuite {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation("OtSuite_Branch", fields: [branchId], references: [id])
+
+  // Optional: link suite to a location node representing OT complex area (floor/wing)
+  locationNodeId String?
+  locationNode   LocationNode? @relation("OtSuite_LocationNode", fields: [locationNodeId], references: [id])
+
+  code   String
+  name   String
+  status OtSuiteStatus @default(DRAFT)
+
+  // Suite-level config (turnaround time, cleaning time, min recovery bays, etc.)
+  config Json?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  spaces    OtSpace[]
+  equipment OtEquipment[]
+
+  @@unique([branchId, code])
+  @@index([branchId])
+  @@index([locationNodeId])
+}
+
+model OtSpace {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  type OtSpaceType
+  code String
+  name String
+
+  // Optional: map each OT space to a specific LocationNode (room) in your location tree
+  locationNodeId String?
+  locationNode   LocationNode? @relation("OtSpace_LocationNode", fields: [locationNodeId], references: [id])
+
+  notes String?
+  meta  Json?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  theatre     OtTheatre?
+  recoveryBay OtRecoveryBay?
+  equipment   OtEquipment[]
+
+  @@unique([suiteId, code])
+  @@index([suiteId, type])
+  @@index([locationNodeId])
+}
+
+model OtTheatre {
+  id      String  @id @default(cuid())
+  spaceId String  @unique
+  space   OtSpace @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+
+  theatreType OtTheatreType  @default(GENERAL)
+  airflow     OtAirflowType  @default(STANDARD)
+  pressure    OtPressureType @default(POSITIVE)
+
+  // Optional classification fields (keep flexible for later)
+  isoClass String?
+  meta     Json?
+
+  // If your DB is Postgres, String[] is fine. Otherwise switch to Json.
+  specialtyCodes String[] @default([])
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tables OtTable[]
+
+  @@index([spaceId])
+}
+
+model OtRecoveryBay {
+  id      String  @id @default(cuid())
+  spaceId String  @unique
+  space   OtSpace @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+
+  bedCount     Int @default(1)
+  monitorCount Int @default(0)
+  oxygenPoints Int @default(0)
+
+  meta Json?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model OtTable {
+  id        String    @id @default(cuid())
+  theatreId String
+  theatre   OtTheatre @relation(fields: [theatreId], references: [id], onDelete: Cascade)
+
+  code      String
+  name      String
+  isPrimary Boolean @default(true)
+
+  manufacturer String?
+  model        String?
+  serialNo     String?
+  installedAt  DateTime?
+
+  meta Json?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([theatreId, code])
+  @@index([theatreId])
+}
+
+model OtEquipment {
+  id String @id @default(cuid())
+
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  // Optional: assign equipment to a specific OT space (theatre/recovery/etc.)
+  spaceId String?
+  space   OtSpace? @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+
+  category OtEquipmentCategory
+  name     String
+  qty      Int                 @default(1)
+
+  manufacturer String?
+  model        String?
+  serialNo     String?
+
+  lastServiceAt           DateTime?
+  nextServiceAt           DateTime?
+  maintenanceIntervalDays Int?
+
+  meta Json?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([suiteId, category])
+  @@index([spaceId])
 }
