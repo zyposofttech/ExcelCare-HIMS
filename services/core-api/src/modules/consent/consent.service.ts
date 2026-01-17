@@ -27,42 +27,45 @@ export class ConsentService {
     });
   }
 
-  // ✅ matches ConsentController.grant()
-  async grant(dto: GrantConsentDto) {
-    const rec = await this.prisma.consentRecord.create({
-      data: {
-        patientId: dto.patientId,
-        scope: dto.scope as any,
-        purpose: dto.purpose,
-        status: "GRANTED" as any,
-      },
-    });
+ // ✅ add actorUserId param
+async grant(dto: GrantConsentDto, actorUserId: string | null) {
+  const rec = await this.prisma.consentRecord.create({
+    data: {
+      patientId: dto.patientId,
+      scope: dto.scope as any,
+      purpose: dto.purpose,
+      status: "GRANTED" as any,
+    },
+  });
 
-    await this.audit.log({
-      action: "CONSENT_GRANT",
-      entity: "ConsentRecord",
-      entityId: rec.id,
-      meta: { patientId: dto.patientId, scope: dto.scope, purpose: dto.purpose },
-    });
+  await this.audit.log({
+    actorUserId, // ✅ add
+    action: "CONSENT_GRANT",
+    entity: "ConsentRecord",
+    entityId: rec.id,
+    meta: { patientId: dto.patientId, scope: dto.scope, purpose: dto.purpose },
+  });
 
-    return rec;
-  }
+  return rec;
+}
 
-  async rtbf(dto: RtbfRequestDto) {
-    const req = await this.prisma.rtbfRequest.create({
-      data: {
-        patientId: dto.patientId,
-        reason: dto.reason,
-      },
-    });
+async rtbf(dto: RtbfRequestDto, actorUserId: string | null) {
+  const req = await this.prisma.rtbfRequest.create({
+    data: {
+      patientId: dto.patientId,
+      reason: dto.reason,
+    },
+  });
 
-    await this.audit.log({
-      action: "RTBF_REQUEST",
-      entity: "RtbfRequest",
-      entityId: req.id,
-      meta: { patientId: dto.patientId, reason: dto.reason },
-    });
+  await this.audit.log({
+    actorUserId, // ✅ add
+    action: "RTBF_REQUEST",
+    entity: "RtbfRequest",
+    entityId: req.id,
+    meta: { patientId: dto.patientId, reason: dto.reason },
+  });
 
-    return req;
-  }
+  return req;
+}
+
 }

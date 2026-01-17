@@ -154,20 +154,23 @@ export class BranchController {
   @Post()
   async create(@Body() dto: CreateBranchDto, @Req() req: any) {
     const principal = req.principal;
-    return this.branches.create(dto, principal?.userId ?? null);
+    const actorUserId = principal?.userId ?? req?.user?.sub ?? null; 
+    return this.branches.create(dto, actorUserId);
   }
 
   @Permissions(PERM.BRANCH_UPDATE)
   @Patch(":id")
   async update(@Param("id") id: string, @Body() dto: UpdateBranchDto, @Req() req: any) {
     const principal = req.principal;
-    return this.branches.update(id, dto, principal?.userId ?? null);
+    const actorUserId = principal?.userId ?? req?.user?.sub ?? null;
+    return this.branches.update(id, dto, actorUserId);
   }
 
   @Permissions(PERM.BRANCH_DELETE)
   @Delete(":id")
   async remove(@Param("id") id: string, @Req() req: any) {
     const principal = req.principal;
-    return this.branches.remove(id, principal?.userId ?? null);
+    const actorUserId = principal?.userId ?? req?.user?.sub ?? null;
+    return this.branches.remove(id, actorUserId);
   }
 }

@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Toaster } from "@/components/ui/toaster";
-import { GlobalLoader } from "@/components/GlobalLoader";
+import { GlobalLoader } from "@/components/global-loading/GlobalLoader";
+import { GlobalNavWatcher } from "@/components/global-loading/GlobalNavWatcher";
 import { NavigationLoader } from "@/components/NavigationLoader";
 
 const inter = Inter({ subsets: ["latin"], display: "swap", variable: "--font-sans" });
@@ -18,10 +19,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased bg-zc-bg text-zc-text`}>
         <ThemeProvider>
-          <NavigationLoader />
-          <GlobalLoader />
+          <GlobalNavWatcher />
           {children}
+          <GlobalLoader />
+          <Toaster />
         </ThemeProvider>
+
         <Toaster />
       </body>
     </html>

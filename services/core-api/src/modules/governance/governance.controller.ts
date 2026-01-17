@@ -7,20 +7,16 @@ import {
   Post,
   Query,
   Req,
-  UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import type { Principal } from "../auth/access-policy.service";
-import { PermissionsGuard } from "../auth/permissions.guard";
 import { Permissions } from "../auth/permissions.decorator";
 import { PERM } from "../iam/iam.constants";
 import { ApprovePolicyVersionDto, RejectPolicyVersionDto, UpdatePolicyDraftDto, CreatePolicyDefinitionDto } from "./governance.dto";
 import { GovernanceService } from "./governance.service";
-import { PrincipalGuard } from "../auth/principal.guard";
 
 @ApiTags("governance")
 @Controller("governance")
-@UseGuards(PrincipalGuard, PermissionsGuard) 
 export class GovernanceController {
   constructor(private governance: GovernanceService) {}
 

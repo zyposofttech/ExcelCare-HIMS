@@ -1,7 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, Delete, Put } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
-import { PrincipalGuard } from "../auth/principal.guard";
-import { PermissionsGuard } from "../auth/permissions.guard";
+import { parseBool } from "../../common/http.util";
 import { Permissions } from "../auth/permissions.decorator";
 import type { Principal } from "../auth/access-policy.service";
 import { PERM } from "../iam/iam.constants";
@@ -19,7 +18,6 @@ import {
 
 @ApiTags("facility-setup")
 @Controller()
-@UseGuards(PrincipalGuard, PermissionsGuard)
 export class FacilitySetupController {
   constructor(private svc: FacilitySetupService) { }
 
@@ -129,7 +127,25 @@ export class FacilitySetupController {
     return this.svc.updateDepartmentAssignments(this.principal(req), id, dto);
   }
 
+  @Permissions(PERM.DEPARTMENT_UPDATE)
+@Delete("departments/:id")
+async deleteDepartment(
+  @Req() req: any,
+  @Param("id") id: string,
+  @Query("hard") hard?: string,
+) {
+  return this.svc.deactivateDepartment(this.principal(req), id, { hard: parseBool(hard, false) });
+}
 
+@Permissions(PERM.SPECIALTY_UPDATE)
+@Delete("specialties/:id")
+async deleteSpecialty(
+  @Req() req: any,
+  @Param("id") id: string,
+  @Query("hard") hard?: string,
+) {
+  return this.svc.deactivateSpecialty(this.principal(req), id, { hard: parseBool(hard, false) });
+}
 
   // -------------------- Department ↔ Specialty mapping --------------------
 

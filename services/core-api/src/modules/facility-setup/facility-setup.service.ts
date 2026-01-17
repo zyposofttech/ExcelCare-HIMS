@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, ConflictException } from "@nestjs/common";
 import type { PrismaClient } from "@zypocare/db";
 import { AuditService } from "../audit/audit.service";
 import type { Principal } from "../auth/access-policy.service";
@@ -486,6 +486,136 @@ export class FacilitySetupService {
       },
     });
   }
+  async deactivateDepartment(
+  principal: Principal,
+  departmentId: string,
+  opts: { hard?: boolean } = {},
+) {
+  const row = await this.prisma.department.findUnique({
+    where: { id: departmentId },
+    select: { id: true, branchId: true, isActive: true },
+  });
+  if (!row) throw new NotFoundException("Department not found");
+
+  // Branch scope enforcement
+  if (principal.roleScope === "BRANCH" && principal.branchId !== row.branchId) {
+    throw new ForbiddenException("Cannot access another branch");
+  }
+
+  const hard = !!opts.hard;
+
+  if (hard) {
+    // Strict “unused” checks for hard delete
+    const staffCount = await this.prisma.staff.count({ where: { departmentId } });
+    const unitsCount = await this.prisma.unit.count({ where: { departmentId } });
+    const doctorAssignCount = await this.prisma.departmentDoctor.count({ where: { departmentId } });
+    const mapCount = await this.prisma.departmentSpecialty.count({ where: { departmentId } });
+
+    const blockers = [
+      staffCount ? `${staffCount} staff linked` : null,
+      unitsCount ? `${unitsCount} units linked` : null,
+      doctorAssignCount ? `${doctorAssignCount} doctor assignments` : null,
+      mapCount ? `${mapCount} specialty mappings` : null,
+    ].filter(Boolean);
+
+    if (blockers.length) {
+      throw new ConflictException(`Cannot hard delete department: ${blockers.join(", ")}`);
+    }
+
+    await this.prisma.department.delete({ where: { id: departmentId } });
+
+    await this.audit.log({
+      branchId: row.branchId,
+      actorUserId: principal.userId,
+      action: "DEPARTMENT_DELETE_HARD",
+      entity: "Department",
+      entityId: row.id,
+      meta: { hard: true },
+    });
+
+    return { ok: true, hardDeleted: true };
+  }
+
+  // Soft deactivate
+  const updated = await this.prisma.department.update({
+    where: { id: departmentId },
+    data: { isActive: false },
+    select: { id: true, branchId: true, isActive: true, name: true, code: true },
+  });
+
+  await this.audit.log({
+    branchId: row.branchId,
+    actorUserId: principal.userId,
+    action: "DEPARTMENT_DEACTIVATE",
+    entity: "Department",
+    entityId: updated.id,
+    meta: { hard: false },
+  });
+
+  return updated;
+}
+
+async deactivateSpecialty(
+  principal: Principal,
+  specialtyId: string,
+  opts: { hard?: boolean } = {},
+) {
+  const row = await this.prisma.specialty.findUnique({
+    where: { id: specialtyId },
+    select: { id: true, branchId: true, isActive: true },
+  });
+  if (!row) throw new NotFoundException("Specialty not found");
+
+  if (principal.roleScope === "BRANCH" && principal.branchId !== row.branchId) {
+    throw new ForbiddenException("Cannot access another branch");
+  }
+
+  const hard = !!opts.hard;
+
+  if (hard) {
+    const staffCount = await this.prisma.staff.count({ where: { specialtyId } });
+    const mapCount = await this.prisma.departmentSpecialty.count({ where: { specialtyId } });
+
+    const blockers = [
+      staffCount ? `${staffCount} staff linked` : null,
+      mapCount ? `${mapCount} department mappings` : null,
+    ].filter(Boolean);
+
+    if (blockers.length) {
+      throw new ConflictException(`Cannot hard delete specialty: ${blockers.join(", ")}`);
+    }
+
+    await this.prisma.specialty.delete({ where: { id: specialtyId } });
+
+    await this.audit.log({
+      branchId: row.branchId,
+      actorUserId: principal.userId,
+      action: "SPECIALTY_DELETE_HARD",
+      entity: "Specialty",
+      entityId: row.id,
+      meta: { hard: true },
+    });
+
+    return { ok: true, hardDeleted: true };
+  }
+
+  const updated = await this.prisma.specialty.update({
+    where: { id: specialtyId },
+    data: { isActive: false },
+    select: { id: true, branchId: true, isActive: true, name: true, code: true },
+  });
+
+  await this.audit.log({
+    branchId: row.branchId,
+    actorUserId: principal.userId,
+    action: "SPECIALTY_DEACTIVATE",
+    entity: "Specialty",
+    entityId: updated.id,
+    meta: { hard: false },
+  });
+
+  return updated;
+}
 
   // ---------------------------------------------------------------------------
   // Specialties (branch-scoped catalog)

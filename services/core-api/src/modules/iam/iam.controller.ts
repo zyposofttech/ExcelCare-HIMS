@@ -1,7 +1,5 @@
-import { Controller, Get, Patch, Post, Body, Param, Query, Req, UseGuards, UnauthorizedException } from "@nestjs/common";
+import { Controller, Get, Patch, Post, Body, Param, Query, Req, UnauthorizedException } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
-import { PrincipalGuard } from "../auth/principal.guard";
-import { PermissionsGuard } from "../auth/permissions.guard";
 import { Permissions } from "../auth/permissions.decorator";
 import type { Principal } from "../auth/access-policy.service";
 import { IamService } from "./iam.service";
@@ -10,7 +8,6 @@ import { PERM } from "./iam.constants";
 
 @ApiTags("iam")
 @Controller("iam")
-@UseGuards(PrincipalGuard, PermissionsGuard)
 export class IamController {
   constructor(private readonly iam: IamService) {}
 

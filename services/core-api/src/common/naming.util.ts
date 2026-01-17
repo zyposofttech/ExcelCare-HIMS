@@ -19,7 +19,10 @@ export function canonicalizeCode(input: string) {
 
 // ---------- Regex used by DTOs ----------
 export const RX_UNIT_CODE = /^[A-Z][A-Z0-9]{1,7}(-[A-Z0-9]{1,8})?$/; // e.g. ICU-A, OT-01, WARD-3
-export const RX_ROOM_CODE = /^[A-Z0-9][A-Z0-9-]{0,20}$/;            // raw input (we canonicalize further in assertRoomCode)
+// Room codes: hospital-friendly input (canonicalized later)
+// Accepts: TH01, OT-1, LAB1, 101, ICU-A-01, etc.
+// Allows letters/digits plus space/underscore/hyphen (canonicalizeCode will normalize to hyphen+uppercase)
+export const RX_ROOM_CODE = /^[A-Z0-9][A-Z0-9 _-]{0,31}$/i;
 export const RX_RESOURCE_CODE_ANY = /^[A-Z0-9][A-Z0-9-]{0,24}$/;    // raw input (we canonicalize further in assertResourceCode)
 export const RX_LOCATION_CODE_ANY = /^[A-Z0-9][A-Z0-9-]{0,48}$/;    // raw input (Zone can be numeric-only too)
 
@@ -97,24 +100,32 @@ export function assertUnitCode(raw: string) {
 }
 
 /**
- * Room code stored as: UNITCODE-R###
- * - Accepts "101" or "R101" or "UNIT-R101"
+ * Room code (stored exactly as a canonical code, NOT forced numeric-only).
+ * Standard:
+ * - Uppercase + trimmed + spaces/underscores => hyphen (canonicalizeCode)
+ * - 1..32 chars
+ * - Allowed chars: A-Z, 0-9, hyphen (no trailing hyphen)
+ * Examples valid: TH01, OT-1, LAB1, 101
  */
-export function assertRoomCode(unitCodeRaw: string, roomCodeRaw: string) {
-  const unitCode = canonicalizeCode(unitCodeRaw);
-  let rc = canonicalizeCode(roomCodeRaw);
+export function assertRoomCode(_unitCodeRaw: string, roomCodeRaw: string) {
+  const rc = canonicalizeCode(roomCodeRaw);
 
-  // allow full codes like UNIT-R101
-  if (rc.startsWith(unitCode + "-")) rc = rc.slice(unitCode.length + 1);
+  if (!rc) throw new BadRequestException("Room code is required");
+  if (rc.length > 32) throw new BadRequestException(`Invalid Room code "${roomCodeRaw}". Max length is 32.`);
 
-  // normalize digits -> R###
-  if (/^\d{1,4}$/.test(rc)) rc = `R${padLeft(rc, 3)}`;
-  if (!/^R\d{1,4}$/.test(rc)) {
-    throw new BadRequestException(`Invalid Room code "${roomCodeRaw}". Use numeric (101) or R-prefixed (R101).`);
+  // Canonical format: no trailing hyphen, no consecutive hyphens after canonicalizeCode collapse
+  const RX_ROOM_CODE_CANON = /^[A-Z0-9](?:[A-Z0-9]|-(?=[A-Z0-9])){0,31}$/;
+
+  if (!RX_ROOM_CODE_CANON.test(rc)) {
+    throw new BadRequestException(
+      `Invalid Room code "${roomCodeRaw}". Examples: TH01, OT-1, LAB1, 101.`,
+    );
   }
 
-  return `${unitCode}-${rc}`;
+  // Store canonical code only (unique per unit via @@unique([unitId, code]))
+  return rc;
 }
+
 
 export const RESOURCE_PREFIX: Record<ResourceType, string> = {
 

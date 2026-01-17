@@ -11,38 +11,90 @@ function getAccessToken(): string | null {
   return localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
 }
 
-export async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const method = (init.method ?? "GET").toUpperCase();
-  const headers = new Headers(init.headers || {});
+// Optional: integrate with the new GlobalLoader store (won't break if missing)
+let loadingStore: any | null = null;
+async function getLoadingStore() {
+  if (typeof window === "undefined") return null;
+  if (loadingStore) return loadingStore;
+  try {
+    loadingStore = await import("@/components/global-loading/store");
+    return loadingStore;
+  } catch {
+    return null;
+  }
+}
+
+type ApiFetchOptions = RequestInit & {
+  showLoader?: boolean;      // default true
+  loaderMessage?: string;    // overrides default label
+};
+
+export async function apiFetch<T>(url: string, init: ApiFetchOptions = {}): Promise<T> {
+  const {
+    showLoader = true,
+    loaderMessage,
+    ...fetchInit
+  } = init;
+
+  const method = (fetchInit.method ?? "GET").toUpperCase();
+  const headers = new Headers(fetchInit.headers || {});
   headers.set("Accept", "application/json");
 
-  // Global, non-blocking loading indicator (anti-flicker handled in GlobalLoader)
-  const loadingId = zcLoading.start({
-    kind: "api",
-    method,
-    url,
-    label: ["GET", "HEAD", "OPTIONS"].includes(method) ? "Loading…" : "Saving changes…",
-  });
-
+  // Attach token for protected APIs
   const token = getAccessToken();
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const mutating = !["GET", "HEAD", "OPTIONS"].includes(method);
-  if (mutating) {
-    if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const csrf = getCookie("xc_csrf");
-    if (csrf) headers.set("X-CSRF-Token", csrf);
-  }
+  const isRead = ["GET", "HEAD", "OPTIONS"].includes(method);
+  const label =
+    loaderMessage ??
+    (isRead ? "Loading…" : "Saving changes…");
+
+  // Start loader(s)
+  const loadingId = zcLoading.start({
+    kind: "api",
+    method,
+    url,
+    label,
+  });
+
+  const store = showLoader ? await getLoadingStore() : null;
+  if (showLoader && store?.startLoading) store.startLoading(label);
 
   try {
-    const res = await fetch(url, { ...init, method, headers, credentials: "include" });
+    // Mutations: set JSON content-type only if not set already
+    if (!isRead) {
+      if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+
+      // CSRF token (if you use it)
+      const csrf = getCookie("xc_csrf");
+      if (csrf && !headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrf);
+    }
+
+    const res = await fetch(url, {
+      ...fetchInit,
+      method,
+      headers,
+      credentials: "include", // IMPORTANT: preserve cookie flows + consistent auth behavior
+    });
+
     const ct = res.headers.get("content-type") || "";
-    const data = ct.includes("application/json") ? await res.json() : await res.text();
-    if (!res.ok) throw new Error((data as any)?.message || `Request failed (${res.status})`);
+    const data: any = ct.includes("application/json") ? await res.json() : await res.text();
+
+    if (!res.ok) {
+      // Standardized error message for UI toasts
+      const msg =
+        data?.message ||
+        data?.error ||
+        (typeof data === "string" && data) ||
+        `Request failed (${res.status})`;
+      throw new Error(msg);
+    }
+
     return data as T;
   } finally {
     zcLoading.end(loadingId);
+    if (showLoader && store?.stopLoading) store.stopLoading();
   }
 }

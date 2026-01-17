@@ -1,5 +1,6 @@
 // src/consent/consent.controller.ts
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Req } from "@nestjs/common";
+
 import { ApiTags } from "@nestjs/swagger";
 import { IsIn, IsString } from "class-validator";
 import { Roles } from "../auth/roles.decorator";
@@ -30,15 +31,18 @@ export class ConsentController {
     return this.consentService.list(patientId);
   }
 
-  @Roles("SUPER_ADMIN", "BRANCH_ADMIN", "FRONT_OFFICE")
+    @Roles("SUPER_ADMIN", "BRANCH_ADMIN", "FRONT_OFFICE")
   @Post("grant")
-  async grant(@Body() dto: GrantConsentDto) {
-    return this.consentService.grant(dto);
+  async grant(@Body() dto: GrantConsentDto, @Req() req: any) {
+    const actorUserId = req?.principal?.userId ?? req?.user?.sub ?? null;
+    return this.consentService.grant(dto, actorUserId);
   }
 
   @Roles("SUPER_ADMIN", "BRANCH_ADMIN")
   @Post("rtbf")
-  async rtbf(@Body() dto: RtbfRequestDto) {
-    return this.consentService.rtbf(dto);
+  async rtbf(@Body() dto: RtbfRequestDto, @Req() req: any) {
+    const actorUserId = req?.principal?.userId ?? req?.user?.sub ?? null;
+    return this.consentService.rtbf(dto, actorUserId);
   }
+
 }

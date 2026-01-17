@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { LinkWithLoader as Link } from "@/components/LinkWithLoader";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { useAuthStore } from "@/lib/auth/store";
