@@ -29,12 +29,33 @@ export class UnitsService {
     });
     if (!unit) throw new NotFoundException("Unit not found");
 
+    // ✅ Works for GLOBAL principals because we pass unit.branchId
     this.ctx.resolveBranchId(principal, unit.branchId);
+
     return unit;
   }
 
+  private async resolveBranchIdForGlobal(principal: Principal, branchIdParam?: string | null, opts?: { departmentId?: string | null }) {
+    // Primary: explicit branchId
+    if (branchIdParam) return this.ctx.resolveBranchId(principal, branchIdParam);
+
+    // Fallback: infer from departmentId (useful for GLOBAL calls where UI didn’t pass branchId)
+    if (opts?.departmentId) {
+      const dept = await this.ctx.prisma.department.findUnique({
+        where: { id: opts.departmentId },
+        select: { id: true, branchId: true },
+      });
+      if (!dept) throw new BadRequestException("Invalid departmentId");
+      return this.ctx.resolveBranchId(principal, dept.branchId);
+    }
+
+    // No inference possible
+    return this.ctx.resolveBranchId(principal, null);
+  }
+
   async listUnits(principal: Principal, q: any) {
-    const branchId = this.ctx.resolveBranchId(principal, q.branchId ?? null);
+    const branchId = await this.resolveBranchIdForGlobal(principal, q.branchId ?? null, { departmentId: q.departmentId ?? null });
+
     const where: any = { branchId };
     if (q.departmentId) where.departmentId = q.departmentId;
     if (q.unitTypeId) where.unitTypeId = q.unitTypeId;
@@ -67,16 +88,31 @@ export class UnitsService {
     });
   }
 
-  async listDepartments(principal: Principal, branchIdParam: string | null) {
-    const branchId = this.ctx.resolveBranchId(principal, branchIdParam);
+  // ✅ Updated: can infer branchId from unitId (perfect for Unit Details screens)
+  async listDepartments(principal: Principal, args: { branchId: string | null; unitId: string | null }) {
+    let branchId = args.branchId;
+
+    if (!branchId && args.unitId) {
+      const unit = await this.ctx.prisma.unit.findUnique({
+        where: { id: args.unitId },
+        select: { id: true, branchId: true },
+      });
+      if (!unit) throw new NotFoundException("Unit not found");
+      branchId = unit.branchId;
+    }
+
+    const resolved = this.ctx.resolveBranchId(principal, branchId ?? null);
+
     return this.ctx.prisma.department.findMany({
-      where: { branchId, isActive: true },
+      where: { branchId: resolved, isActive: true },
       orderBy: { name: "asc" },
     });
   }
 
   async createUnit(principal: Principal, dto: CreateUnitDto, branchIdParam?: string | null) {
-    const branchId = this.ctx.resolveBranchId(principal, branchIdParam ?? null);
+    // ✅ If branchId isn’t provided, infer from departmentId (GLOBAL safe)
+    const branchId = await this.resolveBranchIdForGlobal(principal, branchIdParam ?? null, { departmentId: dto.departmentId });
+
     const code = assertUnitCode(dto.code);
 
     const dept = await this.ctx.prisma.department.findFirst({
@@ -138,7 +174,14 @@ export class UnitsService {
       },
     });
 
-    await this.ctx.audit.log({ branchId, actorUserId: principal.userId, action: "INFRA_UNIT_UPDATE", entity: "Unit", entityId: id, meta: dto });
+    await this.ctx.audit.log({
+      branchId,
+      actorUserId: principal.userId,
+      action: "INFRA_UNIT_UPDATE",
+      entity: "Unit",
+      entityId: id,
+      meta: dto,
+    });
 
     return this.getUnit(principal, id);
   }

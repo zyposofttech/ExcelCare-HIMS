@@ -10,8 +10,105 @@ export class UnitTypesService {
     return this.ctx.prisma.unitTypeCatalog.findMany({
       where: { isActive: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      select: { id: true, code: true, name: true, usesRoomsDefault: true, schedulableByDefault: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        usesRoomsDefault: true,
+        schedulableByDefault: true,
+        isActive: true,
+        sortOrder: true,
+      },
     });
+  }
+
+  // ✅ FIX: create catalog item (matches your Prisma model fields; ignores extra fields like description)
+  async createUnitTypeCatalog(principal: Principal, body: any) {
+    const code = String(body?.code ?? "")
+      .trim()
+      .toUpperCase();
+    const name = String(body?.name ?? "").trim();
+
+    // Prisma constraints:
+    // code: VarChar(32), unique
+    // name: VarChar(120)
+    if (!name) throw new BadRequestException("name is required");
+    if (!code) throw new BadRequestException("code is required");
+
+    if (code.length < 2 || code.length > 32) {
+      throw new BadRequestException("code must be between 2 and 32 characters");
+    }
+    if (!/^[A-Z0-9_-]+$/.test(code)) {
+      throw new BadRequestException("code can contain only A–Z, 0–9, underscore (_) and hyphen (-)");
+    }
+    if (name.length < 2 || name.length > 120) {
+      throw new BadRequestException("name must be between 2 and 120 characters");
+    }
+
+    const usesRoomsDefault = body?.usesRoomsDefault ?? true;
+    const schedulableByDefault = body?.schedulableByDefault ?? false;
+    const isActive = body?.isActive ?? true;
+
+    // sortOrder: if not provided, append near end (max + 10)
+    let sortOrder: number;
+    if (typeof body?.sortOrder === "number" && Number.isFinite(body.sortOrder)) {
+      sortOrder = Math.max(0, Math.floor(body.sortOrder));
+    } else {
+      const agg = await this.ctx.prisma.unitTypeCatalog.aggregate({ _max: { sortOrder: true } });
+      sortOrder = Number(agg?._max?.sortOrder ?? 0) + 10;
+    }
+
+    // unique check
+    const exists = await this.ctx.prisma.unitTypeCatalog.findFirst({
+      where: { code },
+      select: { id: true },
+    });
+    if (exists) throw new BadRequestException(`Catalog code "${code}" already exists`);
+
+    try {
+      const created = await this.ctx.prisma.unitTypeCatalog.create({
+        data: {
+          code,
+          name,
+          usesRoomsDefault: !!usesRoomsDefault,
+          schedulableByDefault: !!schedulableByDefault,
+          isActive: !!isActive,
+          sortOrder,
+        },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          usesRoomsDefault: true,
+          schedulableByDefault: true,
+          isActive: true,
+          sortOrder: true,
+        },
+      });
+
+      // Audit (global catalog => branchId null)
+      await this.ctx.audit.log({
+        branchId: null,
+        actorUserId: principal.userId,
+        action: "INFRA_UNITTYPE_CATALOG_CREATE",
+        entity: "UnitTypeCatalog",
+        entityId: created.id,
+        meta: {
+          code: created.code,
+          name: created.name,
+          usesRoomsDefault: created.usesRoomsDefault,
+          schedulableByDefault: created.schedulableByDefault,
+          isActive: created.isActive,
+          sortOrder: created.sortOrder,
+        },
+      });
+
+      return created;
+    } catch (e: any) {
+      // Prisma unique error fallback (race condition)
+      if (e?.code === "P2002") throw new BadRequestException(`Catalog code "${code}" already exists`);
+      throw e;
+    }
   }
 
   async getBranchUnitTypes(principal: Principal, branchIdParam?: string) {
@@ -34,6 +131,8 @@ export class UnitTypesService {
         name: l.unitType.name,
         usesRoomsDefault: l.unitType.usesRoomsDefault,
         schedulableByDefault: l.unitType.schedulableByDefault,
+        isActive: l.unitType.isActive,
+        sortOrder: l.unitType.sortOrder,
       },
     }));
   }

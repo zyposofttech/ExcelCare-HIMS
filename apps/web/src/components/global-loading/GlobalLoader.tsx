@@ -31,7 +31,7 @@ export function GlobalLoader() {
         .xc-indeterminate-bar {
           width: 40%;
           height: 100%;
-          background: linear-gradient(90deg, transparent, rgba(59,130,246,0.95), transparent);
+          background: linear-gradient(90deg, transparent, rgba(131, 33, 192, 0.95), transparent);
           animation: xc-indeterminate 1.1s ease-in-out infinite;
         }
         @keyframes xc-indeterminate {

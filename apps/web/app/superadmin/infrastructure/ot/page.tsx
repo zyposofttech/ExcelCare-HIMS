@@ -60,7 +60,14 @@ type LocationOption = {
   label: string;
 };
 
-type OtSuiteStatus = "DRAFT" | "ACTIVE" | "MAINTENANCE" | "ARCHIVED";
+type OtSuiteStatus =
+  | "draft"
+  | "ready"
+  | "active"
+  | "booked"
+  | "in_use"
+  | "maintenance"
+  | "archived";
 
 type OtSuite = {
   id: string;
@@ -983,7 +990,7 @@ export default function SuperAdminOtSetupPage() {
     branchId: "",
     code: "",
     name: "",
-    status: "DRAFT" as OtSuiteStatus,
+    status: "draft" as OtSuiteStatus,
     locationNodeId: "",
     isActive: true,
 
@@ -2367,10 +2374,10 @@ export default function SuperAdminOtSetupPage() {
               <div className="grid gap-2">
                 <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Code</div>
                 <Input value={spaceForm.code} onChange={(e) => setSpaceForm((p) => ({ ...p, code: e.target.value }))} placeholder="e.g. OT01 / RB01" disabled={!!spaceEditing} />
-                <div className="text-xs text-zc-muted">Suggested automatically per space type.</div>
+                
               </div>
             </div>
-
+            <div className="text-xs text-zc-muted">Suggested automatically per space type.</div>
             <div className="grid gap-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Name</div>
               <Input value={spaceForm.name} onChange={(e) => setSpaceForm((p) => ({ ...p, name: e.target.value }))} placeholder="e.g. Operation Theatre 1" />

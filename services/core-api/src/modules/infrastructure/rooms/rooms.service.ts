@@ -2,31 +2,29 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import type { Principal } from "../../auth/access-policy.service";
 import { InfraContextService } from "../shared/infra-context.service";
 import type { CreateUnitRoomDto, UpdateUnitRoomDto } from "./dto";
-
-// Legacy convention per your product: numeric (101) or R-prefixed (R101)
-const ROOM_CODE_REGEX = /^(R\d{1,5}|\d{1,5})$/;
-
-function normalizeRoomCode(code: string) {
-  const c = String(code ?? "").trim().toUpperCase();
-  if (!c) throw new BadRequestException("Room code is required");
-  return c;
-}
-
-function assertRoomCode(code: string) {
-  const c = normalizeRoomCode(code);
-  if (!ROOM_CODE_REGEX.test(c)) {
-    throw new BadRequestException(`Invalid Room code "${code}". Use numeric (101) or R-prefixed (R101).`);
-  }
-  return c;
-}
+import { assertValidRoomCode } from "./room-code";
 
 @Injectable()
 export class RoomsService {
   constructor(private readonly ctx: InfraContextService) {}
 
   async listRooms(principal: Principal, q: { branchId?: string | null; unitId?: string | null; includeInactive?: boolean }) {
-    const branchId = this.ctx.resolveBranchId(principal, q.branchId ?? null);
-    const where: any = { branchId };
+    // ✅ If branchId is not provided (common in GLOBAL calls), infer from unitId.
+    let branchId = q.branchId ?? null;
+
+    if (!branchId && q.unitId) {
+      const unit = await this.ctx.prisma.unit.findUnique({
+        where: { id: q.unitId },
+        select: { id: true, branchId: true },
+      });
+      if (!unit) throw new NotFoundException("Unit not found");
+      branchId = unit.branchId;
+    }
+
+    // If still missing, this will throw for GLOBAL principals (by design)
+    const resolvedBranchId = this.ctx.resolveBranchId(principal, branchId);
+
+    const where: any = { branchId: resolvedBranchId };
     if (q.unitId) where.unitId = q.unitId;
     if (!q.includeInactive) where.isActive = true;
 
@@ -51,7 +49,11 @@ export class RoomsService {
       throw new BadRequestException("This unit is configured as open-bay (usesRooms=false). Rooms are not allowed.");
     }
 
-    const code = assertRoomCode(dto.code);
+    const name = String(dto.name ?? "").trim();
+    if (!name) throw new BadRequestException("Room name is required.");
+
+    // ✅ NEW: allow TH01 / OT-1 / LAB1 / TR1 etc
+    const code = assertValidRoomCode(dto.code);
 
     const exists = await this.ctx.prisma.unitRoom.findFirst({
       where: { branchId, unitId: dto.unitId, code },
@@ -64,7 +66,7 @@ export class RoomsService {
         branchId,
         unitId: dto.unitId,
         code,
-        name: dto.name.trim(),
+        name,
         isActive: dto.isActive ?? true,
       },
     });
@@ -75,29 +77,52 @@ export class RoomsService {
       action: "INFRA_ROOM_CREATE",
       entity: "UnitRoom",
       entityId: created.id,
-      meta: dto,
+      meta: { ...dto, code, name },
     });
 
     return created;
   }
 
   async updateRoom(principal: Principal, id: string, dto: UpdateUnitRoomDto) {
-    const room = await this.ctx.prisma.unitRoom.findUnique({ where: { id }, select: { id: true, branchId: true } });
+    const room = await this.ctx.prisma.unitRoom.findUnique({
+      where: { id },
+      select: { id: true, branchId: true, unitId: true, code: true },
+    });
     if (!room) throw new NotFoundException("Room not found");
 
     const branchId = this.ctx.resolveBranchId(principal, room.branchId);
 
+    let nextCode: string | undefined = undefined;
+
+    if (dto.code !== undefined) {
+      nextCode = assertValidRoomCode(dto.code);
+
+      // uniqueness per unit
+      const exists = await this.ctx.prisma.unitRoom.findFirst({
+        where: { branchId, unitId: room.unitId, code: nextCode, id: { not: room.id } },
+        select: { id: true },
+      });
+      if (exists) throw new ConflictException(`Room code "${nextCode}" already exists in this unit.`);
+    }
+
     const updated = await this.ctx.prisma.unitRoom.update({
       where: { id },
       data: {
-        // Keep room codes stable unless explicitly allowed later.
-        // ...(dto.code ? { code: assertRoomCode(dto.code) } : {}),
-        ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+        ...(nextCode !== undefined ? { code: nextCode } : {}),
+        ...(dto.name !== undefined ? { name: String(dto.name ?? "").trim() } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
       },
     });
 
-    await this.ctx.audit.log({ branchId, actorUserId: principal.userId, action: "INFRA_ROOM_UPDATE", entity: "UnitRoom", entityId: id, meta: dto });
+    await this.ctx.audit.log({
+      branchId,
+      actorUserId: principal.userId,
+      action: "INFRA_ROOM_UPDATE",
+      entity: "UnitRoom",
+      entityId: id,
+      meta: { ...dto, ...(nextCode ? { code: nextCode } : {}) },
+    });
+
     return updated;
   }
 
@@ -108,7 +133,7 @@ export class RoomsService {
     });
     if (!room) throw new NotFoundException("Room not found");
 
-    if (principal.roleScope === "BRANCH" && principal.branchId !== room.branchId) {
+    if ((principal as any).roleScope === "BRANCH" && (principal as any).branchId !== room.branchId) {
       throw new ForbiddenException("Cannot access another branch");
     }
 

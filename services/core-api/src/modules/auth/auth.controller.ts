@@ -10,7 +10,9 @@ import {
 import { AuthService } from "./auth.service";
 import { Public } from "./public.decorator";
 import { hashPassword } from "../iam/password.util";
+import { ApiTags } from "@nestjs/swagger";
 
+@ApiTags("Auth/Login")
 @Controller("auth")
 export class AuthController {
   constructor(private readonly authService: AuthService) {}

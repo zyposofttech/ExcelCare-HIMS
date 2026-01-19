@@ -21,7 +21,7 @@ import {
   UpdateOtTableDto,
 } from "./ot.dto";
 
-@ApiTags("infrastructure-ot")
+@ApiTags("infrastructure/ot")
 @Controller("infrastructure/ot")
 @UseGuards(PrincipalGuard, PermissionsGuard)
 export class OtController {

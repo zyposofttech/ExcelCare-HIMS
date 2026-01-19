@@ -806,6 +806,129 @@ exports.Prisma.OtEquipmentScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
+exports.Prisma.DiagnosticSectionScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  code: 'code',
+  name: 'name',
+  sortOrder: 'sortOrder',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticCategoryScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  sectionId: 'sectionId',
+  code: 'code',
+  name: 'name',
+  sortOrder: 'sortOrder',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.SpecimenTypeScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  code: 'code',
+  name: 'name',
+  container: 'container',
+  minVolumeMl: 'minVolumeMl',
+  handlingNotes: 'handlingNotes',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticItemScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  code: 'code',
+  name: 'name',
+  kind: 'kind',
+  sectionId: 'sectionId',
+  categoryId: 'categoryId',
+  specimenId: 'specimenId',
+  tatMinsRoutine: 'tatMinsRoutine',
+  tatMinsStat: 'tatMinsStat',
+  requiresAppointment: 'requiresAppointment',
+  preparationText: 'preparationText',
+  consentRequired: 'consentRequired',
+  isPanel: 'isPanel',
+  sortOrder: 'sortOrder',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticPanelItemScalarFieldEnum = {
+  id: 'id',
+  panelId: 'panelId',
+  itemId: 'itemId',
+  sortOrder: 'sortOrder',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticParameterScalarFieldEnum = {
+  id: 'id',
+  testId: 'testId',
+  code: 'code',
+  name: 'name',
+  dataType: 'dataType',
+  unit: 'unit',
+  precision: 'precision',
+  allowedText: 'allowedText',
+  criticalLow: 'criticalLow',
+  criticalHigh: 'criticalHigh',
+  sortOrder: 'sortOrder',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticReferenceRangeScalarFieldEnum = {
+  id: 'id',
+  parameterId: 'parameterId',
+  sex: 'sex',
+  ageMinDays: 'ageMinDays',
+  ageMaxDays: 'ageMaxDays',
+  low: 'low',
+  high: 'high',
+  textRange: 'textRange',
+  sortOrder: 'sortOrder',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticTemplateScalarFieldEnum = {
+  id: 'id',
+  itemId: 'itemId',
+  kind: 'kind',
+  name: 'name',
+  body: 'body',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticChargeMapScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  diagnosticItemId: 'diagnosticItemId',
+  chargeMasterId: 'chargeMasterId',
+  price: 'price',
+  effectiveFrom: 'effectiveFrom',
+  effectiveTo: 'effectiveTo',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
 exports.Prisma.SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -983,9 +1106,13 @@ exports.BookingStatus = exports.$Enums.BookingStatus = {
 };
 
 exports.OtSuiteStatus = exports.$Enums.OtSuiteStatus = {
-  DRAFT: 'DRAFT',
-  READY: 'READY',
-  ARCHIVED: 'ARCHIVED'
+  draft: 'draft',
+  ready: 'ready',
+  active: 'active',
+  booked: 'booked',
+  in_use: 'in_use',
+  maintenance: 'maintenance',
+  archived: 'archived'
 };
 
 exports.OtSpaceType = exports.$Enums.OtSpaceType = {
@@ -1020,16 +1147,48 @@ exports.OtPressureType = exports.$Enums.OtPressureType = {
 };
 
 exports.OtEquipmentCategory = exports.$Enums.OtEquipmentCategory = {
-  ANESTHESIA: 'ANESTHESIA',
-  MONITORING: 'MONITORING',
-  SURGICAL_LIGHT: 'SURGICAL_LIGHT',
-  DIATHERMY: 'DIATHERMY',
-  SUCTION: 'SUCTION',
-  INFUSION: 'INFUSION',
-  INSTRUMENTS: 'INSTRUMENTS',
-  OT_TABLE: 'OT_TABLE',
-  CSSD: 'CSSD',
+  ANESTHESIA_MACHINE: 'ANESTHESIA_MACHINE',
+  AIRWAY_MANAGEMENT: 'AIRWAY_MANAGEMENT',
+  VENTILATION_RESPIRATORY: 'VENTILATION_RESPIRATORY',
+  PATIENT_MONITORING: 'PATIENT_MONITORING',
+  HEMODYNAMIC_MONITORING: 'HEMODYNAMIC_MONITORING',
+  SURGICAL_INSTRUMENTS: 'SURGICAL_INSTRUMENTS',
+  OR_FURNITURE: 'OR_FURNITURE',
+  OR_LIGHTING: 'OR_LIGHTING',
+  ELECTROSURGERY_ENERGY: 'ELECTROSURGERY_ENERGY',
+  ENDOSCOPY_LAPAROSCOPY: 'ENDOSCOPY_LAPAROSCOPY',
+  IMAGING_INTRAOP: 'IMAGING_INTRAOP',
+  STERILIZATION_CSSD: 'STERILIZATION_CSSD',
+  DISINFECTION_CLEANING: 'DISINFECTION_CLEANING',
+  STERILE_STORAGE_PACKAGING: 'STERILE_STORAGE_PACKAGING',
+  MEDICAL_GASES: 'MEDICAL_GASES',
+  SUCTION_SYSTEMS: 'SUCTION_SYSTEMS',
+  POWER_BACKUP: 'POWER_BACKUP',
+  PATIENT_WARMING: 'PATIENT_WARMING',
+  DVT_PROPHYLAXIS: 'DVT_PROPHYLAXIS',
+  SAFETY_EMERGENCY: 'SAFETY_EMERGENCY',
+  RECOVERY_PACU_EQUIPMENT: 'RECOVERY_PACU_EQUIPMENT',
+  IT_AV_EQUIPMENT: 'IT_AV_EQUIPMENT',
+  CONSUMABLES_DISPOSABLES: 'CONSUMABLES_DISPOSABLES',
   OTHER: 'OTHER'
+};
+
+exports.DiagnosticKind = exports.$Enums.DiagnosticKind = {
+  LAB: 'LAB',
+  IMAGING: 'IMAGING',
+  PROCEDURE: 'PROCEDURE'
+};
+
+exports.DiagnosticResultDataType = exports.$Enums.DiagnosticResultDataType = {
+  NUMERIC: 'NUMERIC',
+  TEXT: 'TEXT',
+  BOOLEAN: 'BOOLEAN',
+  CHOICE: 'CHOICE'
+};
+
+exports.DiagnosticTemplateKind = exports.$Enums.DiagnosticTemplateKind = {
+  IMAGING_REPORT: 'IMAGING_REPORT',
+  LAB_REPORT: 'LAB_REPORT'
 };
 
 exports.Prisma.ModelName = {
@@ -1086,7 +1245,16 @@ exports.Prisma.ModelName = {
   OtTheatre: 'OtTheatre',
   OtRecoveryBay: 'OtRecoveryBay',
   OtTable: 'OtTable',
-  OtEquipment: 'OtEquipment'
+  OtEquipment: 'OtEquipment',
+  DiagnosticSection: 'DiagnosticSection',
+  DiagnosticCategory: 'DiagnosticCategory',
+  SpecimenType: 'SpecimenType',
+  DiagnosticItem: 'DiagnosticItem',
+  DiagnosticPanelItem: 'DiagnosticPanelItem',
+  DiagnosticParameter: 'DiagnosticParameter',
+  DiagnosticReferenceRange: 'DiagnosticReferenceRange',
+  DiagnosticTemplate: 'DiagnosticTemplate',
+  DiagnosticChargeMap: 'DiagnosticChargeMap'
 };
 
 /**

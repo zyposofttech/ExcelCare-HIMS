@@ -212,7 +212,7 @@ export function LocationNodePicker({
 
       {showHelp ? (
         <div className="text-xs text-zc-muted">
-          Tag the Unit to a <span className="font-semibold">Zone</span> (recommended) or a Floor. Rooms and resources inherit this via Unit.
+          
         </div>
       ) : null}
     </div>

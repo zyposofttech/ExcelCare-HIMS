@@ -1,10 +1,28 @@
-import { IsArray, IsBoolean, IsEnum, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength, Min, ValidateNested } from "class-validator";
-import { Type } from "class-transformer";
+import { Transform } from "class-transformer";
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from "class-validator";
 
+/**
+ * Canonical OT suite lifecycle statuses (DB/API values).
+ * UI may send uppercase; we normalize to lowercase.
+ */
 export enum OtSuiteStatus {
-  DRAFT = "DRAFT",
-  READY = "READY",
-  ARCHIVED = "ARCHIVED",
+  DRAFT = "draft",
+  READY = "ready",
+  ACTIVE = "active",
+  BOOKED = "booked",
+  IN_USE = "in_use",
+  MAINTENANCE = "maintenance",
+  ARCHIVED = "archived",
 }
 
 export enum OtSpaceType {
@@ -20,18 +38,52 @@ export enum OtSpaceType {
   OTHER = "OTHER",
 }
 
+/**
+ * Must match UI SelectItem values exactly.
+ */
 export enum OtEquipmentCategory {
-  ANESTHESIA = "ANESTHESIA",
-  MONITORING = "MONITORING",
-  SURGICAL_LIGHT = "SURGICAL_LIGHT",
-  DIATHERMY = "DIATHERMY",
-  SUCTION = "SUCTION",
-  INFUSION = "INFUSION",
-  INSTRUMENTS = "INSTRUMENTS",
-  OT_TABLE = "OT_TABLE",
-  CSSD = "CSSD",
+  ANESTHESIA_MACHINE = "ANESTHESIA_MACHINE",
+  AIRWAY_MANAGEMENT = "AIRWAY_MANAGEMENT",
+  VENTILATION_RESPIRATORY = "VENTILATION_RESPIRATORY",
+
+  PATIENT_MONITORING = "PATIENT_MONITORING",
+  HEMODYNAMIC_MONITORING = "HEMODYNAMIC_MONITORING",
+
+  SURGICAL_INSTRUMENTS = "SURGICAL_INSTRUMENTS",
+  OR_FURNITURE = "OR_FURNITURE",
+  OR_LIGHTING = "OR_LIGHTING",
+  ELECTROSURGERY_ENERGY = "ELECTROSURGERY_ENERGY",
+  ENDOSCOPY_LAPAROSCOPY = "ENDOSCOPY_LAPAROSCOPY",
+  IMAGING_INTRAOP = "IMAGING_INTRAOP",
+
+  STERILIZATION_CSSD = "STERILIZATION_CSSD",
+  DISINFECTION_CLEANING = "DISINFECTION_CLEANING",
+  STERILE_STORAGE_PACKAGING = "STERILE_STORAGE_PACKAGING",
+
+  MEDICAL_GASES = "MEDICAL_GASES",
+  SUCTION_SYSTEMS = "SUCTION_SYSTEMS",
+  POWER_BACKUP = "POWER_BACKUP",
+
+  PATIENT_WARMING = "PATIENT_WARMING",
+  DVT_PROPHYLAXIS = "DVT_PROPHYLAXIS",
+  SAFETY_EMERGENCY = "SAFETY_EMERGENCY",
+
+  RECOVERY_PACU_EQUIPMENT = "RECOVERY_PACU_EQUIPMENT",
+  IT_AV_EQUIPMENT = "IT_AV_EQUIPMENT",
+
+  CONSUMABLES_DISPOSABLES = "CONSUMABLES_DISPOSABLES",
   OTHER = "OTHER",
 }
+
+export function normalizeSuiteStatus(value: unknown): unknown {
+  if (value === undefined || value === null) return value;
+
+  const lower = String(value).trim().toLowerCase();
+  if (["in used", "inuse", "in_used", "in-use"].includes(lower)) return "in_use";
+  return lower;
+}
+
+// -------------------- Suites --------------------
 
 export class CreateOtSuiteDto {
   @IsOptional()
@@ -58,14 +110,18 @@ export class CreateOtSuiteDto {
 }
 
 export class UpdateOtSuiteDto {
-  @IsOptional() @IsString() @MaxLength(120)
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
   name?: string;
 
   @IsOptional()
+  @Transform(({ value }) => normalizeSuiteStatus(value))
   @IsEnum(OtSuiteStatus)
   status?: OtSuiteStatus;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   locationNodeId?: string;
 
   @IsOptional()
@@ -76,6 +132,8 @@ export class UpdateOtSuiteDto {
   @IsBoolean()
   isActive?: boolean;
 }
+
+// -------------------- Spaces --------------------
 
 export class CreateOtSpaceDto {
   @IsString()
@@ -110,13 +168,17 @@ export class CreateOtSpaceDto {
 }
 
 export class UpdateOtSpaceDto {
-  @IsOptional() @IsString() @MaxLength(120)
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
   name?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   locationNodeId?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   notes?: string;
 
   @IsOptional()
@@ -127,6 +189,8 @@ export class UpdateOtSpaceDto {
   @IsBoolean()
   isActive?: boolean;
 }
+
+// -------------------- Tables --------------------
 
 export class CreateOtTableDto {
   @IsString()
@@ -139,45 +203,59 @@ export class CreateOtTableDto {
   @MaxLength(120)
   name!: string;
 
-  @IsOptional() @IsBoolean()
+  @IsOptional()
+  @IsBoolean()
   isPrimary?: boolean;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   manufacturer?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   model?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   serialNo?: string;
 
-  @IsOptional() @IsObject()
+  @IsOptional()
+  @IsObject()
   meta?: Record<string, any>;
 }
 
 export class UpdateOtTableDto {
-  @IsOptional() @IsString() @MaxLength(120)
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
   name?: string;
 
-  @IsOptional() @IsBoolean()
+  @IsOptional()
+  @IsBoolean()
   isPrimary?: boolean;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   manufacturer?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   model?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   serialNo?: string;
 
-  @IsOptional() @IsObject()
+  @IsOptional()
+  @IsObject()
   meta?: Record<string, any>;
 
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
 }
+
+// -------------------- Equipment --------------------
 
 export class CreateOtEquipmentDto {
   @IsEnum(OtEquipmentCategory)
@@ -193,19 +271,24 @@ export class CreateOtEquipmentDto {
   @Min(1)
   qty?: number;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   spaceId?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   manufacturer?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   model?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   serialNo?: string;
 
-  @IsOptional() @IsObject()
+  @IsOptional()
+  @IsObject()
   meta?: Record<string, any>;
 }
 
@@ -214,27 +297,37 @@ export class UpdateOtEquipmentDto {
   @IsEnum(OtEquipmentCategory)
   category?: OtEquipmentCategory;
 
-  @IsOptional() @IsString() @MaxLength(180)
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
   name?: string;
 
-  @IsOptional() @IsInt() @Min(1)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
   qty?: number;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   spaceId?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   manufacturer?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   model?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   serialNo?: string;
 
-  @IsOptional() @IsObject()
+  @IsOptional()
+  @IsObject()
   meta?: Record<string, any>;
 
-  @IsOptional() @IsBoolean()
+  @IsOptional()
+  @IsBoolean()
   isActive?: boolean;
 }

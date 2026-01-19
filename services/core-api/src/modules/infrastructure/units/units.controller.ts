@@ -15,10 +15,15 @@ export class UnitsController {
     return req.principal;
   }
 
+  // ✅ Updated: supports either branchId OR unitId (so Unit Details screen can load without branch picker)
   @Get("departments")
   @Permissions(PERM.INFRA_UNIT_READ)
-  async listDepartments(@Req() req: any, @Query("branchId") branchId?: string) {
-    return this.svc.listDepartments(this.principal(req), branchId ?? null);
+  async listDepartments(
+    @Req() req: any,
+    @Query("branchId") branchId?: string,
+    @Query("unitId") unitId?: string,
+  ) {
+    return this.svc.listDepartments(this.principal(req), { branchId: branchId ?? null, unitId: unitId ?? null });
   }
 
   @Get("units")

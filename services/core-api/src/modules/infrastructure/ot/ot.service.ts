@@ -41,6 +41,45 @@ export class OtService {
     return c;
   }
 
+  private normSuiteStatus(v: unknown): string {
+    if (v === undefined || v === null) return "";
+    const lower = String(v).trim().toLowerCase();
+    if (["in used", "inuse", "in_used", "in-use"].includes(lower)) return "in_use";
+    return lower;
+  }
+
+  private assertSuiteStatusTransition(fromRaw: unknown, toRaw: unknown) {
+    const from = this.normSuiteStatus(fromRaw) || "draft";
+    const to = this.normSuiteStatus(toRaw);
+
+    const systemManaged = new Set(["booked", "in_use"]);
+    if (systemManaged.has(to)) {
+      throw new BadRequestException("BOOKED/IN_USE are system-managed by OT scheduling/workflows.");
+    }
+
+    const allowed: Record<string, Set<string>> = {
+      draft: new Set(["draft", "ready", "archived"]),
+      ready: new Set(["ready", "draft", "active", "maintenance", "archived"]),
+      active: new Set(["active", "maintenance", "ready", "archived"]),
+      maintenance: new Set(["maintenance", "active", "ready", "archived"]),
+      booked: new Set(["booked"]), // system-managed
+      in_use: new Set(["in_use"]), // system-managed
+      archived: new Set(["archived"]),
+    };
+
+    if (!allowed[from]?.has(to)) {
+      throw new BadRequestException(`Invalid OT Suite status transition: ${from} → ${to}`);
+    }
+  }
+
+  private async assertReadyForActivation(principal: Principal, suiteId: string) {
+    const r = await this.readiness(principal, suiteId);
+    if (!r.isReady) {
+      const failed = (r.checks || []).filter((c: any) => !c.ok).map((c: any) => c.label);
+      throw new BadRequestException(`Cannot set status to ACTIVE until Go-Live checks pass. Missing: ${failed.join(", ")}`);
+    }
+  }
+
   // --------------------
   // Suites
   // --------------------
@@ -90,6 +129,7 @@ export class OtService {
           branchId,
           code,
           name: dto.name.trim(),
+          status: "draft" as any,
           locationNodeId: dto.locationNodeId ?? null,
           config: dto.config ?? undefined,
         },
@@ -109,14 +149,35 @@ export class OtService {
       if (!ln) throw new BadRequestException("Invalid locationNodeId");
     }
 
+    const nextStatus = dto.status ? this.normSuiteStatus(dto.status) : undefined;
+
+    if (nextStatus) {
+      this.assertSuiteStatusTransition(existing.status, nextStatus);
+      if (nextStatus === "active") {
+        // enforce go-live readiness before activation
+        await this.assertReadyForActivation(principal, id);
+      }
+    }
+
+    const archiving = nextStatus === "archived";
+    const activating = nextStatus === "active";
+
     return this.prisma.otSuite.update({
       where: { id },
       data: {
         name: dto.name?.trim(),
-        status: dto.status as any,
+        status: nextStatus ? (nextStatus as any) : undefined,
         locationNodeId: dto.locationNodeId ?? undefined,
         config: dto.config ?? undefined,
-        isActive: typeof dto.isActive === "boolean" ? dto.isActive : undefined,
+
+        // enforce consistent "enabled" semantics
+        isActive: archiving
+          ? false
+          : activating
+            ? true
+            : typeof dto.isActive === "boolean"
+              ? dto.isActive
+              : undefined,
       },
     });
   }
@@ -129,7 +190,8 @@ export class OtService {
     await this.prisma.$transaction([
       this.prisma.otEquipment.updateMany({ where: { suiteId: id }, data: { isActive: false } }),
       this.prisma.otSpace.updateMany({ where: { suiteId: id }, data: { isActive: false } }),
-      this.prisma.otSuite.update({ where: { id }, data: { isActive: false, status: "ARCHIVED" as any } }),
+      // ✅ lowercase enum value
+      this.prisma.otSuite.update({ where: { id }, data: { isActive: false, status: "archived" as any } }),
     ]);
 
     return { ok: true };
@@ -466,7 +528,7 @@ export class OtService {
     const recoveryOk = requireRecovery ? activeRecovery.length >= minRecoveryBays : true;
 
     const checks = [
-      { key: "SUITE_ACTIVE", label: "OT Suite is active", ok: !!suite.isActive },
+      { key: "SUITE_ENABLED", label: "OT Suite enabled", ok: !!suite.isActive },
       { key: "MIN_THEATRES", label: `Minimum theatres (${minTheatres})`, ok: theatreOk, details: { count: activeTheatres.length } },
       { key: "TABLES_PER_THEATRE", label: `Tables per theatre (${minTablesPerTheatre})`, ok: tablesOk },
       { key: "RECOVERY_BAYS", label: requireRecovery ? `Recovery bays present (${minRecoveryBays})` : "Recovery bays not required", ok: recoveryOk, details: { count: activeRecovery.length } },

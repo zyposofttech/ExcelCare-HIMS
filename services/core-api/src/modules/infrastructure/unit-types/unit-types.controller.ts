@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Put, Req } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Req } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { Permissions } from "../../auth/permissions.decorator";
 import { PERM } from "../../iam/iam.constants";
@@ -18,6 +18,14 @@ export class UnitTypesController {
   @Permissions(PERM.INFRA_UNITTYPE_READ)
   async unitTypeCatalog(@Req() req: any) {
     return this.svc.listUnitTypeCatalog(this.principal(req));
+  }
+
+  // ✅ FIX: add POST endpoint so /api/infrastructure/unit-types/catalog stops returning 404
+  @Post("unit-types/catalog")
+  // Using UPDATE permission to avoid introducing a new permission constant.
+  @Permissions(PERM.INFRA_UNITTYPE_UPDATE)
+  async createUnitTypeCatalog(@Req() req: any, @Body() body: any) {
+    return this.svc.createUnitTypeCatalog(this.principal(req), body);
   }
 
   @Get("branches/:branchId/unit-types")

@@ -114,7 +114,7 @@ type BranchReadiness = {
   generatedAt: string;
 };
 
-// ---------------- Utilities (same visual language as Branch Details) ----------------
+// ---------------- Utilities ----------------
 
 const LS_KEY = "zc.superadmin.infrastructure.branchId";
 
@@ -170,12 +170,12 @@ function countOf(row: BranchRow | null, key: string) {
 
   const c = row._count || {};
 
-  if (key === "departments") return safeNum(c.departments ?? c.department);
-  if (key === "specialties") return safeNum(c.specialties ?? c.specialty);
-  if (key === "users") return safeNum(c.users ?? c.user ?? c.staff ?? c.employees);
-  if (key === "wards") return safeNum(c.wards ?? c.units ?? c.unit ?? c.ward);
-  if (key === "beds") return safeNum(c.beds ?? c.resources ?? c.bed ?? c.resource);
-  if (key === "ots") return safeNum(c.oTs ?? c.ots ?? c.ot ?? c.operationTheatres);
+  if (key === "departments") return safeNum((c as any).departments ?? (c as any).department);
+  if (key === "specialties") return safeNum((c as any).specialties ?? (c as any).specialty);
+  if (key === "users") return safeNum((c as any).users ?? (c as any).user ?? (c as any).staff ?? (c as any).employees);
+  if (key === "wards") return safeNum((c as any).wards ?? (c as any).units ?? (c as any).unit ?? (c as any).ward);
+  if (key === "beds") return safeNum((c as any).beds ?? (c as any).resources ?? (c as any).bed ?? (c as any).resource);
+  if (key === "ots") return safeNum((c as any).oTs ?? (c as any).ots ?? (c as any).ot ?? (c as any).operationTheatres);
 
   return 0;
 }
@@ -299,7 +299,7 @@ function ModuleCard({
       className={cn(
         "group block rounded-2xl border border-zc-border bg-zc-panel/20 p-4 transition-all",
         disabled
-          ? "cursor-not-allowed opacity-60"
+          ? "cursor-not-allowed opacity-55"
           : "hover:-translate-y-0.5 hover:bg-zc-panel/35 hover:shadow-elev-2"
       )}
     >
@@ -345,6 +345,16 @@ function fmtDate(s: string | null | undefined) {
   return d.toLocaleString();
 }
 
+function appendBranch(href: string, branchId: string) {
+  if (!branchId) return href;
+  const sep = href.includes("?") ? "&" : "?";
+  return `${href}${sep}branchId=${encodeURIComponent(branchId)}`;
+}
+
+function clamp100(n: number) {
+  return Math.max(0, Math.min(100, n));
+}
+
 // ---------------- Page ----------------
 
 export default function SuperAdminInfrastructureOverview() {
@@ -358,7 +368,7 @@ export default function SuperAdminInfrastructureOverview() {
   const [ctxErr, setCtxErr] = React.useState<string | null>(null);
 
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
-  const [branchId, setBranchId] = React.useState<string | undefined>(undefined);
+  const [branchId, setBranchId] = React.useState<string>(""); // IMPORTANT: never undefined for Select
 
   const [goLive, setGoLive] = React.useState<GoLivePreview | null>(null);
   const [locTree, setLocTree] = React.useState<LocationTree | null>(null);
@@ -371,14 +381,13 @@ export default function SuperAdminInfrastructureOverview() {
     setBusy(true);
     try {
       const rows = await apiFetch<BranchRow[]>("/api/branches");
-      setBranches(rows || []);
+      const list = rows || [];
+      setBranches(list);
 
       const stored = readLS(LS_KEY);
-      const first = rows?.[0]?.id;
+      const first = list?.[0]?.id;
 
-      const next =
-        (stored && rows?.some((b) => b.id === stored) ? stored : undefined) || first || undefined;
-
+      const next = (stored && list.some((b) => b.id === stored) ? stored : "") || first || "";
       setBranchId(next);
       if (next) writeLS(LS_KEY, next);
 
@@ -402,27 +411,28 @@ export default function SuperAdminInfrastructureOverview() {
     setCtxErr(null);
     setCtxBusy(true);
 
-    // Clear only what’s branch-scoped; keep existing cards until new data arrives.
+    // Keep old signals visible while refreshing to avoid flicker,
+    // but we do clear readiness (more volatile / often missing).
     setFacilityReadiness(null);
 
     try {
       const q = encodeURIComponent(branchIdParam);
 
-      // IMPORTANT: allow partial success so the page stays "live" even if one endpoint isn’t ready yet.
+      // Page remains "live" even if one endpoint isn't ready yet.
       const [glRes, treeRes, rdRes] = await Promise.allSettled([
         apiFetch<GoLivePreview>(`/api/infrastructure/branch/go-live?branchId=${q}`),
         apiFetch<LocationTree>(`/api/infrastructure/locations/tree?branchId=${q}`),
         apiFetch<BranchReadiness>(`/api/branches/${q}/readiness`),
       ]);
 
-      if (seq !== ctxReqSeq.current) return; // ignore stale responses
+      if (seq !== ctxReqSeq.current) return;
 
       const partialErrors: string[] = [];
 
       if (glRes.status === "fulfilled") setGoLive(glRes.value || null);
       else {
         setGoLive(null);
-        partialErrors.push("Go-Live preview not available.");
+        partialErrors.push("Go-Live preview not available (using fallback readiness).");
       }
 
       if (treeRes.status === "fulfilled") setLocTree(treeRes.value || null);
@@ -437,9 +447,7 @@ export default function SuperAdminInfrastructureOverview() {
         partialErrors.push("Branch readiness not available.");
       }
 
-      if (partialErrors.length) {
-        setCtxErr(partialErrors.join(" "));
-      }
+      if (partialErrors.length) setCtxErr(partialErrors.join(" "));
 
       if (showToast) {
         toast({
@@ -500,10 +508,69 @@ export default function SuperAdminInfrastructureOverview() {
     return { campuses: campuses.length, buildings, floors, zones };
   }, [locTree]);
 
-  const snap = goLive?.snapshot ?? null;
+  // -------- Fallback Go-Live (client-side) so the page is always "live" --------
+  const fallbackGoLive = React.useMemo<GoLivePreview | null>(() => {
+    if (!selected) return null;
 
+    const s = facilityReadiness?.summary;
+    const zones = locCounts.zones;
+
+    const blockers: string[] = [];
+    const warnings: string[] = [];
+
+    // Hard blockers (minimum “hospital reality”)
+    if (zones <= 0) blockers.push("Locations not complete: no Zones found (Campus → Building → Floor → Zone).");
+    if (!s || safeNum(s.enabledFacilities) <= 0) blockers.push("No facilities enabled for this branch.");
+    if (!s || safeNum(s.departments) <= 0) blockers.push("No departments configured.");
+    if (!s || safeNum(s.specialties) <= 0) blockers.push("No specialties configured.");
+    if (!s || safeNum(s.doctors) <= 0) warnings.push("No doctors assigned yet (HOD/Doctor mapping pending).");
+    if (!s || safeNum(s.beds) <= 0) blockers.push("No beds configured (Resources/Beds).");
+    if (!s || safeNum(s.otRooms) <= 0) warnings.push("No OT rooms detected yet (OT setup pending).");
+
+    // Score: 0–100 based on the signals we do have
+    let score = 0;
+    score += zones > 0 ? 15 : 0;
+    score += safeNum(s?.enabledFacilities) > 0 ? 10 : 0;
+    score += safeNum(s?.departments) > 0 ? 15 : 0;
+    score += safeNum(s?.specialties) > 0 ? 15 : 0;
+    score += safeNum(s?.doctors) > 0 ? 10 : 0;
+    score += safeNum(s?.beds) > 0 ? 20 : 0;
+    score += safeNum(s?.otRooms) > 0 ? 15 : 0;
+
+    score = clamp100(score);
+
+    const now = new Date().toISOString();
+
+    return {
+      branchId: selected.id,
+      score,
+      blockers,
+      warnings,
+      snapshot: {
+        // These are “best-effort” when backend Go-Live isn’t available.
+        enabledUnitTypes: 0,
+        units: 0,
+        rooms: 0,
+        resources: 0,
+        beds: safeNum(s?.beds),
+        schedulableOts: 0,
+        equipmentCount: 0,
+        fixItsOpen: 0,
+        generatedAt: now,
+      },
+      reportId: undefined,
+    };
+  }, [selected, facilityReadiness, locCounts.zones]);
+
+  // Effective Go-Live: prefer backend signal; fallback ensures page stays live.
+  const effectiveGoLive = goLive ?? fallbackGoLive;
+
+  const snap = effectiveGoLive?.snapshot ?? null;
+
+  // Module flags: use real snapshot if available; fallback uses what we can infer.
   const moduleFlags = React.useMemo(() => {
     const zones = locCounts.zones;
+
     const enabledUnitTypes = safeNum(snap?.enabledUnitTypes);
     const units = safeNum(snap?.units);
     const rooms = safeNum(snap?.rooms);
@@ -515,12 +582,12 @@ export default function SuperAdminInfrastructureOverview() {
 
     return {
       locations: zones > 0 ? readinessFlag("ready") : readinessFlag("pending"),
-      unitTypes: enabledUnitTypes > 0 ? readinessFlag("ready") : readinessFlag("block"),
-      units: units > 0 ? readinessFlag("ready") : readinessFlag("block"),
-      rooms: rooms > 0 ? readinessFlag("ready") : readinessFlag("warn"),
-      resources: resources > 0 ? readinessFlag("ready") : readinessFlag("block"),
-      ot: schedulableOts > 0 ? readinessFlag("ready") : readinessFlag("block"),
-      equipment: equipmentCount > 0 ? readinessFlag("ready") : readinessFlag("warn"),
+      unitTypes: enabledUnitTypes > 0 ? readinessFlag("ready") : readinessFlag("pending"),
+      units: units > 0 ? readinessFlag("ready") : readinessFlag("pending"),
+      rooms: rooms > 0 ? readinessFlag("ready") : readinessFlag("pending"),
+      resources: resources > 0 ? readinessFlag("ready") : readinessFlag("pending"),
+      ot: schedulableOts > 0 ? readinessFlag("ready") : readinessFlag("pending"),
+      equipment: equipmentCount > 0 ? readinessFlag("ready") : readinessFlag("pending"),
       mapping: fixItsOpen === 0 ? readinessFlag("ready") : readinessFlag("warn", `${fixItsOpen} open`),
 
       enabledUnitTypes,
@@ -534,12 +601,19 @@ export default function SuperAdminInfrastructureOverview() {
     };
   }, [locCounts.zones, snap]);
 
-  const score = goLive?.score ?? 0;
-  const blockers = goLive?.blockers ?? [];
-  const warnings = goLive?.warnings ?? [];
+  const score = effectiveGoLive?.score ?? 0;
+  const blockers = effectiveGoLive?.blockers ?? [];
+  const warnings = effectiveGoLive?.warnings ?? [];
   const generatedAt = snap?.generatedAt ?? null;
 
   const branchHref = selected ? `/superadmin/branches/${encodeURIComponent(selected.id)}` : "/superadmin/branches";
+
+  const mustSelectBranch = !branchId || !selected;
+
+  const moduleHref = React.useCallback(
+    (href: string) => (branchId ? appendBranch(href, branchId) : href),
+    [branchId]
+  );
 
   return (
     <AppShell title="Infrastructure Setup">
@@ -564,8 +638,8 @@ export default function SuperAdminInfrastructureOverview() {
                 <div className="mt-1 text-3xl font-semibold tracking-tight">Infrastructure Setup</div>
 
                 <div className="mt-2 max-w-3xl text-sm leading-6 text-zc-muted">
-                  This page is now live: it reads the latest branch infra state from backend (Go-Live preview + Location tree) and reflects
-                  readiness, blockers, and module-level progress automatically.
+                  Fully live dashboard: branch-scoped infra signals load automatically. If backend Go-Live is not available yet,
+                  a fallback readiness score is computed from Locations + Branch Readiness so the UI remains operational.
                 </div>
 
                 {fmtDate(generatedAt) ? (
@@ -590,6 +664,13 @@ export default function SuperAdminInfrastructureOverview() {
                 <div className="min-w-0">{ctxErr}</div>
               </div>
             ) : null}
+
+            {mustSelectBranch ? (
+              <div className="mt-3 flex items-start gap-2 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2 text-sm text-zc-muted">
+                <Sparkles className="mt-0.5 h-4 w-4 text-zc-accent" />
+                <div className="min-w-0">Select a branch to activate all modules and load branch-scoped infra signals.</div>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -608,12 +689,19 @@ export default function SuperAdminInfrastructureOverview() {
               Refresh Infra Signals
             </Button>
 
-            <Button asChild className="gap-2">
-              <Link href={branchHref}>
+            {selected ? (
+              <Button asChild className="gap-2">
+                <Link href={branchHref}>
+                  <Sparkles className="h-4 w-4" />
+                  Open Branch
+                </Link>
+              </Button>
+            ) : (
+              <Button className="gap-2" disabled>
                 <Sparkles className="h-4 w-4" />
                 Open Branch
-              </Link>
-            </Button>
+              </Button>
+            )}
           </div>
         </div>
 
@@ -660,7 +748,7 @@ export default function SuperAdminInfrastructureOverview() {
                     </Select>
 
                     <div className="text-xs text-zc-muted">
-                      Infra readiness and module counts below are fetched live from backend for the selected branch.
+                      All module links are now branch-aware. They will open with <span className="font-mono">?branchId=...</span>.
                     </div>
                   </div>
 
@@ -671,17 +759,19 @@ export default function SuperAdminInfrastructureOverview() {
                           <div className="text-sm font-semibold text-zc-text">
                             {selected.name} <span className="font-mono text-xs text-zc-muted">({selected.code})</span>
                           </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-zc-muted">
-                            <span className="inline-flex items-center gap-1">
-                              <MapPin className="h-4 w-4" /> {selected.city}
-                            </span>
-                            {selected.address ? (
-                              <>
-                                <span className="text-zc-muted/60">•</span>
-                                <span className="truncate">{selected.address}</span>
-                              </>
-                            ) : null}
-                          </div>
+                          <div className="mt-2 grid gap-1 text-sm text-zc-muted">
+  <div className="flex items-center gap-2">
+    <MapPin className="h-4 w-4 shrink-0" />
+    <span className="whitespace-normal break-words">{selected.city}</span>
+  </div>
+
+  {selected.address ? (
+    <div className="pl-6 whitespace-normal break-words leading-5">
+      {selected.address}
+    </div>
+  ) : null}
+</div>
+
 
                           <div className="mt-3 flex flex-wrap gap-2">
                             <MetricPill
@@ -722,14 +812,14 @@ export default function SuperAdminInfrastructureOverview() {
                 Go-Live Preview (Live)
               </CardTitle>
               <CardDescription>
-                This panel is now backend-driven. Score, blockers and warnings are computed by the Go-Live Validator service.
+                Uses backend validator if available; otherwise computes fallback readiness so you always see a live score.
               </CardDescription>
             </CardHeader>
             <Separator />
             <CardContent className="pt-6">
               {!selected ? (
                 <div className="text-sm text-zc-muted">Select a branch to view readiness.</div>
-              ) : ctxBusy && !goLive ? (
+              ) : ctxBusy && !effectiveGoLive ? (
                 <div className="grid gap-3">
                   <Skeleton className="h-7 w-32" />
                   <Skeleton className="h-2 w-full" />
@@ -740,11 +830,11 @@ export default function SuperAdminInfrastructureOverview() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Score</div>
-                      <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{goLive ? `${score}%` : "—"}</div>
+                      <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{effectiveGoLive ? `${score}%` : "—"}</div>
                       <div className="mt-2 text-sm text-zc-muted">
-                        This score is computed from enabled unit types, units, beds, schedulable OT tables, equipment registry, and open Fix-It tasks.
+                        This score reflects minimum infra completeness. If backend Go-Live is unavailable, it is computed from Locations + Branch readiness.
                       </div>
-                      <ProgressBar value={goLive ? score : 0} />
+                      <ProgressBar value={effectiveGoLive ? score : 0} />
                     </div>
 
                     <div className="grid h-10 w-10 place-items-center rounded-2xl border border-zc-border bg-zc-panel/25">
@@ -765,24 +855,16 @@ export default function SuperAdminInfrastructureOverview() {
                         {locCounts.zones > 0 ? readinessFlag("ready") : readinessFlag("pending")}
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-zc-muted">Unit Types Enabled</span>
-                        {moduleFlags.enabledUnitTypes > 0 ? readinessFlag("ready") : readinessFlag("block")}
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-zc-muted">Units</span>
-                        {moduleFlags.units > 0 ? readinessFlag("ready") : readinessFlag("block")}
-                      </div>
-                      <div className="flex items-center justify-between">
                         <span className="text-zc-muted">Beds</span>
-                        {moduleFlags.beds > 0 ? readinessFlag("ready") : readinessFlag("block")}
+                        {moduleFlags.beds > 0 ? readinessFlag("ready") : readinessFlag("pending")}
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-zc-muted">Schedulable OT Tables</span>
-                        {moduleFlags.schedulableOts > 0 ? readinessFlag("ready") : readinessFlag("block")}
+                        <span className="text-zc-muted">OT Scheduling Readiness</span>
+                        {moduleFlags.schedulableOts > 0 ? readinessFlag("ready") : readinessFlag("pending")}
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-zc-muted">Equipment Register</span>
-                        {moduleFlags.equipmentCount > 0 ? readinessFlag("ready") : readinessFlag("warn")}
+                        {moduleFlags.equipmentCount > 0 ? readinessFlag("ready") : readinessFlag("pending")}
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-zc-muted">Fix-It Queue</span>
@@ -824,7 +906,7 @@ export default function SuperAdminInfrastructureOverview() {
           </Card>
         </div>
 
-        {/* KPI strip (Infra-focused + location counts) */}
+        {/* KPI strip */}
         <div className="grid gap-4 md:grid-cols-6">
           <InfoTile
             label="Campuses"
@@ -868,18 +950,18 @@ export default function SuperAdminInfrastructureOverview() {
         <Card className="overflow-hidden">
           <CardHeader className="pb-0">
             <CardTitle>Infrastructure Modules</CardTitle>
-            <CardDescription>
-              Status and counts are live. Pages that are not implemented yet remain disabled, but still reflect backend progress.
-            </CardDescription>
+            <CardDescription>All modules are now clickable once a branch is selected. Links carry branchId automatically.</CardDescription>
           </CardHeader>
+
           <CardContent className="p-6">
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               <ModuleCard
                 title="Locations"
-                description="Campus → Building → Floor → Zone (effective-dated, strict codes)"
+                description="Campus → Building → Floor → Zone (effective-dated)"
                 icon={<MapPin className="h-4 w-4 text-zc-accent" />}
-                href="/superadmin/infrastructure/locations"
+                href={moduleHref("/superadmin/infrastructure/locations")}
                 tone="indigo"
+                disabled={mustSelectBranch}
                 metricLabel="Zones"
                 metricValue={selected ? locCounts.zones : 0}
                 rightTag={
@@ -892,171 +974,171 @@ export default function SuperAdminInfrastructureOverview() {
 
               <ModuleCard
                 title="Unit Types (Enablement)"
-                description="Day-1 unit types catalog. Branch enable/disable"
+                description="Unit types catalog + branch enable/disable"
                 icon={<Layers className="h-4 w-4 text-zc-accent" />}
-                href="/superadmin/infrastructure/unit-types"
+                href={moduleHref("/superadmin/infrastructure/unit-types")}
                 tone="violet"
-                disabled
+                disabled={mustSelectBranch}
                 metricLabel="Enabled"
                 metricValue={selected ? moduleFlags.enabledUnitTypes : 0}
                 rightTag={
                   <>
                     {moduleFlags.unitTypes}
-                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.amber)}>UI Soon</span>
+                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.emerald)}>Live</span>
                   </>
                 }
               />
 
               <ModuleCard
                 title="Units / Wards"
-                description="Care units: Ward/ICU/OT/Diagnostics with naming validation"
+                description="Care units: Ward/ICU/OT/Diagnostics"
                 icon={<Building2 className="h-4 w-4 text-zc-accent" />}
-                href="/superadmin/infrastructure/units"
+                href={moduleHref("/superadmin/infrastructure/units")}
                 tone="sky"
-                disabled
+                disabled={mustSelectBranch}
                 metricLabel="Units"
                 metricValue={selected ? moduleFlags.units : 0}
                 rightTag={
                   <>
                     {moduleFlags.units}
-                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.amber)}>UI Soon</span>
+                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.emerald)}>Live</span>
                   </>
                 }
               />
 
               <ModuleCard
                 title="Rooms / Bays"
-                description="Rooms (beds in room) + option for Open Bays"
+                description="Rooms and open bays"
                 icon={<Layers className="h-4 w-4 text-zc-accent" />}
-                href="/superadmin/infrastructure/rooms"
+                href={moduleHref("/superadmin/infrastructure/rooms")}
                 tone="emerald"
-                disabled
+                disabled={mustSelectBranch}
                 metricLabel="Rooms"
                 metricValue={selected ? moduleFlags.rooms : 0}
                 rightTag={
                   <>
                     {moduleFlags.rooms}
-                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.amber)}>UI Soon</span>
+                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.emerald)}>Live</span>
                   </>
                 }
               />
 
               <ModuleCard
                 title="Resources (Beds/OT Tables/etc.)"
-                description="Bed states + housekeeping gate; support bays & rooms"
+                description="Beds + other resources registry"
                 icon={<Hammer className="h-4 w-4 text-zc-accent" />}
-                href="/superadmin/infrastructure/resources"
+                href={moduleHref("/superadmin/infrastructure/resources")}
                 tone="emerald"
-                disabled
+                disabled={mustSelectBranch}
                 metricLabel="Resources"
                 metricValue={selected ? moduleFlags.resources : 0}
                 rightTag={
                   <>
                     {moduleFlags.resources}
-                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.amber)}>UI Soon</span>
+                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.emerald)}>Live</span>
                   </>
                 }
               />
 
               <ModuleCard
                 title="OT Scheduling Readiness"
-                description="Conflict detection + pre-check blockers (consent/anesthesia/checklists)"
+                description="Scheduling gates + readiness checks"
                 icon={<CalendarClock className="h-4 w-4 text-zc-accent" />}
-                href="/superadmin/infrastructure/ot"
+                href={moduleHref("/superadmin/infrastructure/ot")}
                 tone="indigo"
-                disabled
+                disabled={mustSelectBranch}
                 metricLabel="Schedulable"
                 metricValue={selected ? moduleFlags.schedulableOts : 0}
                 rightTag={
                   <>
                     {moduleFlags.ot}
-                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.amber)}>UI Soon</span>
+                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.emerald)}>Live</span>
                   </>
                 }
               />
 
               <ModuleCard
                 title="Diagnostics Configuration"
-                description="Orderables, modalities, worklists, validation policy"
+                description="Orderables, modalities, worklists"
                 icon={<Database className="h-4 w-4 text-zc-accent" />}
-                href="/superadmin/infrastructure/diagnostics"
+                href={moduleHref("/superadmin/infrastructure/diagnostics")}
                 tone="sky"
-                disabled
+                disabled={mustSelectBranch}
                 metricLabel="Planned"
                 metricValue={1}
-                rightTag={<span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.amber)}>Soon</span>}
+                rightTag={<span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.sky)}>Open</span>}
               />
 
               <ModuleCard
                 title="Equipment Register"
-                description="Make/model/serial, AMC/PM schedules, downtime tickets; AERB/PCPNDT gates"
+                description="Assets + AMC/PM schedules"
                 icon={<ShieldCheck className="h-4 w-4 text-zc-accent" />}
-                href="/superadmin/infrastructure/equipment"
+                href={moduleHref("/superadmin/infrastructure/equipment")}
                 tone="violet"
-                disabled
+                disabled={mustSelectBranch}
                 metricLabel="Assets"
                 metricValue={selected ? moduleFlags.equipmentCount : 0}
                 rightTag={
                   <>
                     {moduleFlags.equipment}
-                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.amber)}>UI Soon</span>
+                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.emerald)}>Live</span>
                   </>
                 }
               />
 
               <ModuleCard
                 title="Service Items + Charge Mapping"
-                description="Orderable ServiceItem → versioned Charge Master code; Fix-It queue for unmapped"
+                description="ServiceItem → Charge Master mapping"
                 icon={<ClipboardList className="h-4 w-4 text-zc-accent" />}
-                href="/superadmin/infrastructure/service-items"
+                href={moduleHref("/superadmin/infrastructure/service-items")}
                 tone="indigo"
-                disabled
+                disabled={mustSelectBranch}
                 metricLabel="Fix-Its"
                 metricValue={selected ? moduleFlags.fixItsOpen : 0}
                 rightTag={
                   <>
                     {moduleFlags.mapping}
-                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.amber)}>UI Soon</span>
+                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.emerald)}>Live</span>
                   </>
                 }
               />
 
               <ModuleCard
                 title="Bulk Import (CSV/XLS)"
-                description="Templates: Units / Rooms / Resources / Assets / Service Items"
+                description="Templates: Units / Rooms / Resources / Assets"
                 icon={<Database className="h-4 w-4 text-zc-accent" />}
-                href="/superadmin/infrastructure/import"
+                href={moduleHref("/superadmin/infrastructure/import")}
                 tone="zinc"
-                disabled
+                disabled={mustSelectBranch}
                 metricLabel="Planned"
                 metricValue={1}
-                rightTag={<span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.amber)}>Soon</span>}
+                rightTag={<span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.zinc)}>Open</span>}
               />
 
               <ModuleCard
                 title="Go-Live Validator"
-                description="Readiness score + blockers/warnings + recommended fixes + immutable snapshot report"
+                description="Readiness score + blockers/warnings + snapshot report"
                 icon={<Sparkles className="h-4 w-4 text-zc-accent" />}
-                href="/superadmin/infrastructure/go-live"
+                href={moduleHref("/superadmin/infrastructure/go-live")}
                 tone="emerald"
-                disabled
+                disabled={mustSelectBranch}
                 metricLabel="Score"
                 metricValue={selected ? score : 0}
                 rightTag={
                   <>
                     {blockers.length === 0 ? readinessFlag("ready") : readinessFlag("block", `${blockers.length}`)}
-                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.amber)}>UI Soon</span>
+                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", pillTones.emerald)}>Live</span>
                   </>
                 }
               />
             </div>
 
             <div className="mt-6 rounded-2xl border border-zc-border bg-zc-panel/15 p-4 text-sm text-zc-muted">
-              <div className="font-semibold text-zc-text">What changed (so it is “live” now)</div>
+              <div className="font-semibold text-zc-text">What makes this “live” now</div>
               <ul className="mt-2 list-disc pl-5 text-sm">
-                <li>Branch context uses allSettled: partial backend availability no longer breaks the whole page.</li>
-                <li>Removed duplicate state updates causing inconsistent UI refresh.</li>
-                <li>Core counts/flags now render whenever the relevant endpoint is available.</li>
+                <li>All module cards are enabled after branch selection and carry the selected branchId automatically.</li>
+                <li>Go-Live score never disappears: backend signal preferred, fallback score computed if validator isn’t ready.</li>
+                <li>Partial backend failures don’t break the page (allSettled + graceful UI state).</li>
               </ul>
             </div>
           </CardContent>

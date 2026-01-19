@@ -1,19 +1,24 @@
-import { IsBoolean, IsOptional, IsString, MaxLength, Matches } from "class-validator";
 import { Transform } from "class-transformer";
-import { RX_ROOM_CODE } from "../../../../common/naming.util";
+import { IsBoolean, IsNotEmpty, IsOptional, IsString, Length, Matches } from "class-validator";
 
 export class CreateUnitRoomDto {
   @IsString()
+  @IsNotEmpty()
   unitId!: string;
 
-  @IsString()
   @Transform(({ value }) => String(value ?? "").trim().toUpperCase())
-  @MaxLength(32)
-  @Matches(RX_ROOM_CODE)
+  @IsString()
+  @IsNotEmpty()
+  @Length(2, 32, { message: "Room code must be between 2 and 32 characters." })
+  @Matches(/^[A-Z0-9][A-Z0-9_-]*$/, {
+    message: "Room code can contain only A–Z, 0–9, underscore (_) and hyphen (-), and must start with A–Z/0–9.",
+  })
   code!: string;
 
+  @Transform(({ value }) => String(value ?? "").trim())
   @IsString()
-  @MaxLength(160)
+  @IsNotEmpty()
+  @Length(2, 120, { message: "Room name must be between 2 and 120 characters." })
   name!: string;
 
   @IsOptional()

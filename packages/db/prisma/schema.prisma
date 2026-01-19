@@ -1287,9 +1287,13 @@ model GoLiveReport {
 // =========================
 
 enum OtSuiteStatus {
-  DRAFT
-  READY
-  ARCHIVED
+  draft
+  ready
+  active
+  booked
+  in_use
+  maintenance
+  archived
 }
 
 enum OtSpaceType {
@@ -1324,15 +1328,29 @@ enum OtPressureType {
 }
 
 enum OtEquipmentCategory {
-  ANESTHESIA
-  MONITORING
-  SURGICAL_LIGHT
-  DIATHERMY
-  SUCTION
-  INFUSION
-  INSTRUMENTS
-  OT_TABLE
-  CSSD
+  ANESTHESIA_MACHINE
+  AIRWAY_MANAGEMENT
+  VENTILATION_RESPIRATORY
+  PATIENT_MONITORING
+  HEMODYNAMIC_MONITORING
+  SURGICAL_INSTRUMENTS
+  OR_FURNITURE
+  OR_LIGHTING
+  ELECTROSURGERY_ENERGY
+  ENDOSCOPY_LAPAROSCOPY
+  IMAGING_INTRAOP
+  STERILIZATION_CSSD
+  DISINFECTION_CLEANING
+  STERILE_STORAGE_PACKAGING
+  MEDICAL_GASES
+  SUCTION_SYSTEMS
+  POWER_BACKUP
+  PATIENT_WARMING
+  DVT_PROPHYLAXIS
+  SAFETY_EMERGENCY
+  RECOVERY_PACU_EQUIPMENT
+  IT_AV_EQUIPMENT
+  CONSUMABLES_DISPOSABLES
   OTHER
 }
 
@@ -1347,7 +1365,7 @@ model OtSuite {
 
   code   String
   name   String
-  status OtSuiteStatus @default(DRAFT)
+  status OtSuiteStatus @default(draft)
 
   // Suite-level config (turnaround time, cleaning time, min recovery bays, etc.)
   config Json?
@@ -1468,7 +1486,7 @@ model OtEquipment {
   spaceId String?
   space   OtSpace? @relation(fields: [spaceId], references: [id], onDelete: SetNull)
 
-  category OtEquipmentCategory
+  category OtEquipmentCategory @default(OTHER)
   name     String
   qty      Int                 @default(1)
 
@@ -1488,4 +1506,234 @@ model OtEquipment {
 
   @@index([suiteId, category])
   @@index([spaceId])
+}
+
+// ================================
+// Diagnostics Configuration (Lab + Imaging)
+// Merge into your main schema.prisma
+// ================================
+
+enum DiagnosticKind {
+  LAB
+  IMAGING
+  PROCEDURE
+}
+
+enum DiagnosticResultDataType {
+  NUMERIC
+  TEXT
+  BOOLEAN
+  CHOICE
+}
+
+enum DiagnosticTemplateKind {
+  IMAGING_REPORT
+  LAB_REPORT
+}
+
+model DiagnosticSection {
+  id        String   @id @default(cuid())
+  branchId  String
+  code      String
+  name      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categories DiagnosticCategory[]
+  items      DiagnosticItem[]
+
+  @@unique([branchId, code])
+  @@index([branchId, isActive])
+}
+
+model DiagnosticCategory {
+  id        String   @id @default(cuid())
+  branchId  String
+  sectionId String
+  code      String
+  name      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  section DiagnosticSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  items   DiagnosticItem[]
+
+  @@unique([branchId, code])
+  @@index([branchId, sectionId, isActive])
+}
+
+model SpecimenType {
+  id            String   @id @default(cuid())
+  branchId      String
+  code          String
+  name          String
+  container     String?
+  minVolumeMl   Float?
+  handlingNotes String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items DiagnosticItem[]
+
+  @@unique([branchId, code])
+  @@index([branchId, isActive])
+}
+
+model DiagnosticItem {
+  id       String         @id @default(cuid())
+  branchId String
+  code     String
+  name     String
+  kind     DiagnosticKind
+
+  // taxonomy
+  sectionId  String
+  categoryId String?
+
+  // lab
+  specimenId     String?
+  tatMinsRoutine Int?
+  tatMinsStat    Int?
+
+  // imaging/procedure
+  requiresAppointment Boolean @default(false)
+  preparationText     String?
+  consentRequired     Boolean @default(false)
+
+  // panels
+  isPanel Boolean @default(false)
+
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  section  DiagnosticSection   @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  category DiagnosticCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  specimen SpecimenType?       @relation(fields: [specimenId], references: [id], onDelete: SetNull)
+
+  // panel composition
+  panelChildren DiagnosticPanelItem[] @relation("PanelParent")
+  panelParents  DiagnosticPanelItem[] @relation("PanelChild")
+
+  // lab results
+  parameters DiagnosticParameter[]
+
+  // templates
+  templates DiagnosticTemplate[]
+
+  // billing
+  chargeMaps DiagnosticChargeMap[]
+
+  @@unique([branchId, code])
+  @@index([branchId, kind, isActive])
+  @@index([branchId, sectionId, categoryId])
+}
+
+model DiagnosticPanelItem {
+  id        String   @id @default(cuid())
+  panelId   String
+  itemId    String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  panel DiagnosticItem @relation("PanelParent", fields: [panelId], references: [id], onDelete: Cascade)
+  item  DiagnosticItem @relation("PanelChild", fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([panelId, itemId])
+  @@index([panelId, isActive])
+}
+
+model DiagnosticParameter {
+  id          String                   @id @default(cuid())
+  testId      String
+  code        String
+  name        String
+  dataType    DiagnosticResultDataType
+  unit        String?
+  precision   Int? // decimals
+  allowedText String? // for CHOICE: comma separated values (simple MVP)
+
+  // critical thresholds (for NUMERIC)
+  criticalLow  Float?
+  criticalHigh Float?
+
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  test   DiagnosticItem             @relation(fields: [testId], references: [id], onDelete: Cascade)
+  ranges DiagnosticReferenceRange[]
+
+  @@unique([testId, code])
+  @@index([testId, isActive])
+}
+
+model DiagnosticReferenceRange {
+  id          String @id @default(cuid())
+  parameterId String
+
+  // demographics
+  sex        String? // M/F/O or null
+  ageMinDays Int?
+  ageMaxDays Int?
+
+  // range
+  low       Float?
+  high      Float?
+  textRange String?
+
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parameter DiagnosticParameter @relation(fields: [parameterId], references: [id], onDelete: Cascade)
+
+  @@index([parameterId, isActive])
+}
+
+model DiagnosticTemplate {
+  id        String                 @id @default(cuid())
+  itemId    String
+  kind      DiagnosticTemplateKind @default(IMAGING_REPORT)
+  name      String
+  body      String
+  isActive  Boolean                @default(true)
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+
+  item DiagnosticItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, kind, isActive])
+}
+
+model DiagnosticChargeMap {
+  id               String @id @default(cuid())
+  branchId         String
+  diagnosticItemId String
+
+  // Billing mapping (adapt relation name to your charge master model)
+  chargeMasterId String
+  price          Float?
+
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  diagnosticItem DiagnosticItem @relation(fields: [diagnosticItemId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, diagnosticItemId, chargeMasterId])
+  @@index([branchId, isActive])
+  @@index([diagnosticItemId, isActive])
 }
