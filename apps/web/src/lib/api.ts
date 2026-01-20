@@ -1,5 +1,24 @@
 import { zcLoading } from "@/lib/loading-events";
 
+export class ApiError<TData = any> extends Error {
+  status: number;
+  data?: TData;
+  url?: string;
+  method?: string;
+
+  constructor(
+    message: string,
+    opts: { status: number; data?: TData; url?: string; method?: string } = { status: 0 },
+  ) {
+    super(message);
+    this.name = "ApiError";
+    this.status = opts.status;
+    this.data = opts.data;
+    this.url = opts.url;
+    this.method = opts.method;
+  }
+}
+
 function getCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
   const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
@@ -25,16 +44,12 @@ async function getLoadingStore() {
 }
 
 type ApiFetchOptions = RequestInit & {
-  showLoader?: boolean;      // default true
-  loaderMessage?: string;    // overrides default label
+  showLoader?: boolean; // default true
+  loaderMessage?: string; // overrides default label
 };
 
 export async function apiFetch<T>(url: string, init: ApiFetchOptions = {}): Promise<T> {
-  const {
-    showLoader = true,
-    loaderMessage,
-    ...fetchInit
-  } = init;
+  const { showLoader = true, loaderMessage, ...fetchInit } = init;
 
   const method = (fetchInit.method ?? "GET").toUpperCase();
   const headers = new Headers(fetchInit.headers || {});
@@ -47,9 +62,7 @@ export async function apiFetch<T>(url: string, init: ApiFetchOptions = {}): Prom
   }
 
   const isRead = ["GET", "HEAD", "OPTIONS"].includes(method);
-  const label =
-    loaderMessage ??
-    (isRead ? "Loading…" : "Saving changes…");
+  const label = loaderMessage ?? (isRead ? "Loading…" : "Saving changes…");
 
   // Start loader(s)
   const loadingId = zcLoading.start({
@@ -76,23 +89,33 @@ export async function apiFetch<T>(url: string, init: ApiFetchOptions = {}): Prom
       ...fetchInit,
       method,
       headers,
-      credentials: "include", // IMPORTANT: preserve cookie flows + consistent auth behavior
+      credentials: "include",
     });
 
     const ct = res.headers.get("content-type") || "";
     const data: any = ct.includes("application/json") ? await res.json() : await res.text();
 
     if (!res.ok) {
-      // Standardized error message for UI toasts
       const msg =
         data?.message ||
         data?.error ||
         (typeof data === "string" && data) ||
         `Request failed (${res.status})`;
-      throw new Error(msg);
+
+      throw new ApiError(msg, {
+        status: res.status,
+        data,
+        url,
+        method,
+      });
     }
 
     return data as T;
+  } catch (e: any) {
+    // Normalize network/unexpected failures into ApiError
+    if (e instanceof ApiError) throw e;
+    const msg = e?.message ? String(e.message) : "Network error";
+    throw new ApiError(msg, { status: 0, data: undefined, url, method });
   } finally {
     zcLoading.end(loadingId);
     if (showLoader && store?.stopLoading) store.stopLoading();
