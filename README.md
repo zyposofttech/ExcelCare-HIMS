@@ -79,7 +79,7 @@ Ensure you have the following installed:
 * **Docker Desktop**
 * **Python** (3.10+)
 
-### 2. Environment Setup
+### 2. Environment Setup:
 Copy the example environment file:
 ```bash
 
