@@ -18,6 +18,9 @@
     "db:generate": "pnpm -C packages/db exec prisma generate",
     "db:studio": "pnpm -C packages/db exec prisma studio"
   },
+  "prisma": {
+    "schema": "packages/db/prisma/schema.prisma"
+  },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "turbo": "^2.7.5"
