@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import Link from "next/link";
+import { AppLink as Link } from "@/components/app-link";
 
 import { AlertTriangle, CheckCircle2, RefreshCw, XCircle } from "lucide-react";
 

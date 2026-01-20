@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { AppLink as Link } from "@/components/app-link";
 import {
   AlertTriangle,
   Loader2,
@@ -61,13 +61,13 @@ type LocationOption = {
 };
 
 type OtSuiteStatus =
-  | "draft"
-  | "ready"
-  | "active"
-  | "booked"
-  | "in_use"
-  | "maintenance"
-  | "archived";
+  | "DRAFT"
+  | "READY"
+  | "ACTIVE"
+  | "BOOKED"
+  | "IN_USE"
+  | "MAINTENANCE"
+  | "ARCHIVED";
 
 type OtSuite = {
   id: string;
@@ -249,12 +249,13 @@ function flattenLocationTree(nodes: LocationTreeNode[], depth = 0, out: Location
     // Support both:
     // - generic: children/nodes
     // - infra tree: buildings/floors/zones
-    const kids: any[] = []
-      .concat((n.children ?? []) as any[])
-      .concat((n.nodes ?? []) as any[])
-      .concat(((n as any).buildings ?? []) as any[])
-      .concat(((n as any).floors ?? []) as any[])
-      .concat(((n as any).zones ?? []) as any[]);
+    const kids: any[] = [
+  ...(n.children ?? []),
+  ...(n.nodes ?? []),
+  ...(((n as any).buildings ?? []) as any[]),
+  ...(((n as any).floors ?? []) as any[]),
+  ...(((n as any).zones ?? []) as any[]),
+];
 
     if (kids.length) flattenLocationTree(kids, depth + 1, out);
   }
@@ -990,7 +991,7 @@ export default function SuperAdminOtSetupPage() {
     branchId: "",
     code: "",
     name: "",
-    status: "draft" as OtSuiteStatus,
+    status: "DRAFT" as OtSuiteStatus,
     locationNodeId: "",
     isActive: true,
 

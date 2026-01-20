@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import Link from "next/link";
+import { AppLink as Link } from "@/components/app-link";
 
 import { AlertTriangle, RefreshCw, Search } from "lucide-react";
 

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { AppLink as Link } from "@/components/app-link";
 import { useSearchParams } from "next/navigation";
 
 import { AppShell } from "@/components/AppShell";

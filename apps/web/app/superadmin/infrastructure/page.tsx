@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { AppLink as Link } from "@/components/app-link";
 
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -583,9 +583,9 @@ export default function SuperAdminInfrastructureOverview() {
     return {
       locations: zones > 0 ? readinessFlag("ready") : readinessFlag("pending"),
       unitTypes: enabledUnitTypes > 0 ? readinessFlag("ready") : readinessFlag("pending"),
-      units: units > 0 ? readinessFlag("ready") : readinessFlag("pending"),
-      rooms: rooms > 0 ? readinessFlag("ready") : readinessFlag("pending"),
-      resources: resources > 0 ? readinessFlag("ready") : readinessFlag("pending"),
+      unitsFlag: units > 0 ? readinessFlag("ready") : readinessFlag("pending"),
+      roomsFlag: rooms > 0 ? readinessFlag("ready") : readinessFlag("pending"),
+      resourcesFlag: resources > 0 ? readinessFlag("ready") : readinessFlag("pending"),
       ot: schedulableOts > 0 ? readinessFlag("ready") : readinessFlag("pending"),
       equipment: equipmentCount > 0 ? readinessFlag("ready") : readinessFlag("pending"),
       mapping: fixItsOpen === 0 ? readinessFlag("ready") : readinessFlag("warn", `${fixItsOpen} open`),

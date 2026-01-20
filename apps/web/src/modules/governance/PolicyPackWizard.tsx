@@ -208,10 +208,10 @@ function EditorForTemplate({
   value: any;
   onChange: (v: any) => void;
 }) {
-  if (templateId === "EXPORT_REPORTS") return <ExportReportsEditor value={value} onChange={onChange} />;
-  if (templateId === "BREAK_GLASS") return <BreakGlassEditor value={value} onChange={onChange} />;
-  if (templateId === "AUDIT_RETENTION") return <AuditRetentionEditor value={value} onChange={onChange} />;
-  if (templateId === "DATA_RETENTION") return <DataRetentionEditor value={value} onChange={onChange} />;
+  if (templateId === ("EXPORT_REPORTS" as PolicyTemplateId)) return <ExportReportsEditor value={value} onChange={onChange} />;
+  if (templateId === ("BREAK_GLASS" as PolicyTemplateId)) return <BreakGlassEditor value={value} onChange={onChange} />;
+  if (templateId === ("AUDIT_RETENTION" as PolicyTemplateId)) return <AuditRetentionEditor value={value} onChange={onChange} />;
+  if (templateId === ("DATA_RETENTION" as PolicyTemplateId)) return <DataRetentionEditor value={value} onChange={onChange} />;
   return <div className="text-sm text-zc-muted">Editor not available for this template.</div>;
 }
 

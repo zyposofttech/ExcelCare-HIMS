@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { AppLink as Link } from "@/components/app-link";
 import { useRouter } from "next/navigation";
 
 import { AlertTriangle, FileText, Loader2, RefreshCw } from "lucide-react";

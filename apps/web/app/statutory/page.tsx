@@ -1,10 +1,10 @@
-import { AppShell } from "@/components/AppShell";
-import { ComingSoon } from "@/components/ComingSoon";
+import { Suspense } from "react";
+import StatutoryClient from "./StatutoryClient";
 
 export default function Page() {
   return (
-    <AppShell title="Statutory Reporting">
-      <ComingSoon title="Statutory Reporting" />
-    </AppShell>
+    <Suspense fallback={<div className="p-6 text-sm text-zc-muted">Loading…</div>}>
+      <StatutoryClient />
+    </Suspense>
   );
 }

@@ -17,6 +17,15 @@ const badgeVariants = cva(
         destructive: "border-zc-danger/40 bg-zc-danger/15 text-zc-danger",
         success: "border-zc-ok/40 bg-zc-ok/15 text-zc-ok",
         warning: "border-zc-warn/40 bg-zc-warn/15 text-zc-warn",
+          info:
+          "border-transparent bg-sky-600 text-white dark:bg-sky-700",
+        neutral:
+          "border-zc-border bg-zc-panel/40 text-zc-text",
+          danger:
+          "border-zc-danger/40 bg-zc-danger/15 text-zc-danger",
+          ok:
+          "border-zc-ok/40 bg-zc-ok/15 text-zc-ok", 
+          
       },
     },
     defaultVariants: {
