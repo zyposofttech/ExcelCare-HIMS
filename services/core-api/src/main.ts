@@ -7,10 +7,6 @@ import { PrismaClient } from "@zypocare/db";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 
 async function bootstrap() {
-  console.log("------------------------------------------------------------------");
-  console.log("🛑 DEBUG: DATABASE_URL is:", process.env.DATABASE_URL);
-  console.log("------------------------------------------------------------------");
-
   const app = await NestFactory.create(AppModule);
   
   app.setGlobalPrefix(process.env.API_GLOBAL_PREFIX || "api");

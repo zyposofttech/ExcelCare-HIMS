@@ -10,10 +10,17 @@
     "format": "biome format . --write",
     "check": "biome check .",
     "infra:up": "docker compose -f infra/docker/compose.dev.yml up -d",
-    "infra:down": "docker compose -f infra/docker/compose.dev.yml down -v"
+    "infra:down": "docker compose -f infra/docker/compose.dev.yml down -v",
+    "env:localdb": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Copy-Item -Force .env.localdb .env\"",
+    "env:supabase": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Copy-Item -Force .env.supabase .env\"",
+    "db:migrate:deploy": "pnpm -C packages/db exec prisma migrate deploy",
+    "db:migrate:dev": "pnpm -C packages/db exec prisma migrate dev",
+    "db:generate": "pnpm -C packages/db exec prisma generate",
+    "db:studio": "pnpm -C packages/db exec prisma studio"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "turbo": "^2.7.5"
   }
+  
 }
