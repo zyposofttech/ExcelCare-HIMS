@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { AppShell } from "@/components/AppShell";
-import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +20,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Copy,
+  Eye,
   KeyRound,
   Loader2,
   RefreshCw,
@@ -108,6 +108,17 @@ export default function UsersPage() {
   // Per-row action busy state
   const [busyUserId, setBusyUserId] = React.useState<string | null>(null);
 
+  // Details/edit dialog
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const [detailsUser, setDetailsUser] = React.useState<UserRow | null>(null);
+  const [detailsForm, setDetailsForm] = React.useState({
+    name: "",
+    email: "",
+    roleCode: "",
+    branchId: "",
+  });
+  const [busyDetails, setBusyDetails] = React.useState(false);
+
   const filtered = React.useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return users;
@@ -123,6 +134,12 @@ export default function UsersPage() {
 
   const selectedRole = React.useMemo(() => roles.find((r) => r.roleCode === form.roleCode) || null, [roles, form.roleCode]);
   const needsBranch = selectedRole?.scope === "BRANCH" || form.roleCode.toUpperCase().includes("BRANCH");
+
+  const selectedDetailsRole = React.useMemo(
+    () => roles.find((r) => r.roleCode === detailsForm.roleCode) || null,
+    [roles, detailsForm.roleCode],
+  );
+  const detailsNeedsBranch = selectedDetailsRole?.scope === "BRANCH" || detailsForm.roleCode.toUpperCase().includes("BRANCH");
 
   async function refresh(showToast = false) {
     setErr(null);
@@ -161,6 +178,18 @@ export default function UsersPage() {
     void refresh(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function openDetails(u: UserRow) {
+    setErr(null);
+    setDetailsUser(u);
+    setDetailsForm({
+      name: u.name ?? "",
+      email: u.email ?? "",
+      roleCode: u.roleCode ?? "",
+      branchId: u.branchId ?? "",
+    });
+    setDetailsOpen(true);
+  }
 
   async function onCreate() {
     setErr(null);
@@ -206,6 +235,48 @@ export default function UsersPage() {
       toast({ variant: "destructive", title: "Create failed", description: msg });
     } finally {
       setBusyCreate(false);
+    }
+  }
+
+  async function onUpdateUser() {
+    if (!detailsUser) return;
+    setErr(null);
+
+    const name = detailsForm.name.trim();
+    const email = detailsForm.email.trim().toLowerCase();
+    const roleCode = detailsForm.roleCode.trim();
+    const branchId = detailsForm.branchId.trim();
+
+    if (!name) return setErr("Full name is required");
+    if (!email || !isEmail(email)) return setErr("A valid email is required");
+    if (!roleCode) return setErr("Role is required");
+    if (detailsNeedsBranch && !branchId) return setErr("Branch is required for BRANCH-scoped roles");
+
+    setBusyDetails(true);
+    try {
+      const payload: any = { name, email, roleCode };
+      payload.branchId = branchId || null;
+
+      await apiFetch(`/api/iam/users/${detailsUser.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+
+      toast({
+        title: "User updated",
+        description: `Updated ${email}.`,
+        variant: "success" as any,
+      });
+
+      setDetailsOpen(false);
+      setDetailsUser(null);
+      await refresh(false);
+    } catch (e: any) {
+      const msg = e?.message || "Update failed";
+      setErr(msg);
+      toast({ variant: "destructive", title: "Update failed", description: msg });
+    } finally {
+      setBusyDetails(false);
     }
   }
 
@@ -417,6 +488,11 @@ export default function UsersPage() {
 
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
+                          <Button variant="outline" className="px-3 gap-2" onClick={() => openDetails(u)} title="View or edit user">
+                            <Eye className="h-4 w-4" />
+                            View
+                          </Button>
+
                           <Button
                             variant={u.isActive ? "secondary" : "success"}
                             className="px-3 gap-2"
@@ -596,6 +672,148 @@ export default function UsersPage() {
                 {busyCreate ? <Loader2 className="h-4 w-4 animate-spin" /> : <IconPlus className="h-4 w-4" />}
                 Create User
               </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* User Details Dialog */}
+      <Dialog
+        open={detailsOpen}
+        onOpenChange={(v) => {
+          if (!v) {
+            setDetailsOpen(false);
+            setDetailsUser(null);
+            setBusyDetails(false);
+          }
+        }}
+      >
+        <DialogContent className="w-[95vw] sm:max-w-[640px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-900/40">
+                <Users2 className="h-5 w-5 text-slate-700 dark:text-slate-200" />
+              </div>
+              User Details
+            </DialogTitle>
+            <DialogDescription>Review account details and update role assignments as needed.</DialogDescription>
+          </DialogHeader>
+
+          <Separator className="my-3" />
+
+          {detailsUser ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-zc-muted">
+              {detailsUser.isActive ? <StatusPill label="Active" kind="active" /> : <StatusPill label="Inactive" kind="inactive" />}
+              {detailsUser.mustChangePassword ? <StatusPill label="MCP" kind="mcp" /> : null}
+            </div>
+          ) : null}
+
+          {err ? (
+            <div className="mb-3 flex items-start gap-2 rounded-xl border border-[rgb(var(--zc-danger-rgb)/0.35)] bg-[rgb(var(--zc-danger-rgb)/0.12)] px-3 py-2 text-sm text-[rgb(var(--zc-danger))]">
+              <AlertTriangle className="mt-0.5 h-4 w-4" />
+              <div className="min-w-0">{err}</div>
+            </div>
+          ) : null}
+
+          <div className="grid gap-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label>Full Name</Label>
+                <Input
+                  value={detailsForm.name}
+                  onChange={(e) => setDetailsForm((s) => ({ ...s, name: e.target.value }))}
+                  disabled={!isSuperAdmin}
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label>Email</Label>
+                <Input
+                  value={detailsForm.email}
+                  onChange={(e) => setDetailsForm((s) => ({ ...s, email: e.target.value }))}
+                  disabled={!isSuperAdmin}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Role</Label>
+              <select
+                className={cn(
+                  "w-full rounded-md border border-zc-border bg-zc-card px-3 py-2 text-sm text-zc-text",
+                  "focus:outline-none focus:ring-2 focus:ring-zc-accent/50",
+                )}
+                value={detailsForm.roleCode}
+                onChange={(e) => setDetailsForm((s) => ({ ...s, roleCode: e.target.value }))}
+                disabled={!isSuperAdmin}
+              >
+                {roles.map((r) => (
+                  <option key={r.roleCode} value={r.roleCode}>
+                    {r.roleCode} (v{r.version}) · {r.scope}
+                  </option>
+                ))}
+              </select>
+
+              {selectedDetailsRole ? (
+                <div className="flex items-center gap-2 text-[11px] text-zc-muted">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  <span>
+                    {selectedDetailsRole.roleName} · <span className="font-mono">{selectedDetailsRole.scope}</span> scope
+                  </span>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Branch</Label>
+              <select
+                className={cn(
+                  "w-full rounded-md border border-zc-border bg-zc-card px-3 py-2 text-sm text-zc-text",
+                  "focus:outline-none focus:ring-2 focus:ring-zc-accent/50",
+                  detailsNeedsBranch && !detailsForm.branchId ? "border-amber-300/70 dark:border-amber-700/60" : "",
+                )}
+                value={detailsForm.branchId}
+                onChange={(e) => setDetailsForm((s) => ({ ...s, branchId: e.target.value }))}
+                disabled={!isSuperAdmin}
+              >
+                <option value="">{detailsNeedsBranch ? "Select branch (required)" : "Select branch (optional)"}</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.code})
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-zc-muted">
+                {detailsNeedsBranch ? "Required for BRANCH-scoped roles." : "Optional for GLOBAL roles."}
+              </p>
+            </div>
+
+            {!isSuperAdmin ? (
+              <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-3 text-xs text-zc-muted">
+                Only super administrators can edit user details.
+              </div>
+            ) : null}
+          </div>
+
+          <DialogFooter>
+            <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDetailsOpen(false);
+                  setDetailsUser(null);
+                }}
+                disabled={busyDetails}
+              >
+                {isSuperAdmin ? "Cancel" : "Close"}
+              </Button>
+
+              {isSuperAdmin ? (
+                <Button variant="primary" onClick={() => void onUpdateUser()} disabled={busyDetails} className="gap-2">
+                  {busyDetails ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  Save Changes
+                </Button>
+              ) : null}
             </div>
           </DialogFooter>
         </DialogContent>
