@@ -67,11 +67,9 @@ export function Modal({
             ) : null}
           </DialogHeader>
         </div>
-
         <div className="px-5 py-4 overflow-y-auto max-h-[calc(90vh-140px)]">
           {children}
         </div>
-
         {footer ? (
           <div className="border-t border-zc-border bg-zc-card px-5 py-4">
             <DialogFooter className="mt-0">{footer}</DialogFooter>
