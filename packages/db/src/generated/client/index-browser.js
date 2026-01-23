@@ -916,15 +916,122 @@ exports.Prisma.DiagnosticTemplateScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
-exports.Prisma.DiagnosticChargeMapScalarFieldEnum = {
+exports.Prisma.DiagnosticServicePointScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  locationNodeId: 'locationNodeId',
+  unitId: 'unitId',
+  code: 'code',
+  name: 'name',
+  type: 'type',
+  isActive: 'isActive',
+  sortOrder: 'sortOrder',
+  notes: 'notes',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticServicePointRoomScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  servicePointId: 'servicePointId',
+  roomId: 'roomId',
+  modality: 'modality',
+  sortOrder: 'sortOrder',
+  isActive: 'isActive',
+  notes: 'notes',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticServicePointResourceScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  servicePointId: 'servicePointId',
+  resourceId: 'resourceId',
+  modality: 'modality',
+  sortOrder: 'sortOrder',
+  isActive: 'isActive',
+  notes: 'notes',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticServicePointEquipmentScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  servicePointId: 'servicePointId',
+  equipmentId: 'equipmentId',
+  modality: 'modality',
+  sortOrder: 'sortOrder',
+  isActive: 'isActive',
+  notes: 'notes',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticCapabilityScalarFieldEnum = {
   id: 'id',
   branchId: 'branchId',
   diagnosticItemId: 'diagnosticItemId',
-  chargeMasterId: 'chargeMasterId',
-  price: 'price',
-  effectiveFrom: 'effectiveFrom',
-  effectiveTo: 'effectiveTo',
+  servicePointId: 'servicePointId',
+  modality: 'modality',
+  defaultDurationMins: 'defaultDurationMins',
+  isPrimary: 'isPrimary',
   isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticCapabilityRoomScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  capabilityId: 'capabilityId',
+  roomId: 'roomId',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticCapabilityResourceScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  capabilityId: 'capabilityId',
+  resourceId: 'resourceId',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticCapabilityEquipmentScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  capabilityId: 'capabilityId',
+  equipmentId: 'equipmentId',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticPackScalarFieldEnum = {
+  id: 'id',
+  code: 'code',
+  name: 'name',
+  labType: 'labType',
+  description: 'description',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DiagnosticPackVersionScalarFieldEnum = {
+  id: 'id',
+  packId: 'packId',
+  version: 'version',
+  status: 'status',
+  notes: 'notes',
+  payload: 'payload',
+  createdByUserId: 'createdByUserId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 };
@@ -1191,6 +1298,42 @@ exports.DiagnosticTemplateKind = exports.$Enums.DiagnosticTemplateKind = {
   LAB_REPORT: 'LAB_REPORT'
 };
 
+exports.DiagnosticServicePointType = exports.$Enums.DiagnosticServicePointType = {
+  LAB: 'LAB',
+  RADIOLOGY: 'RADIOLOGY',
+  CARDIO_DIAGNOSTICS: 'CARDIO_DIAGNOSTICS',
+  NEURO_DIAGNOSTICS: 'NEURO_DIAGNOSTICS',
+  PULMONARY_DIAGNOSTICS: 'PULMONARY_DIAGNOSTICS',
+  ENDOSCOPY: 'ENDOSCOPY',
+  OTHER: 'OTHER'
+};
+
+exports.DiagnosticModality = exports.$Enums.DiagnosticModality = {
+  XRAY: 'XRAY',
+  ULTRASOUND: 'ULTRASOUND',
+  CT: 'CT',
+  MRI: 'MRI',
+  MAMMOGRAPHY: 'MAMMOGRAPHY',
+  FLUOROSCOPY: 'FLUOROSCOPY',
+  ECG: 'ECG',
+  ECHO: 'ECHO',
+  TMT: 'TMT',
+  HOLTER: 'HOLTER',
+  PFT: 'PFT',
+  EEG: 'EEG',
+  EMG_NCV: 'EMG_NCV',
+  LAB: 'LAB',
+  SAMPLE_COLLECTION: 'SAMPLE_COLLECTION',
+  PROCEDURE_ROOM: 'PROCEDURE_ROOM',
+  OTHER: 'OTHER'
+};
+
+exports.DiagnosticPackVersionStatus = exports.$Enums.DiagnosticPackVersionStatus = {
+  DRAFT: 'DRAFT',
+  ACTIVE: 'ACTIVE',
+  RETIRED: 'RETIRED'
+};
+
 exports.Prisma.ModelName = {
   Branch: 'Branch',
   FacilityCatalog: 'FacilityCatalog',
@@ -1254,7 +1397,16 @@ exports.Prisma.ModelName = {
   DiagnosticParameter: 'DiagnosticParameter',
   DiagnosticReferenceRange: 'DiagnosticReferenceRange',
   DiagnosticTemplate: 'DiagnosticTemplate',
-  DiagnosticChargeMap: 'DiagnosticChargeMap'
+  DiagnosticServicePoint: 'DiagnosticServicePoint',
+  DiagnosticServicePointRoom: 'DiagnosticServicePointRoom',
+  DiagnosticServicePointResource: 'DiagnosticServicePointResource',
+  DiagnosticServicePointEquipment: 'DiagnosticServicePointEquipment',
+  DiagnosticCapability: 'DiagnosticCapability',
+  DiagnosticCapabilityRoom: 'DiagnosticCapabilityRoom',
+  DiagnosticCapabilityResource: 'DiagnosticCapabilityResource',
+  DiagnosticCapabilityEquipment: 'DiagnosticCapabilityEquipment',
+  DiagnosticPack: 'DiagnosticPack',
+  DiagnosticPackVersion: 'DiagnosticPackVersion'
 };
 
 /**

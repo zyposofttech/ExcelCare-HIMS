@@ -22,6 +22,8 @@ export type AuthUser = {
   isActive?: boolean;
 };
 
+const REMEMBER_DEVICE_KEY = "zypocare-remember-device";
+
 type AuthState = {
   user: AuthUser | null;
   token: string | null;
@@ -39,6 +41,42 @@ function setAuthCookie() {
 function clearAuthCookie() {
   document.cookie = `zypocare_auth=; Max-Age=0; Path=/; SameSite=Lax`;
 }
+
+function getPreferredStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    if (localStorage.getItem(REMEMBER_DEVICE_KEY) === "1") return localStorage;
+    if (sessionStorage.getItem(REMEMBER_DEVICE_KEY) === "1") return sessionStorage;
+  } catch {}
+  return null;
+}
+
+const authStorage = {
+  getItem: (name: string) => {
+    if (typeof window === "undefined") return null;
+    try {
+      const preferred = getPreferredStorage();
+      if (preferred) return preferred.getItem(name);
+      return localStorage.getItem(name) ?? sessionStorage.getItem(name);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (name: string, value: string) => {
+    if (typeof window === "undefined") return;
+    try {
+      const preferred = getPreferredStorage();
+      (preferred ?? localStorage).setItem(name, value);
+    } catch {}
+  },
+  removeItem: (name: string) => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.removeItem(name);
+      sessionStorage.removeItem(name);
+    } catch {}
+  },
+};
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -61,6 +99,8 @@ export const useAuthStore = create<AuthState>()(
       logout: () => {
         clearAuthCookie();
         try {
+          localStorage.removeItem(REMEMBER_DEVICE_KEY);
+          sessionStorage.removeItem(REMEMBER_DEVICE_KEY);
           localStorage.removeItem("access_token");
           sessionStorage.removeItem("access_token");
         } catch {}
@@ -71,7 +111,7 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: "zypocare-auth",
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => authStorage),
       partialize: (s) => ({ user: s.user, token: s.token }),
       //  Update flag when storage is loaded
       onRehydrateStorage: () => (state) => {

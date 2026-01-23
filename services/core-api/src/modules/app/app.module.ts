@@ -14,7 +14,7 @@ import { GovernanceModule } from "../governance/governance.module";
 import { FacilitySetupModule } from "../facility-setup/facility-setup.module";
 import { InfrastructureModule } from "../infrastructure/infrastructure.module";
 import { OtModule } from "../infrastructure/ot/ot.module";
-import { DiagnosticsConfigModule } from "../infrastructure/diagnostics-config/diagnostics-config.module";
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -31,7 +31,6 @@ import { DiagnosticsConfigModule } from "../infrastructure/diagnostics-config/di
     FacilitySetupModule,
     InfrastructureModule,
     OtModule,
-    DiagnosticsConfigModule,
   ],
   controllers: [HealthController],
 })

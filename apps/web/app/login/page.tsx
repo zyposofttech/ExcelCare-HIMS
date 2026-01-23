@@ -22,6 +22,7 @@ import { zcLoading } from "@/lib/loading-events";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
 type AuthView = "LOGIN" | "FORGOT";
+const REMEMBER_DEVICE_KEY = "zypocare-remember-device";
 
 function BrandPattern() {
   return (
@@ -149,6 +150,17 @@ export default function LoginPage() {
         }
 
         if (loggedInUser) {
+          try {
+            if (remember) {
+              localStorage.setItem(REMEMBER_DEVICE_KEY, "1");
+              sessionStorage.removeItem(REMEMBER_DEVICE_KEY);
+              sessionStorage.removeItem("zypocare-auth");
+            } else {
+              sessionStorage.setItem(REMEMBER_DEVICE_KEY, "1");
+              localStorage.removeItem(REMEMBER_DEVICE_KEY);
+              localStorage.removeItem("zypocare-auth");
+            }
+          } catch {}
           login(loggedInUser, accessToken ?? null);
         }
       } finally {

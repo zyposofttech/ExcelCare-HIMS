@@ -7,6 +7,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum ConsentScope {
@@ -94,19 +95,21 @@ model Branch {
   policyVersionBranches PolicyVersionBranch[] @relation("PolicyTarget_Branch")
 
   // ---------------- Infrastructure (Setup Studio) ----------------
-  locationNodes         LocationNode[]
-  branchUnitTypes       BranchUnitType[]
-  units                 Unit[]
-  unitRooms             UnitRoom[]
-  unitResources         UnitResource[]
-  procedureBookings     ProcedureBooking[]
-  equipmentAssets       EquipmentAsset[]
-  chargeMasterItems     ChargeMasterItem[]
-  serviceItems          ServiceItem[]
-  serviceChargeMappings ServiceChargeMapping[]
-  fixItTasks            FixItTask[]
-  bulkImportJobs        BulkImportJob[]
-  goLiveReports         GoLiveReport[]
+  locationNodes           LocationNode[]
+  branchUnitTypes         BranchUnitType[]
+  units                   Unit[]
+  unitRooms               UnitRoom[]
+  unitResources           UnitResource[]
+  procedureBookings       ProcedureBooking[]
+  equipmentAssets         EquipmentAsset[]
+  chargeMasterItems       ChargeMasterItem[]
+  serviceItems            ServiceItem[]
+  serviceChargeMappings   ServiceChargeMapping[]
+  fixItTasks              FixItTask[]
+  bulkImportJobs          BulkImportJob[]
+  goLiveReports           GoLiveReport[]
+  diagnosticServicePoints DiagnosticServicePoint[]
+  diagnosticCapabilities  DiagnosticCapability[]
 
   otSuites OtSuite[] @relation("OtSuite_Branch")
 
@@ -312,11 +315,12 @@ model User {
   updatedAt DateTime @updatedAt
 
   // ---------------- Infrastructure (Setup Studio) ----------------
-  createdLocationRevisions LocationNodeRevision[] @relation("LocationRevisionCreatedBy")
-  createdImportJobs        BulkImportJob[]        @relation("ImportJobCreatedBy")
-  assignedFixIts           FixItTask[]            @relation("FixItAssignedTo")
-  createdBookings          ProcedureBooking[]     @relation("BookingCreatedBy")
-  createdGoLiveReports     GoLiveReport[]         @relation("GoLiveCreatedBy")
+  createdLocationRevisions      LocationNodeRevision[]  @relation("LocationRevisionCreatedBy")
+  createdImportJobs             BulkImportJob[]         @relation("ImportJobCreatedBy")
+  assignedFixIts                FixItTask[]             @relation("FixItAssignedTo")
+  createdBookings               ProcedureBooking[]      @relation("BookingCreatedBy")
+  createdGoLiveReports          GoLiveReport[]          @relation("GoLiveCreatedBy")
+  createdDiagnosticPackVersions DiagnosticPackVersion[] @relation("DiagnosticPackVersionCreatedBy")
 }
 
 model Patient {
@@ -796,11 +800,13 @@ model LocationNode {
   updatedAt DateTime @updatedAt
 
   // Units mapped to this location node
-  units     Unit[]
-  revisions LocationNodeRevision[]
+  units                   Unit[]
+  revisions               LocationNodeRevision[]
   // OT Setup mappings
-  otSuites  OtSuite[]              @relation("OtSuite_LocationNode")
-  otSpaces  OtSpace[]              @relation("OtSpace_LocationNode")
+  otSuites                OtSuite[]                @relation("OtSuite_LocationNode")
+  otSpaces                OtSpace[]                @relation("OtSpace_LocationNode")
+  // Diagnostics setup mappings
+  diagnosticServicePoints DiagnosticServicePoint[]
 
   @@index([branchId, kind])
   @@index([branchId, parentId])
@@ -913,9 +919,11 @@ model Unit {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  rooms     UnitRoom[]
-  resources UnitResource[]
-  bookings  ProcedureBooking[]
+  rooms                   UnitRoom[]
+  resources               UnitResource[]
+  bookings                ProcedureBooking[]
+  // Diagnostics: service points optionally linked to this unit
+  diagnosticServicePoints DiagnosticServicePoint[]
 
   @@unique([branchId, code], name: "branchId_unitCode")
   @@index([branchId, departmentId, isActive])
@@ -938,7 +946,10 @@ model UnitRoom {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  resources UnitResource[]
+  resources                   UnitResource[]
+  // Diagnostics mappings
+  diagnosticServicePointRooms DiagnosticServicePointRoom[]
+  diagnosticCapabilityRooms   DiagnosticCapabilityRoom[]
 
   @@unique([unitId, code], name: "unitId_roomCode")
   @@index([branchId, unitId, isActive])
@@ -966,7 +977,10 @@ model UnitResource {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  bookings ProcedureBooking[]
+  bookings                        ProcedureBooking[]
+  // Diagnostics mappings
+  diagnosticServicePointResources DiagnosticServicePointResource[]
+  diagnosticCapabilityResources   DiagnosticCapabilityResource[]
 
   @@unique([unitId, code], name: "unitId_resourceCode")
   @@index([branchId, unitId, isActive])
@@ -1041,7 +1055,10 @@ model EquipmentAsset {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  downtimeTickets DowntimeTicket[]
+  downtimeTickets                 DowntimeTicket[]
+  // Diagnostics mappings
+  diagnosticServicePointEquipment DiagnosticServicePointEquipment[]
+  diagnosticCapabilityEquipment   DiagnosticCapabilityEquipment[]
 
   @@unique([branchId, code], name: "branchId_equipmentCode")
   @@index([branchId, category])
@@ -1084,10 +1101,9 @@ model ChargeMasterItem {
   unit     String?
   isActive Boolean @default(true)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  mappings ServiceChargeMapping[]
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+  mappings  ServiceChargeMapping[]
 
   @@unique([branchId, code], name: "branchId_code")
   @@index([branchId, isActive])
@@ -1509,10 +1525,44 @@ model OtEquipment {
   @@index([spaceId])
 }
 
-// ================================
-// Diagnostics Configuration (Lab + Imaging)
-// Merge into your main schema.prisma
-// ================================
+// ---------------- Diagnostics Facilities (Infrastructure) ----------------
+enum DiagnosticServicePointType {
+  LAB
+  RADIOLOGY
+  CARDIO_DIAGNOSTICS
+  NEURO_DIAGNOSTICS
+  PULMONARY_DIAGNOSTICS
+  ENDOSCOPY
+  OTHER
+}
+
+enum DiagnosticModality {
+  // Imaging
+  XRAY
+  ULTRASOUND
+  CT
+  MRI
+  MAMMOGRAPHY
+  FLUOROSCOPY
+
+  // Cardio / Neuro / Pulmonary
+  ECG
+  ECHO
+  TMT
+  HOLTER
+  PFT
+  EEG
+  EMG_NCV
+
+  // Lab / Collection
+  LAB
+  SAMPLE_COLLECTION
+
+  // Procedure rooms
+  PROCEDURE_ROOM
+
+  OTHER
+}
 
 enum DiagnosticKind {
   LAB
@@ -1530,6 +1580,12 @@ enum DiagnosticResultDataType {
 enum DiagnosticTemplateKind {
   IMAGING_REPORT
   LAB_REPORT
+}
+
+enum DiagnosticPackVersionStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
 }
 
 model DiagnosticSection {
@@ -1626,10 +1682,9 @@ model DiagnosticItem {
   parameters DiagnosticParameter[]
 
   // templates
-  templates DiagnosticTemplate[]
-
-  // billing
-  chargeMaps DiagnosticChargeMap[]
+  templates    DiagnosticTemplate[]
+  // Facilities & resources layer: which service points can perform this item
+  capabilities DiagnosticCapability[]
 
   @@unique([branchId, code])
   @@index([branchId, kind, isActive])
@@ -1717,24 +1772,235 @@ model DiagnosticTemplate {
   @@index([itemId, kind, isActive])
 }
 
-model DiagnosticChargeMap {
-  id               String @id @default(cuid())
-  branchId         String
+model DiagnosticServicePoint {
+  id String @id @default(cuid())
+
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  // Mandatory: every diagnostic unit must be tagged to a location node within branch
+  locationNodeId String
+  locationNode   LocationNode @relation(fields: [locationNodeId], references: [id], onDelete: Restrict)
+
+  // Optional: link to existing infra Unit (if you want), but not required
+  unitId String?
+  unit   Unit?   @relation(fields: [unitId], references: [id], onDelete: SetNull)
+
+  code String @db.VarChar(64)
+  name String @db.VarChar(160)
+
+  type DiagnosticServicePointType @default(OTHER)
+
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rooms     DiagnosticServicePointRoom[]
+  resources DiagnosticServicePointResource[]
+  equipment DiagnosticServicePointEquipment[]
+
+  // Optional routing contract for future operations
+  capabilities DiagnosticCapability[]
+
+  @@unique([branchId, code])
+  @@index([branchId, type, isActive, sortOrder])
+  @@index([branchId, locationNodeId])
+  @@index([branchId, unitId])
+}
+
+model DiagnosticServicePointRoom {
+  id       String @id @default(cuid())
+  branchId String
+
+  servicePointId String
+  servicePoint   DiagnosticServicePoint @relation(fields: [servicePointId], references: [id], onDelete: Cascade)
+
+  roomId String
+  room   UnitRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  modality  DiagnosticModality @default(OTHER)
+  sortOrder Int                @default(0)
+  isActive  Boolean            @default(true)
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([servicePointId, roomId])
+  @@index([branchId, servicePointId, isActive])
+  @@index([branchId, roomId])
+  @@index([branchId, modality, isActive])
+}
+
+model DiagnosticServicePointResource {
+  id       String @id @default(cuid())
+  branchId String
+
+  servicePointId String
+  servicePoint   DiagnosticServicePoint @relation(fields: [servicePointId], references: [id], onDelete: Cascade)
+
+  resourceId String
+  resource   UnitResource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  modality  DiagnosticModality @default(OTHER)
+  sortOrder Int                @default(0)
+  isActive  Boolean            @default(true)
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([servicePointId, resourceId])
+  @@index([branchId, servicePointId, isActive])
+  @@index([branchId, resourceId])
+  @@index([branchId, modality, isActive])
+}
+
+model DiagnosticServicePointEquipment {
+  id       String @id @default(cuid())
+  branchId String
+
+  servicePointId String
+  servicePoint   DiagnosticServicePoint @relation(fields: [servicePointId], references: [id], onDelete: Cascade)
+
+  equipmentId String
+  equipment   EquipmentAsset @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  modality  DiagnosticModality @default(OTHER)
+  sortOrder Int                @default(0)
+  isActive  Boolean            @default(true)
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([servicePointId, equipmentId])
+  @@index([branchId, servicePointId, isActive])
+  @@index([branchId, equipmentId])
+  @@index([branchId, modality, isActive])
+}
+
+model DiagnosticCapability {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
   diagnosticItemId String
+  diagnosticItem   DiagnosticItem @relation(fields: [diagnosticItemId], references: [id], onDelete: Cascade)
 
-  // Billing mapping (adapt relation name to your charge master model)
-  chargeMasterId String
-  price          Float?
+  servicePointId String
+  servicePoint   DiagnosticServicePoint @relation(fields: [servicePointId], references: [id], onDelete: Cascade)
 
-  effectiveFrom DateTime?
-  effectiveTo   DateTime?
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  // Optional override (item.kind=IMAGING but modality could be XRAY vs USG etc.)
+  modality DiagnosticModality?
 
-  diagnosticItem DiagnosticItem @relation(fields: [diagnosticItemId], references: [id], onDelete: Cascade)
+  // future operations use these
+  defaultDurationMins Int?
+  isPrimary           Boolean @default(false)
 
-  @@unique([branchId, diagnosticItemId, chargeMasterId])
-  @@index([branchId, isActive])
-  @@index([diagnosticItemId, isActive])
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Optional constraints: restrict to specific rooms/resources/equipment
+  allowedRooms     DiagnosticCapabilityRoom[]
+  allowedResources DiagnosticCapabilityResource[]
+  allowedEquipment DiagnosticCapabilityEquipment[]
+
+  @@unique([servicePointId, diagnosticItemId])
+  @@index([branchId, diagnosticItemId, isActive])
+  @@index([branchId, servicePointId, isActive])
+  @@index([modality, isActive])
+}
+
+model DiagnosticCapabilityRoom {
+  id       String @id @default(cuid())
+  branchId String
+
+  capabilityId String
+  capability   DiagnosticCapability @relation(fields: [capabilityId], references: [id], onDelete: Cascade)
+
+  roomId String
+  room   UnitRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([capabilityId, roomId])
+  @@index([branchId, capabilityId, isActive])
+  @@index([branchId, roomId])
+}
+
+model DiagnosticCapabilityResource {
+  id       String @id @default(cuid())
+  branchId String
+
+  capabilityId String
+  capability   DiagnosticCapability @relation(fields: [capabilityId], references: [id], onDelete: Cascade)
+
+  resourceId String
+  resource   UnitResource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([capabilityId, resourceId])
+  @@index([branchId, capabilityId, isActive])
+  @@index([branchId, resourceId])
+}
+
+model DiagnosticCapabilityEquipment {
+  id       String @id @default(cuid())
+  branchId String
+
+  capabilityId String
+  capability   DiagnosticCapability @relation(fields: [capabilityId], references: [id], onDelete: Cascade)
+
+  equipmentId String
+  equipment   EquipmentAsset @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([capabilityId, equipmentId])
+  @@index([branchId, capabilityId, isActive])
+  @@index([branchId, equipmentId])
+}
+
+model DiagnosticPack {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  labType     String?
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  versions DiagnosticPackVersion[]
+}
+
+model DiagnosticPackVersion {
+  id      String                      @id @default(cuid())
+  packId  String
+  pack    DiagnosticPack              @relation(fields: [packId], references: [id], onDelete: Cascade)
+  version Int
+  status  DiagnosticPackVersionStatus @default(DRAFT)
+  notes   String?
+  payload Json
+
+  createdByUserId String?
+  createdByUser   User?   @relation("DiagnosticPackVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([packId, version])
+  @@index([packId, status])
 }

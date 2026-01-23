@@ -7,44 +7,40 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useToast } from "@/components/ui/use-toast";
 
 import {
-  Activity,
-  ArrowDown,
-  ArrowUp,
-  CheckCircle2,
   ClipboardList,
-  FlaskConical,
-  Image as ImageIcon,
-  Link2,
   Pencil,
   Plus,
   RefreshCw,
+  Settings2,
   Search,
   Trash2,
+  ArrowUp,
+  ArrowDown,
   X,
 } from "lucide-react";
 
-// ---------------- Types (lightweight; tolerant to backend changes) ----------------
+/* =========================================================
+   Types (aligned to backend DTOs + Prisma responses)
+   ========================================================= */
 
 type BranchRow = { id: string; code: string; name: string; city?: string | null };
+
+type DiagnosticKind = "LAB" | "IMAGING" | "PROCEDURE";
+type ResultDataType = "NUMERIC" | "TEXT" | "CHOICE" | "BOOLEAN";
+type TemplateKind = "IMAGING_REPORT" | "LAB_REPORT";
 
 type SectionRow = { id: string; branchId: string; code: string; name: string; sortOrder: number; isActive: boolean };
 
@@ -67,11 +63,8 @@ type SpecimenRow = {
   container?: string | null;
   minVolumeMl?: number | null;
   handlingNotes?: string | null;
-  sortOrder?: number;
   isActive: boolean;
 };
-
-type DiagnosticKind = "LAB" | "IMAGING" | "PROCEDURE";
 
 type DiagnosticItemRow = {
   id: string;
@@ -83,38 +76,20 @@ type DiagnosticItemRow = {
   categoryId?: string | null;
   specimenId?: string | null;
   isPanel: boolean;
+  tatMinsRoutine?: number | null;
+  tatMinsStat?: number | null;
   preparationText?: string | null;
-  consentRequired?: boolean;
-  appointmentRequired?: boolean;
+  consentRequired: boolean;
+  requiresAppointment: boolean;
   sortOrder: number;
   isActive: boolean;
   section?: SectionRow;
   category?: CategoryRow | null;
   specimen?: SpecimenRow | null;
+  _count?: { parameters: number; templates: number; panelChildren: number; panelParents: number };
 };
 
-type PanelItemRow = {
-  panelId: string;
-  itemId: string;
-  sortOrder: number;
-  isActive: boolean;
-  item?: DiagnosticItemRow;
-};
-
-type ResultDataType = "NUMERIC" | "TEXT" | "CHOICE";
-
-type RangeRow = {
-  id: string;
-  parameterId: string;
-  sex?: string | null;
-  ageMinDays?: number | null;
-  ageMaxDays?: number | null;
-  low?: number | null;
-  high?: number | null;
-  textRange?: string | null;
-  sortOrder: number;
-  isActive: boolean;
-};
+type PanelItemRow = { panelId: string; itemId: string; sortOrder: number; isActive: boolean; item?: DiagnosticItemRow };
 
 type ParameterRow = {
   id: string;
@@ -125,43 +100,142 @@ type ParameterRow = {
   unit?: string | null;
   precision?: number | null;
   allowedText?: string | null;
-  criticalLow?: number | null;
-  criticalHigh?: number | null;
-  sortOrder: number;
   isActive: boolean;
   ranges?: RangeRow[];
 };
 
-type TemplateKind = "IMAGING_REPORT" | "LAB_REPORT";
-
-type TemplateRow = {
+type RangeRow = {
   id: string;
-  itemId: string;
-  kind: TemplateKind;
-  name: string;
-  body: string;
+  parameterId: string;
+  sex?: string | null;
+  ageMinDays?: number | null;
+  ageMaxDays?: number | null;
+  low?: number | null;
+  high?: number | null;
+  textRange?: string | null;
   isActive: boolean;
 };
 
-type ChargeMapRow = {
+type TemplateRow = { id: string; itemId: string; kind: TemplateKind; name: string; body: string; isActive: boolean };
+
+/* ---- Service Points / Capabilities / Bootstrap ---- */
+
+type ServicePointType =
+  | "LAB"
+  | "RADIOLOGY"
+  | "CARDIO_DIAGNOSTICS"
+  | "NEURO_DIAGNOSTICS"
+  | "PULMONARY_DIAGNOSTICS"
+  | "ENDOSCOPY"
+  | "OTHER";
+
+type LabType =
+  | "LAB_CORE"
+  | "RADIOLOGY"
+  | "CARDIO"
+  | "PULMONARY"
+  | "ENDOSCOPY"
+  | "MICROBIOLOGY"
+  | "BIOCHEMISTRY"
+  | "HEMATOLOGY"
+  | "OTHER";
+
+type Modality =
+  | "XRAY"
+  | "ULTRASOUND"
+  | "CT"
+  | "MRI"
+  | "MAMMOGRAPHY"
+  | "FLUOROSCOPY"
+  | "ECG"
+  | "ECHO"
+  | "TMT"
+  | "HOLTER"
+  | "PFT"
+  | "EEG"
+  | "EMG_NCV"
+  | "LAB"
+  | "SAMPLE_COLLECTION"
+  | "PROCEDURE_ROOM"
+  | "OTHER";
+
+type UnitRow = { id: string; code: string; name: string };
+type RoomRow = { id: string; code: string; name: string; unitId: string };
+type UnitResourceRow = { id: string; code: string; name: string; unitId: string; roomId?: string | null };
+type EquipmentAssetRow = { id: string; code: string; name: string; category?: string };
+
+type LocationTreeNode = {
+  id: string;
+  type: string;
+  code: string;
+  name: string;
+  buildings?: LocationTreeNode[];
+  floors?: LocationTreeNode[];
+  zones?: LocationTreeNode[];
+};
+
+type FlatLocationNode = { id: string; type: string; code: string; name: string; path: string };
+
+type DiagnosticServicePointRow = {
   id: string;
   branchId: string;
-  diagnosticItemId: string;
-  chargeMasterId: string;
-  price?: number | null;
-  effectiveFrom?: string | null;
-  effectiveTo?: string | null;
+  locationNodeId: string;
+  unitId?: string | null;
+  code: string;
+  name: string;
+  type: ServicePointType;
+  sortOrder: number;
+  notes?: string | null;
   isActive: boolean;
-  updatedAt?: string;
-  diagnosticItem?: DiagnosticItemRow;
+  locationNode?: { id: string; type: string; code: string; name: string };
+  unit?: UnitRow | null;
+  _count?: { rooms: number; resources: number; equipment: number };
 };
 
-type ChargeMasterRow = {
+type RoomMapRow = { id: string; branchId: string; servicePointId: string; roomId: string; modality?: Modality | null; notes?: string | null; sortOrder: number; isActive: boolean; room?: any };
+type ResourceMapRow = { id: string; branchId: string; servicePointId: string; resourceId: string; modality?: Modality | null; notes?: string | null; sortOrder: number; isActive: boolean; resource?: any };
+type EquipmentMapRow = { id: string; branchId: string; servicePointId: string; equipmentId: string; modality?: Modality | null; notes?: string | null; sortOrder: number; isActive: boolean; equipment?: any };
+
+type CapabilityRow = {
   id: string;
-  code?: string;
-  name?: string;
-  price?: number;
+  branchId: string;
+  servicePointId: string;
+  diagnosticItemId: string;
+  modality?: Modality | null;
+  defaultDurationMins?: number | null;
+  isPrimary: boolean;
+  isActive: boolean;
+  servicePoint?: DiagnosticServicePointRow;
+  diagnosticItem?: DiagnosticItemRow;
+  _count?: { allowedRooms: number; allowedResources: number; allowedEquipment: number };
 };
+
+type AllowedRoomRow = { id: string; roomId: string; isActive: boolean; room?: any };
+type AllowedResourceRow = { id: string; resourceId: string; isActive: boolean; resource?: any };
+type AllowedEquipmentRow = { id: string; equipmentId: string; isActive: boolean; equipment?: any };
+type PackVersionStatus = "DRAFT" | "ACTIVE" | "RETIRED";
+type DiagnosticPackVersionRow = {
+  id: string;
+  packId: string;
+  version: number;
+  status: PackVersionStatus;
+  notes?: string | null;
+  payload: any;
+  createdAt?: string;
+};
+type DiagnosticPackRow = {
+  id: string;
+  code: string;
+  name: string;
+  labType?: string | null;
+  description?: string | null;
+  isActive: boolean;
+  versions?: DiagnosticPackVersionRow[];
+};
+
+/* =========================================================
+   Constants (aligned with backend enums)
+   ========================================================= */
 
 const DIAG_KINDS: Array<{ value: DiagnosticKind; label: string }> = [
   { value: "LAB", label: "Lab" },
@@ -173,6 +247,7 @@ const RESULT_TYPES: Array<{ value: ResultDataType; label: string }> = [
   { value: "NUMERIC", label: "Numeric" },
   { value: "TEXT", label: "Text" },
   { value: "CHOICE", label: "Choice" },
+  { value: "BOOLEAN", label: "Yes/No" },
 ];
 
 const TEMPLATE_KINDS: Array<{ value: TemplateKind; label: string }> = [
@@ -180,13 +255,60 @@ const TEMPLATE_KINDS: Array<{ value: TemplateKind; label: string }> = [
   { value: "LAB_REPORT", label: "Lab report" },
 ];
 
-// ---------------- Utilities ----------------
+const SERVICE_POINT_TYPES: Array<{ value: ServicePointType; label: string }> = [
+  { value: "LAB", label: "Lab" },
+  { value: "RADIOLOGY", label: "Radiology" },
+  { value: "CARDIO_DIAGNOSTICS", label: "Cardio diagnostics" },
+  { value: "NEURO_DIAGNOSTICS", label: "Neuro diagnostics" },
+  { value: "PULMONARY_DIAGNOSTICS", label: "Pulmonary diagnostics" },
+  { value: "ENDOSCOPY", label: "Endoscopy" },
+  { value: "OTHER", label: "Other" },
+];
+
+const LAB_TYPE_OPTIONS: Array<{ value: LabType; label: string }> = [
+  { value: "LAB_CORE", label: "Lab Core" },
+  { value: "RADIOLOGY", label: "Radiology" },
+  { value: "CARDIO", label: "Cardio Diagnostics" },
+  { value: "PULMONARY", label: "Pulmonary Diagnostics" },
+  { value: "ENDOSCOPY", label: "Endoscopy Suite" },
+  { value: "MICROBIOLOGY", label: "Microbiology Lab" },
+  { value: "BIOCHEMISTRY", label: "Biochemistry Lab" },
+  { value: "HEMATOLOGY", label: "Hematology Lab" },
+  { value: "OTHER", label: "Other" },
+];
+
+const MODALITIES: Array<{ value: Modality; label: string }> = [
+  { value: "XRAY", label: "X-Ray" },
+  { value: "ULTRASOUND", label: "Ultrasound" },
+  { value: "CT", label: "CT" },
+  { value: "MRI", label: "MRI" },
+  { value: "MAMMOGRAPHY", label: "Mammography" },
+  { value: "FLUOROSCOPY", label: "Fluoroscopy" },
+  { value: "ECG", label: "ECG" },
+  { value: "ECHO", label: "ECHO" },
+  { value: "TMT", label: "TMT" },
+  { value: "HOLTER", label: "Holter" },
+  { value: "PFT", label: "PFT" },
+  { value: "EEG", label: "EEG" },
+  { value: "EMG_NCV", label: "EMG/NCV" },
+  { value: "LAB", label: "Lab" },
+  { value: "SAMPLE_COLLECTION", label: "Sample collection" },
+  { value: "PROCEDURE_ROOM", label: "Procedure room" },
+  { value: "OTHER", label: "Other" },
+];
+
+/* =========================================================
+   Utilities (aligned to backend regex + maxLen)
+   ========================================================= */
 
 const LS_KEY = "zc.superadmin.infrastructure.branchId";
-const CODE_REGEX = /^[A-Z0-9][A-Z0-9-]{0,31}$/; // 1–32, letters/numbers/hyphen
+const CODE_REGEX = /^[A-Z0-9][A-Z0-9-]{0,63}$/; // backend: 1-64
 
 function normalizeCode(v: any) {
-  return String(v ?? "").trim().toUpperCase();
+  let code = String(v ?? "").trim().toUpperCase();
+  code = code.replace(/[^A-Z0-9-]+/g, "-");
+  code = code.replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+  return code;
 }
 
 function isBlank(v: any) {
@@ -196,14 +318,14 @@ function isBlank(v: any) {
 function validateCode(v: any, label: string): string | null {
   const code = normalizeCode(v);
   if (!code) return `${label} code is required`;
-  if (!CODE_REGEX.test(code)) return `${label} code must be 1–32 chars, letters/numbers/hyphen (e.g., TH01, OT-1, LAB1)`;
+  if (!CODE_REGEX.test(code)) return `${label} code must be 1-64 chars, letters/numbers/hyphen (e.g., TH01, OT-1, LAB1)`;
   return null;
 }
 
 function validateName(v: any, label: string): string | null {
   const name = String(v ?? "").trim();
   if (!name) return `${label} name is required`;
-  if (name.length > 200) return `${label} name is too long`;
+  if (name.length > 160) return `${label} name is too long`;
   return null;
 }
 
@@ -219,1998 +341,256 @@ function toFloat(v: any): number | null {
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
   if (!s) return null;
-  const n = Number.parseFloat(s);
+  const m = s.match(/([0-9]+(\.[0-9]+)?)/);
+  if (!m) return null;
+  const n = Number(m[1]);
   return Number.isFinite(n) ? n : null;
 }
 
-function safeArray<T = any>(v: any): T[] {
-  return Array.isArray(v) ? v : [];
+function safeArray<T = any>(v: unknown): T[] {
+  return Array.isArray(v) ? (v as T[]) : [];
 }
 
-function formatDateISO(v?: string | null): string {
-  if (!v) return "";
-  try {
-    // If backend sends ISO, keep date part.
-    return String(v).slice(0, 10);
-  } catch {
-    return "";
+function flattenLocationTree(nodes: LocationTreeNode[], parentPath = ""): FlatLocationNode[] {
+  const out: FlatLocationNode[] = [];
+  for (const n of safeArray<LocationTreeNode>(nodes)) {
+    const path = parentPath ? `${parentPath} / ${n.name}` : n.name;
+    out.push({ id: n.id, type: n.type, code: n.code, name: n.name, path });
+    const kids = [...safeArray(n.buildings), ...safeArray(n.floors), ...safeArray(n.zones)];
+    out.push(...flattenLocationTree(kids, path));
   }
+  return out;
 }
 
-function itemLabel(i: DiagnosticItemRow) {
-  return `${i.code} — ${i.name}`;
+function normalizeLocationTree(res: any): LocationTreeNode[] {
+  if (Array.isArray(res)) return res as LocationTreeNode[];
+  return safeArray<LocationTreeNode>(res?.campuses);
 }
 
-function toneByKind(kind: DiagnosticKind) {
-  if (kind === "LAB") return "bg-emerald-50/70 text-emerald-800 border border-emerald-200/70 dark:bg-emerald-900/20 dark:text-emerald-200 dark:border-emerald-900/40";
-  if (kind === "IMAGING") return "bg-sky-50/70 text-sky-800 border border-sky-200/70 dark:bg-sky-900/20 dark:text-sky-200 dark:border-sky-900/40";
-  return "bg-violet-50/70 text-violet-800 border border-violet-200/70 dark:bg-violet-900/20 dark:text-violet-200 dark:border-violet-900/40";
+function asRecord(v: any): Record<string, any> {
+  if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, any>;
+  return {};
 }
 
-type ActiveTab = "items" | "panels" | "lab" | "templates" | "charges";
+/* =========================================================
+   Page + Tabs
+   ========================================================= */
+
+type ActiveTab = "catalog" | "panels" | "lab" | "templates" | "servicePoints" | "capabilities" | "packs";
+type TabProps = { branchId: string };
 
 export default function DiagnosticsConfigPage() {
   const { toast } = useToast();
 
-  const [activeTab, setActiveTab] = React.useState<ActiveTab>("items");
-
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
-  const [branchId, setBranchId] = React.useState<string>("");
-  const [branchLoading, setBranchLoading] = React.useState(false);
-
-  const [bootErr, setBootErr] = React.useState<string | null>(null);
-
-  const loadBranches = React.useCallback(async () => {
-    setBranchLoading(true);
-    setBootErr(null);
-    try {
-      const list = await apiFetch<BranchRow[]>(`/api/branches`);
-      setBranches(list || []);
-      const saved = typeof window !== "undefined" ? localStorage.getItem(LS_KEY) : null;
-      const first = (list || [])[0]?.id;
-      const pick = saved && (list || []).some((b) => b.id === saved) ? saved : first || "";
-      if (pick) setBranchId(pick);
-    } catch (e: any) {
-      const msg = e?.message || "Failed to load branches";
-      setBootErr(msg);
-      toast({ title: "Branches", description: msg, variant: "destructive" as any });
-    } finally {
-      setBranchLoading(false);
-    }
-  }, [toast]);
+  const [branchId, setBranchId] = React.useState("");
+  const [loadingBranches, setLoadingBranches] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState<ActiveTab>("packs");
 
   React.useEffect(() => {
+    const saved = localStorage.getItem(LS_KEY);
+    if (saved) setBranchId(saved);
     void loadBranches();
-  }, [loadBranches]);
+  }, []);
 
   React.useEffect(() => {
-    if (!branchId) return;
-    try {
-      localStorage.setItem(LS_KEY, branchId);
-    } catch {
-      // ignore
-    }
+    if (branchId) localStorage.setItem(LS_KEY, branchId);
   }, [branchId]);
 
-  const branch = React.useMemo(() => branches.find((b) => b.id === branchId) || null, [branches, branchId]);
+  async function loadBranches() {
+    setLoadingBranches(true);
+    try {
+      const rows = await apiFetch<BranchRow[]>("/api/branches");
+      setBranches(safeArray(rows));
+      if (!branchId && rows?.[0]?.id) setBranchId(rows[0].id);
+    } catch (e: any) {
+      toast({ title: "Failed to load branches", description: e?.message || "Error", variant: "destructive" as any });
+      setBranches([]);
+    } finally {
+      setLoadingBranches(false);
+    }
+  }
+
+  const branch = branches.find((b) => b.id === branchId) || null;
 
   return (
     <AppShell title="Diagnostics Configuration">
-      <div className="space-y-4">
-        <Card className="overflow-hidden">
-          <CardHeader className="space-y-1">
-            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-              <div className="min-w-0">
-                <CardTitle className="text-base">Diagnostics Configuration</CardTitle>
-                <CardDescription>
-                  Configure diagnostic items, panels, lab parameters/ranges, imaging templates, and charge mapping.
-                </CardDescription>
-              </div>
-
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <div className="min-w-[260px]">
-                  <Select value={branchId} onValueChange={(v) => setBranchId(v)}>
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder={branchLoading ? "Loading branches…" : "Select branch"} />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-[320px] overflow-y-auto">
-                      {(branches || []).map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.code} — {b.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10"
-                  onClick={() => loadBranches()}
-                  disabled={branchLoading}
-                >
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Refresh
-                </Button>
+      <div className="grid gap-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-2xl border border-zc-border bg-zc-panel/30">
+              <ClipboardList className="h-5 w-5 text-zc-accent" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-3xl font-semibold tracking-tight">Diagnostics Configuration</div>
+              <div className="mt-1 text-sm text-zc-muted">
+                Configure catalog, panels, lab params, templates, service points, capabilities, and packs.
               </div>
             </div>
-          </CardHeader>
+          </div>
 
-          <CardContent className="pt-0">
-            {bootErr ? (
-              <div className="rounded-xl border border-rose-200/70 bg-rose-50/70 p-3 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-200">
-                {bootErr}
-              </div>
-            ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" className="px-5 gap-2" onClick={loadBranches} disabled={loadingBranches}>
+              <RefreshCw className={loadingBranches ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+              Refresh
+            </Button>
+          </div>
+        </div>
 
-            <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-zc-text">Branch</div>
-                <div className="mt-1 text-sm text-zc-muted">
-                  {branch ? (
-                    <span>
-                      {branch.code} — {branch.name}
-                      {branch.city ? <span className="text-zc-muted"> · {branch.city}</span> : null}
-                    </span>
-                  ) : (
-                    <span className="text-zc-muted">Select a branch to begin</span>
-                  )}
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ActiveTab)}>
+          {/* Single full-width setup header + tab navigation */}
+          <Card className="overflow-hidden">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-2">
+                <ClipboardList className="h-5 w-5 text-zc-accent" />
+                Diagnostics Setup
+              </CardTitle>
+              <CardDescription>Select branch and configure diagnostics catalog, service points, and templates.</CardDescription>
+            </CardHeader>
+            <Separator />
+            <CardContent className="pt-6">
+              <div className="grid gap-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                  <div className="grid w-full gap-2 lg:max-w-[560px]">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Branch</div>
+                    <Select value={branchId} onValueChange={setBranchId}>
+                      <SelectTrigger className="h-11 w-full rounded-xl border-zc-border bg-zc-card">
+                        <SelectValue placeholder="Select a branch…" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[320px] overflow-y-auto">
+                        {branches.map((b) => (
+                          <SelectItem key={b.id} value={b.id}>
+                            {b.name} <span className="font-mono text-xs text-zc-muted">({b.code})</span>
+                            {b.city ? <span className="text-xs text-zc-muted"> • {b.city}</span> : null}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" className="h-11 rounded-xl px-5 gap-2" onClick={loadBranches} disabled={loadingBranches} title="Refresh branches">
+                      <RefreshCw className={loadingBranches ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+                      Refresh
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Configuration</div>
+
+                  <TabsList className="grid w-full h-auto grid-cols-2 gap-2 rounded-2xl border border-zc-border bg-zc-panel/20 p-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
+                    <TabsTrigger
+                      value="packs"
+                      disabled={!branchId}
+                      className="rounded-xl data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm"
+                    >
+                      Packs
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="servicePoints"
+                      disabled={!branchId}
+                      className="rounded-xl data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm"
+                    >
+                      Service Points
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="catalog"
+                      disabled={!branchId}
+                      className="rounded-xl data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm"
+                    >
+                      Catalog
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="panels"
+                      disabled={!branchId}
+                      className="rounded-xl data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm"
+                    >
+                      Panels
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="lab"
+                      disabled={!branchId}
+                      className="rounded-xl data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm"
+                    >
+                      Lab Params
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="templates"
+                      disabled={!branchId}
+                      className="rounded-xl data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm"
+                    >
+                      Templates
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="capabilities"
+                      disabled={!branchId}
+                      className="rounded-xl data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm"
+                    >
+                      Capabilities
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <div className="rounded-2xl border border-dashed border-zc-border bg-zc-panel/15 p-4 text-sm text-zc-muted">
+                    Recommended flow: <span className="font-semibold text-zc-text">Packs</span> → Service Points → Catalog → Panels → Lab Params → Templates → Capabilities.
+                    {branch ? (
+                      <div className="mt-2 text-xs text-zc-muted">
+                        Active branch: <span className="font-mono">{branch.code}</span> — {branch.name}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
-
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Views</div>
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("items")}
-                    className={cn(
-                      "group rounded-2xl border p-3 text-left transition",
-                      activeTab === "items"
-                        ? "border-sky-200/70 bg-sky-50/70 dark:border-sky-900/40 dark:bg-sky-900/20"
-                        : "border-zc-border bg-zc-panel/10 hover:bg-zc-panel/20",
-                    )}
-                    aria-pressed={activeTab === "items"}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="grid h-9 w-9 place-items-center rounded-xl border border-white/60 bg-white/50 dark:border-white/10 dark:bg-black/10">
-                          <ClipboardList className="h-4 w-4 text-sky-700 dark:text-sky-200" />
-                        </span>
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold text-zc-text">Items</div>
-                          <div className="text-xs text-zc-muted">CRUD + deactivate</div>
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("panels")}
-                    className={cn(
-                      "group rounded-2xl border p-3 text-left transition",
-                      activeTab === "panels"
-                        ? "border-violet-200/70 bg-violet-50/70 dark:border-violet-900/40 dark:bg-violet-900/20"
-                        : "border-zc-border bg-zc-panel/10 hover:bg-zc-panel/20",
-                    )}
-                    aria-pressed={activeTab === "panels"}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="grid h-9 w-9 place-items-center rounded-xl border border-white/60 bg-white/50 dark:border-white/10 dark:bg-black/10">
-                          <Activity className="h-4 w-4 text-violet-700 dark:text-violet-200" />
-                        </span>
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold text-zc-text">Panel Builder</div>
-                          <div className="text-xs text-zc-muted">Search + multi-select</div>
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("lab")}
-                    className={cn(
-                      "group rounded-2xl border p-3 text-left transition",
-                      activeTab === "lab"
-                        ? "border-emerald-200/70 bg-emerald-50/70 dark:border-emerald-900/40 dark:bg-emerald-900/20"
-                        : "border-zc-border bg-zc-panel/10 hover:bg-zc-panel/20",
-                    )}
-                    aria-pressed={activeTab === "lab"}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="grid h-9 w-9 place-items-center rounded-xl border border-white/60 bg-white/50 dark:border-white/10 dark:bg-black/10">
-                          <FlaskConical className="h-4 w-4 text-emerald-700 dark:text-emerald-200" />
-                        </span>
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold text-zc-text">Lab Params</div>
-                          <div className="text-xs text-zc-muted">Parameters + ranges</div>
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("templates")}
-                    className={cn(
-                      "group rounded-2xl border p-3 text-left transition",
-                      activeTab === "templates"
-                        ? "border-amber-200/70 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-900/20"
-                        : "border-zc-border bg-zc-panel/10 hover:bg-zc-panel/20",
-                    )}
-                    aria-pressed={activeTab === "templates"}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="grid h-9 w-9 place-items-center rounded-xl border border-white/60 bg-white/50 dark:border-white/10 dark:bg-black/10">
-                          <ImageIcon className="h-4 w-4 text-amber-800 dark:text-amber-200" />
-                        </span>
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold text-zc-text">Templates</div>
-                          <div className="text-xs text-zc-muted">Textarea + preview</div>
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("charges")}
-                    className={cn(
-                      "group rounded-2xl border p-3 text-left transition",
-                      activeTab === "charges"
-                        ? "border-rose-200/70 bg-rose-50/70 dark:border-rose-900/40 dark:bg-rose-900/20"
-                        : "border-zc-border bg-zc-panel/10 hover:bg-zc-panel/20",
-                    )}
-                    aria-pressed={activeTab === "charges"}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="grid h-9 w-9 place-items-center rounded-xl border border-white/60 bg-white/50 dark:border-white/10 dark:bg-black/10">
-                          <Link2 className="h-4 w-4 text-rose-700 dark:text-rose-200" />
-                        </span>
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold text-zc-text">Charges</div>
-                          <div className="text-xs text-zc-muted">Bind Charge Master</div>
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {branchId ? (
-          <>
-            {activeTab === "items" ? <DiagnosticsItemsTab branchId={branchId} /> : null}
-            {activeTab === "panels" ? <PanelBuilderTab branchId={branchId} /> : null}
-            {activeTab === "lab" ? <LabParametersTab branchId={branchId} /> : null}
-            {activeTab === "templates" ? <ImagingTemplatesTab branchId={branchId} /> : null}
-            {activeTab === "charges" ? <ChargeMappingTab branchId={branchId} /> : null}
-          </>
-        ) : (
-          <Card>
-            <CardContent className="py-6">
-              <div className="text-sm text-zc-muted">Select a branch to configure diagnostics.</div>
             </CardContent>
           </Card>
-        )}
+
+          {/* Full-width active tab content */}
+          {!branchId ? (
+            <Card>
+              <CardContent className="py-6 text-sm text-zc-muted">Select a branch to start.</CardContent>
+            </Card>
+          ) : (
+            <>
+              <TabsContent value="packs" className="mt-0">
+                <PacksTab branchId={branchId} />
+              </TabsContent>
+
+              <TabsContent value="servicePoints" className="mt-0">
+                <ServicePointsTab branchId={branchId} />
+              </TabsContent>
+
+              <TabsContent value="catalog" className="mt-0">
+                <CatalogTab branchId={branchId} />
+              </TabsContent>
+
+              <TabsContent value="panels" className="mt-0">
+                <PanelsTab branchId={branchId} />
+              </TabsContent>
+
+              <TabsContent value="lab" className="mt-0">
+                <LabParamsTab branchId={branchId} />
+              </TabsContent>
+
+              <TabsContent value="templates" className="mt-0">
+                <TemplatesTab branchId={branchId} />
+              </TabsContent>
+
+              <TabsContent value="capabilities" className="mt-0">
+                <CapabilitiesTab branchId={branchId} />
+              </TabsContent>
+            </>
+          )}
+        </Tabs>
+
+
       </div>
     </AppShell>
   );
 }
 
-// ---- Tabs below ----
-
-type TabProps = { branchId: string };
-
-function DiagnosticsItemsTab({ branchId }: TabProps) {
-  const { toast } = useToast();
-
-  const [loading, setLoading] = React.useState(false);
-  const [err, setErr] = React.useState<string | null>(null);
-
-  const [sections, setSections] = React.useState<SectionRow[]>([]);
-  const [categories, setCategories] = React.useState<CategoryRow[]>([]);
-  const [specimens, setSpecimens] = React.useState<SpecimenRow[]>([]);
-  const [items, setItems] = React.useState<DiagnosticItemRow[]>([]);
-
-  // filters
-  const [kind, setKind] = React.useState<DiagnosticKind>("LAB");
-  const [sectionId, setSectionId] = React.useState<string>("all");
-  const [categoryId, setCategoryId] = React.useState<string>("all");
-  const [panelFilter, setPanelFilter] = React.useState<"all" | "panel" | "test">("all");
-  const [includeInactive, setIncludeInactive] = React.useState(false);
-  const [q, setQ] = React.useState("");
-
-  // dialogs
-  const [itemDialogOpen, setItemDialogOpen] = React.useState(false);
-  const [editingItem, setEditingItem] = React.useState<DiagnosticItemRow | null>(null);
-
-  const [sectionDialogOpen, setSectionDialogOpen] = React.useState(false);
-  const [editingSection, setEditingSection] = React.useState<SectionRow | null>(null);
-
-  const [categoryDialogOpen, setCategoryDialogOpen] = React.useState(false);
-  const [editingCategory, setEditingCategory] = React.useState<CategoryRow | null>(null);
-
-  const [specimenDialogOpen, setSpecimenDialogOpen] = React.useState(false);
-  const [editingSpecimen, setEditingSpecimen] = React.useState<SpecimenRow | null>(null);
-
-  function buildQS(params: Record<string, any>) {
-    const usp = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => {
-      if (v === undefined || v === null) return;
-      const s = String(v);
-      if (!s || s === "all") return;
-      usp.set(k, s);
-    });
-    return usp.toString();
-  }
-
-  async function loadCatalog() {
-    const sec = await apiFetch<SectionRow[]>(
-      `/api/infrastructure/diagnostics/sections?${buildQS({ branchId, includeInactive: true })}`
-    );
-    setSections(Array.isArray(sec) ? sec : []);
-
-    const cat = await apiFetch<CategoryRow[]>(
-      `/api/infrastructure/diagnostics/categories?${buildQS({ branchId, includeInactive: true })}`
-    );
-    setCategories(Array.isArray(cat) ? cat : []);
-
-    const sp = await apiFetch<SpecimenRow[]>(
-      `/api/infrastructure/diagnostics/specimens?${buildQS({ branchId, includeInactive: true })}`
-    );
-    setSpecimens(Array.isArray(sp) ? sp : []);
-  }
-
-  async function loadItems(showToast = false) {
-    setErr(null);
-    setLoading(true);
-    try {
-      const isPanel = panelFilter === "all" ? undefined : panelFilter === "panel";
-      const data = await apiFetch<DiagnosticItemRow[]>(
-        `/api/infrastructure/diagnostics/items?${buildQS({
-          branchId,
-          kind,
-          sectionId,
-          categoryId,
-          includeInactive,
-          isPanel,
-          q: q.trim() || undefined,
-        })}`
-      );
-      setItems(Array.isArray(data) ? data : []);
-      if (showToast) toast({ title: "Items refreshed", description: "Loaded latest items." });
-    } catch (e: any) {
-      const msg = e?.message || "Failed to load items";
-      setErr(msg);
-      setItems([]);
-      if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function refreshAll(showToast = false) {
-    setLoading(true);
-    setErr(null);
-    try {
-      await loadCatalog();
-      await loadItems(false);
-      if (showToast) toast({ title: "Diagnostics refreshed", description: "Catalog and items are up to date." });
-    } catch (e: any) {
-      const msg = e?.message || "Refresh failed";
-      setErr(msg);
-      if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  React.useEffect(() => {
-    void refreshAll(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId]);
-
-  React.useEffect(() => {
-    void loadItems(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, sectionId, categoryId, panelFilter, includeInactive]);
-
-  const sectionOptions = React.useMemo(() => {
-    const list = (sections || []).slice().sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
-    return list;
-  }, [sections]);
-
-  const categoryOptions = React.useMemo(() => {
-    const base = (categories || []).filter((c) => !sectionId || sectionId === "all" || c.sectionId === sectionId);
-    return base
-      .slice()
-      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
-  }, [categories, sectionId]);
-
-  const specimenOptions = React.useMemo(() => {
-    return (specimens || [])
-      .slice()
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)) || String(a.code).localeCompare(String(b.code)));
-  }, [specimens]);
-
-  async function deactivateItem(row: DiagnosticItemRow) {
-    try {
-      await apiFetch(`/api/infrastructure/diagnostics/items/${encodeURIComponent(row.id)}`, { method: "DELETE" });
-      toast({ title: "Deactivated", description: `${row.code} is now inactive.` });
-      await loadItems(false);
-    } catch (e: any) {
-      toast({ title: "Action failed", description: e?.message || "Failed", variant: "destructive" as any });
-    }
-  }
-
-  async function activateItem(row: DiagnosticItemRow) {
-    try {
-      await apiFetch(`/api/infrastructure/diagnostics/items/${encodeURIComponent(row.id)}`, {
-        method: "PUT",
-        body: JSON.stringify({ branchId, isActive: true }),
-      });
-      toast({ title: "Activated", description: `${row.code} is now active.` });
-      await loadItems(false);
-    } catch (e: any) {
-      toast({ title: "Action failed", description: e?.message || "Failed", variant: "destructive" as any });
-    }
-  }
-
-  return (
-    <div className="space-y-6">
-      <Card className="overflow-hidden">
-        <CardHeader className="pb-3">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="min-w-0">
-              <CardTitle className="text-base">Diagnostic Items</CardTitle>
-              <CardDescription>Create, edit and deactivate diagnostic items. Includes validation aligned with backend rules.</CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => void refreshAll(true)} className="gap-2">
-                <RefreshCw className="h-4 w-4" /> Refresh
-              </Button>
-              <Button
-                variant={"success" as any}
-                onClick={() => {
-                  setEditingItem(null);
-                  setItemDialogOpen(true);
-                }}
-                className="gap-2"
-              >
-                <Plus className="h-4 w-4" /> New Item
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-12">
-            <div className="md:col-span-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Kind</div>
-              <Select value={kind} onValueChange={(v) => setKind(v as DiagnosticKind)}>
-                <SelectTrigger className="mt-1 h-10">
-                  <SelectValue placeholder="Kind" />
-                </SelectTrigger>
-                <SelectContent>
-                  {DIAG_KINDS.map((k) => (
-                    <SelectItem key={k.value} value={k.value}>
-                      {k.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="md:col-span-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Section</div>
-              <Select value={sectionId} onValueChange={setSectionId}>
-                <SelectTrigger className="mt-1 h-10">
-                  <SelectValue placeholder="All sections" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All sections</SelectItem>
-                  {sectionOptions.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name} ({s.code})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="mt-1 flex items-center justify-between">
-                <button
-                  type="button"
-                  className="text-xs text-zc-muted hover:text-zc-text"
-                  onClick={() => {
-                    setEditingSection(null);
-                    setSectionDialogOpen(true);
-                  }}
-                >
-                  + Add section
-                </button>
-                <button
-                  type="button"
-                  className="text-xs text-zc-muted hover:text-zc-text"
-                  onClick={() => {
-                    const s = sections.find((x) => x.id === sectionId);
-                    if (!s) return;
-                    setEditingSection(s);
-                    setSectionDialogOpen(true);
-                  }}
-                  disabled={sectionId === "all"}
-                >
-                  Edit
-                </button>
-              </div>
-            </div>
-
-            <div className="md:col-span-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Category</div>
-              <Select value={categoryId} onValueChange={setCategoryId}>
-                <SelectTrigger className="mt-1 h-10">
-                  <SelectValue placeholder="All categories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All categories</SelectItem>
-                  {categoryOptions.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name} ({c.code})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="mt-1 flex items-center justify-between">
-                <button
-                  type="button"
-                  className="text-xs text-zc-muted hover:text-zc-text"
-                  onClick={() => {
-                    setEditingCategory(null);
-                    setCategoryDialogOpen(true);
-                  }}
-                >
-                  + Add category
-                </button>
-                <button
-                  type="button"
-                  className="text-xs text-zc-muted hover:text-zc-text"
-                  onClick={() => {
-                    const c = categories.find((x) => x.id === categoryId);
-                    if (!c) return;
-                    setEditingCategory(c);
-                    setCategoryDialogOpen(true);
-                  }}
-                  disabled={categoryId === "all"}
-                >
-                  Edit
-                </button>
-              </div>
-            </div>
-
-            <div className="md:col-span-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Type</div>
-              <Select value={panelFilter} onValueChange={(v) => setPanelFilter(v as any)}>
-                <SelectTrigger className="mt-1 h-10">
-                  <SelectValue placeholder="All" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="panel">Panels</SelectItem>
-                  <SelectItem value="test">Tests</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="md:col-span-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Search</div>
-              <div className="relative mt-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zc-muted" />
-                <Input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Code or name"
-                  className="h-10 pl-9"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 text-sm">
-              <Switch checked={includeInactive} onCheckedChange={(v) => setIncludeInactive(Boolean(v))} />
-              Include inactive
-            </label>
-
-            <Button variant="outline" onClick={() => void loadItems(true)} className="gap-2">
-              <Activity className="h-4 w-4" /> Apply
-            </Button>
-
-            {err ? <span className="text-sm text-red-600">{err}</span> : null}
-            {loading ? <span className="text-sm text-zc-muted">Loading…</span> : null}
-          </div>
-
-          <div className="rounded-xl border border-zc-border overflow-hidden">
-            <div className="grid grid-cols-12 gap-2 bg-zc-panel/40 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-zc-muted">
-              <div className="col-span-3">Item</div>
-              <div className="col-span-3">Classification</div>
-              <div className="col-span-3">Notes</div>
-              <div className="col-span-3 text-right">Actions</div>
-            </div>
-
-            {items.length === 0 ? (
-              <div className="px-3 py-6 text-sm text-zc-muted">No items found for current filters.</div>
-            ) : (
-              <div className="divide-y divide-zc-border">
-                {items.map((it) => (
-                  <div key={it.id} className="grid grid-cols-12 gap-2 px-3 py-3">
-                    <div className="col-span-3 min-w-0">
-                      <div className="truncate text-sm font-semibold text-zc-text">
-                        {it.name}
-                        {it.isPanel ? <Badge className="ml-2" variant="secondary">Panel</Badge> : null}
-                        {!it.isActive ? <Badge className="ml-2" variant="outline">Inactive</Badge> : null}
-                      </div>
-                      <div className="mt-0.5 truncate text-xs text-zc-muted">{it.code}</div>
-                    </div>
-
-                    <div className="col-span-3 min-w-0">
-                      <div className="truncate text-sm">{DIAG_KINDS.find((k) => k.value === it.kind)?.label ?? it.kind}</div>
-                      <div className="mt-0.5 truncate text-xs text-zc-muted">
-                        {it.section?.name || "—"}
-                        {it.category?.name ? ` • ${it.category.name}` : ""}
-                        {it.kind === "LAB" && it.specimen?.name ? ` • ${it.specimen.name}` : ""}
-                      </div>
-                    </div>
-
-                    <div className="col-span-3 min-w-0">
-                      <div className="truncate text-sm text-zc-muted">{it.preparationText ? "Prep: " + it.preparationText : "—"}</div>
-                      <div className="mt-0.5 truncate text-xs text-zc-muted">
-                        {it.consentRequired ? "Consent required" : ""}
-                      </div>
-                    </div>
-
-                    <div className="col-span-3 flex items-center justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-2"
-                        onClick={() => {
-                          setEditingItem(it);
-                          setItemDialogOpen(true);
-                        }}
-                      >
-                        <Pencil className="h-4 w-4" /> Edit
-                      </Button>
-
-                      {it.isActive ? (
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          className="gap-2"
-                          onClick={() => void deactivateItem(it)}
-                        >
-                          <Trash2 className="h-4 w-4" /> Deactivate
-                        </Button>
-                      ) : (
-                        <Button variant="secondary" size="sm" onClick={() => void activateItem(it)}>
-                          Activate
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <ItemDialog
-        open={itemDialogOpen}
-        onOpenChange={setItemDialogOpen}
-        branchId={branchId}
-        editing={editingItem}
-        sections={sectionOptions}
-        categories={categories}
-        specimens={specimenOptions}
-        onSaved={async () => {
-          setItemDialogOpen(false);
-          setEditingItem(null);
-          await loadCatalog();
-          await loadItems(false);
-        }}
-      />
-
-      <SectionDialog
-        open={sectionDialogOpen}
-        onOpenChange={setSectionDialogOpen}
-        branchId={branchId}
-        editing={editingSection}
-        onSaved={async () => {
-          setSectionDialogOpen(false);
-          setEditingSection(null);
-          await loadCatalog();
-          await loadItems(false);
-        }}
-      />
-
-      <CategoryDialog
-        open={categoryDialogOpen}
-        onOpenChange={setCategoryDialogOpen}
-        branchId={branchId}
-        editing={editingCategory}
-        sections={sectionOptions}
-        onSaved={async () => {
-          setCategoryDialogOpen(false);
-          setEditingCategory(null);
-          await loadCatalog();
-          await loadItems(false);
-        }}
-      />
-
-      <SpecimenDialog
-        open={specimenDialogOpen}
-        onOpenChange={setSpecimenDialogOpen}
-        branchId={branchId}
-        editing={editingSpecimen}
-        onSaved={async () => {
-          setSpecimenDialogOpen(false);
-          setEditingSpecimen(null);
-          await loadCatalog();
-          await loadItems(false);
-        }}
-      />
-
-      <Card className="overflow-hidden">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Lab Specimens</CardTitle>
-          <CardDescription>Used by LAB tests. Deactivation is blocked if specimen is used by any active item.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-sm text-zc-muted">{specimens.length} specimen types</div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setEditingSpecimen(null);
-                  setSpecimenDialogOpen(true);
-                }}
-                className="gap-2"
-              >
-                <Plus className="h-4 w-4" /> Add specimen
-              </Button>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-zc-border overflow-hidden">
-            <div className="grid grid-cols-12 gap-2 bg-zc-panel/40 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-zc-muted">
-              <div className="col-span-4">Specimen</div>
-              <div className="col-span-5">Container / Notes</div>
-              <div className="col-span-3 text-right">Actions</div>
-            </div>
-            <div className="divide-y divide-zc-border">
-              {specimens.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map((s) => (
-                <div key={s.id} className="grid grid-cols-12 gap-2 px-3 py-3">
-                  <div className="col-span-4 min-w-0">
-                    <div className="truncate text-sm font-semibold text-zc-text">
-                      {s.name} {!s.isActive ? <Badge className="ml-2" variant="outline">Inactive</Badge> : null}
-                    </div>
-                    <div className="mt-0.5 truncate text-xs text-zc-muted">{s.code}</div>
-                  </div>
-                  <div className="col-span-5 min-w-0">
-                    <div className="truncate text-sm text-zc-muted">
-                      {(s.container ? `Container: ${s.container}` : "") + (s.minVolumeMl ? ` • Min: ${s.minVolumeMl} ml` : "")}
-                    </div>
-                    <div className="mt-0.5 truncate text-xs text-zc-muted">{s.handlingNotes || "—"}</div>
-                  </div>
-                  <div className="col-span-3 flex items-center justify-end gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setEditingSpecimen(s);
-                        setSpecimenDialogOpen(true);
-                      }}
-                      className="gap-2"
-                    >
-                      <Pencil className="h-4 w-4" /> Edit
-                    </Button>
-                    {s.isActive ? (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={async () => {
-                          try {
-                            await apiFetch(`/api/infrastructure/diagnostics/specimens/${encodeURIComponent(s.id)}`, { method: "DELETE" });
-                            toast({ title: "Deactivated", description: `${s.code} is now inactive.` });
-                            await loadCatalog();
-                          } catch (e: any) {
-                            toast({ title: "Cannot deactivate", description: e?.message || "Failed", variant: "destructive" as any });
-                          }
-                        }}
-                      >
-                        Deactivate
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={async () => {
-                          try {
-                            await apiFetch(`/api/infrastructure/diagnostics/specimens/${encodeURIComponent(s.id)}`, {
-                              method: "PUT",
-                              body: JSON.stringify({ branchId, isActive: true }),
-                            });
-                            toast({ title: "Activated", description: `${s.code} is now active.` });
-                            await loadCatalog();
-                          } catch (e: any) {
-                            toast({ title: "Action failed", description: e?.message || "Failed", variant: "destructive" as any });
-                          }
-                        }}
-                      >
-                        Activate
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function PanelBuilderTab({ branchId }: TabProps) {
-  const { toast } = useToast();
-
-  const [loading, setLoading] = React.useState(false);
-  const [err, setErr] = React.useState<string | null>(null);
-
-  const [kind, setKind] = React.useState<DiagnosticKind>("LAB");
-  const [panelQuery, setPanelQuery] = React.useState("");
-  const [panels, setPanels] = React.useState<DiagnosticItemRow[]>([]);
-  const [panelId, setPanelId] = React.useState<string>("");
-
-  const selectedPanel = React.useMemo(() => panels.find((p) => p.id === panelId) || null, [panels, panelId]);
-
-  const [serverPanelItems, setServerPanelItems] = React.useState<PanelItemRow[]>([]);
-  const [draft, setDraft] = React.useState<Array<{ itemId: string; code: string; name: string }>>([]);
-
-  const [candidateQuery, setCandidateQuery] = React.useState("");
-  const [candidates, setCandidates] = React.useState<DiagnosticItemRow[]>([]);
-  const [selectedIds, setSelectedIds] = React.useState<Record<string, boolean>>({});
-
-  async function loadPanels() {
-    setErr(null);
-    setLoading(true);
-    try {
-      const qs = new URLSearchParams();
-      qs.set("branchId", branchId);
-      qs.set("kind", kind);
-      qs.set("isPanel", "true");
-      if (panelQuery.trim()) qs.set("q", panelQuery.trim());
-      const rows = await apiFetch<DiagnosticItemRow[]>(`/api/infrastructure/diagnostics/items?${qs.toString()}`);
-      setPanels(Array.isArray(rows) ? rows : []);
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load panels");
-      setPanels([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadPanelItems(id: string) {
-    if (!id) {
-      setServerPanelItems([]);
-      setDraft([]);
-      return;
-    }
-    setLoading(true);
-    setErr(null);
-    try {
-      const rows = await apiFetch<PanelItemRow[]>(`/api/infrastructure/diagnostics/items/${encodeURIComponent(id)}/panel-items`);
-      const list = Array.isArray(rows) ? rows : [];
-      setServerPanelItems(list);
-      const d = list
-        .filter((x) => x?.itemId)
-        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-        .map((x) => ({ itemId: x.itemId, code: x.item?.code || "", name: x.item?.name || "" }));
-      setDraft(d);
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load panel items");
-      setServerPanelItems([]);
-      setDraft([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadCandidates() {
-    if (!selectedPanel) {
-      setCandidates([]);
-      return;
-    }
-    try {
-      const qs = new URLSearchParams();
-      qs.set("branchId", branchId);
-      qs.set("kind", selectedPanel.kind);
-      qs.set("isPanel", "false");
-      if (candidateQuery.trim()) qs.set("q", candidateQuery.trim());
-      const rows = await apiFetch<DiagnosticItemRow[]>(`/api/infrastructure/diagnostics/items?${qs.toString()}`);
-      const list = (Array.isArray(rows) ? rows : []).filter((x) => !x.isPanel && x.isActive);
-      setCandidates(list);
-    } catch {
-      setCandidates([]);
-    }
-  }
-
-  React.useEffect(() => {
-    void loadPanels();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId, kind]);
-
-  React.useEffect(() => {
-    const t = setTimeout(() => void loadPanels(), 350);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panelQuery]);
-
-  React.useEffect(() => {
-    void loadPanelItems(panelId);
-    setSelectedIds({});
-    setCandidateQuery("");
-    setCandidates([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panelId]);
-
-  React.useEffect(() => {
-    const t = setTimeout(() => void loadCandidates(), 250);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidateQuery, selectedPanel?.id]);
-
-  function toggleCandidate(id: string) {
-    setSelectedIds((p) => ({ ...p, [id]: !p[id] }));
-  }
-
-  function addSelected() {
-    const ids = Object.keys(selectedIds).filter((k) => selectedIds[k]);
-    if (!ids.length) return;
-
-    const existing = new Set(draft.map((d) => d.itemId));
-    const toAdd = candidates.filter((c) => ids.includes(c.id) && !existing.has(c.id));
-
-    setDraft((p) => [...p, ...toAdd.map((c) => ({ itemId: c.id, code: c.code, name: c.name }))]);
-    setSelectedIds({});
-    toast({ title: "Added", description: `${toAdd.length} item(s) added to draft.` });
-  }
-
-  function move(idx: number, dir: -1 | 1) {
-    setDraft((p) => {
-      const next = [...p];
-      const j = idx + dir;
-      if (idx < 0 || idx >= next.length) return p;
-      if (j < 0 || j >= next.length) return p;
-      const tmp = next[idx];
-      next[idx] = next[j];
-      next[j] = tmp;
-      return next;
-    });
-  }
-
-  function removeAt(idx: number) {
-    setDraft((p) => p.filter((_, i) => i !== idx));
-  }
-
-  async function save() {
-    if (!selectedPanel?.id) {
-      toast({ title: "Select a panel", description: "Choose a panel item to configure its contents.", variant: "destructive" as any });
-      return;
-    }
-
-    setLoading(true);
-    setErr(null);
-    try {
-      await apiFetch(
-        `/api/infrastructure/diagnostics/items/${encodeURIComponent(selectedPanel.id)}/panel-items`,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            items: draft.map((d, i) => ({ itemId: d.itemId, sortOrder: i })),
-          }),
-        },
-      );
-      toast({ title: "Saved", description: "Panel items updated." });
-      await loadPanelItems(selectedPanel.id);
-    } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Failed", variant: "destructive" as any });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="grid gap-4">
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="text-base">Panel Builder</CardTitle>
-          <CardDescription>
-            Search tests, multi-select, order them, and apply using <span className="font-mono">replacePanelItems</span>.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-3">
-            <div>
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-zc-muted">Kind</div>
-              <Select value={kind} onValueChange={(v) => setKind(v as DiagnosticKind)}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Kind" />
-                </SelectTrigger>
-                <SelectContent>
-                  {DIAG_KINDS.map((k) => (
-                    <SelectItem key={k.value} value={k.value}>
-                      {k.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="md:col-span-2">
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-zc-muted">Panel</div>
-              <div className="flex items-center gap-2">
-                <Input
-                  value={panelQuery}
-                  onChange={(e) => setPanelQuery(e.target.value)}
-                  placeholder="Search panels (code/name)…"
-                  className="h-10"
-                />
-                <Button variant="outline" className="h-10" onClick={() => loadPanels()}>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Refresh
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="md:col-span-2">
-              <Select value={panelId} onValueChange={(v) => setPanelId(v)}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Select a panel…" />
-                </SelectTrigger>
-                <SelectContent className="max-h-[320px] overflow-y-auto">
-                  {(panels || []).map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.code} — {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="mt-2 text-xs text-zc-muted">
-                MVP rule enforced by backend: panels cannot contain other panels; panel items must match panel kind.
-              </div>
-            </div>
-
-            <div className="flex items-end justify-end gap-2">
-              <Button className="h-10" onClick={save} disabled={!selectedPanel || loading}>
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Apply
-              </Button>
-            </div>
-          </div>
-
-          {err ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200">
-              {err}
-            </div>
-          ) : null}
-
-          <Separator />
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm font-semibold text-zc-text">Candidate tests</div>
-                  <div className="text-xs text-zc-muted">Search and multi-select. Click “Add to draft”.</div>
-                </div>
-              </div>
-
-              <div className="mt-3 flex items-center gap-2">
-                <Search className="h-4 w-4 text-zc-muted" />
-                <Input
-                  value={candidateQuery}
-                  onChange={(e) => setCandidateQuery(e.target.value)}
-                  placeholder={selectedPanel ? `Search ${selectedPanel.kind} tests…` : "Select a panel first"}
-                  className="h-10"
-                  disabled={!selectedPanel}
-                />
-                <Button variant="outline" className="h-10" onClick={addSelected} disabled={!selectedPanel}>
-                  Add
-                </Button>
-              </div>
-
-              <div className="mt-3 max-h-[360px] overflow-y-auto rounded-xl border bg-zc-panel/10">
-                {(candidates || []).length ? (
-                  <div className="divide-y divide-zc-border">
-                    {candidates.map((c) => {
-                      const checked = !!selectedIds[c.id];
-                      return (
-                        <div key={c.id} className="flex items-center gap-3 px-3 py-2">
-                          <Checkbox checked={checked} onCheckedChange={() => toggleCandidate(c.id)} />
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-zc-text">{c.code} — {c.name}</div>
-                            <div className="text-xs text-zc-muted">{c.isPanel ? "Panel" : "Test"} • {c.section?.name || "—"}</div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="p-3 text-sm text-zc-muted">No results.</div>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-xl border p-3">
-              <div>
-                <div className="text-sm font-semibold text-zc-text">Draft panel items</div>
-                <div className="text-xs text-zc-muted">Order with arrows, remove, then Apply.</div>
-              </div>
-
-              <div className="mt-3 max-h-[420px] overflow-y-auto rounded-xl border bg-zc-panel/10">
-                {draft.length ? (
-                  <div className="divide-y divide-zc-border">
-                    {draft.map((d, idx) => (
-                      <div key={d.itemId} className="flex items-center justify-between gap-3 px-3 py-2">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-zc-text">{d.code} — {d.name}</div>
-                          <div className="text-xs text-zc-muted">Sort: {idx}</div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Button variant="outline" size="icon" onClick={() => move(idx, -1)} disabled={idx === 0}>
-                            <ArrowUp className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => move(idx, 1)}
-                            disabled={idx === draft.length - 1}
-                          >
-                            <ArrowDown className="h-4 w-4" />
-                          </Button>
-                          <Button variant="outline" size="icon" onClick={() => removeAt(idx)}>
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="p-3 text-sm text-zc-muted">No items in draft.</div>
-                )}
-              </div>
-
-              <div className="mt-3 text-xs text-zc-muted">
-                Backend will reject: panel including itself, containing panels, or containing mismatched kinds.
-              </div>
-
-              {serverPanelItems.length ? (
-                <div className="mt-3 text-xs text-zc-muted">
-                  Loaded {serverPanelItems.length} active items from server.
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function LabParametersTab({ branchId }: TabProps) {
-  const { toast } = useToast();
-
-  const [loading, setLoading] = React.useState(false);
-  const [err, setErr] = React.useState<string | null>(null);
-
-  const [testQuery, setTestQuery] = React.useState("");
-  const [tests, setTests] = React.useState<DiagnosticItemRow[]>([]);
-  const [selectedTestId, setSelectedTestId] = React.useState<string>("");
-  const selectedTest = React.useMemo(() => tests.find((t) => t.id === selectedTestId) || null, [tests, selectedTestId]);
-
-  const [parameters, setParameters] = React.useState<ParameterRow[]>([]);
-
-  const [paramModalOpen, setParamModalOpen] = React.useState(false);
-  const [editingParam, setEditingParam] = React.useState<ParameterRow | null>(null);
-
-  const [rangesModalOpen, setRangesModalOpen] = React.useState(false);
-  const [rangesParam, setRangesParam] = React.useState<ParameterRow | null>(null);
-
-  async function loadTests() {
-    const qs = new URLSearchParams({
-      branchId,
-      kind: "LAB",
-      isPanel: "false",
-    });
-    if (testQuery.trim()) qs.set("q", testQuery.trim());
-
-    const rows = await apiFetch<DiagnosticItemRow[]>(`/api/infrastructure/diagnostics/items?${qs.toString()}`);
-    setTests(rows || []);
-
-    // keep selection if still exists
-    if (selectedTestId) {
-      const still = (rows || []).some((r) => r.id === selectedTestId);
-      if (!still) {
-        setSelectedTestId("");
-        setParameters([]);
-      }
-    }
-  }
-
-  async function loadParameters(testId: string) {
-    if (!testId) return;
-    const rows = await apiFetch<ParameterRow[]>(`/api/infrastructure/diagnostics/items/${encodeURIComponent(testId)}/parameters`);
-    setParameters(rows || []);
-  }
-
-  async function refresh(showToast = false) {
-    setErr(null);
-    setLoading(true);
-    try {
-      await loadTests();
-      if (selectedTestId) await loadParameters(selectedTestId);
-      if (showToast) toast({ title: "Refreshed", description: "Loaded latest lab parameters." });
-    } catch (e: any) {
-      const msg = e?.message || "Failed to load lab parameters";
-      setErr(msg);
-      if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  React.useEffect(() => {
-    void refresh(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId]);
-
-  React.useEffect(() => {
-    const t = setTimeout(() => void loadTests(), 200);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [testQuery]);
-
-  React.useEffect(() => {
-    if (!selectedTestId) return;
-    void loadParameters(selectedTestId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTestId]);
-
-  return (
-    <div className="mt-4 grid gap-4">
-      <Card className="overflow-hidden">
-        <CardHeader className="pb-3">
-          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-            <div className="min-w-0">
-              <CardTitle className="text-base">Lab Parameters & Reference Ranges</CardTitle>
-              <CardDescription>Configure lab result parameters and their normal ranges (full CRUD).</CardDescription>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => void refresh(true)} disabled={loading}>
-                <RefreshCw className={cn("mr-2 h-4 w-4", loading ? "animate-spin" : "")} />
-                Refresh
-              </Button>
-              <Button
-                className="gap-2"
-                onClick={() => {
-                  if (!selectedTestId) {
-                    toast({ title: "Select a test", description: "Choose a non-panel LAB item first.", variant: "destructive" as any });
-                    return;
-                  }
-                  setEditingParam(null);
-                  setParamModalOpen(true);
-                }}
-                disabled={!selectedTestId}
-              >
-                <Plus className="h-4 w-4" />
-                New Parameter
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-
-        <CardContent className="pt-0">
-          {err ? (
-            <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-200">
-              {err}
-            </div>
-          ) : null}
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="md:col-span-1">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Choose test</div>
-              <div className="mt-2 flex items-center gap-2">
-                <Input value={testQuery} onChange={(e) => setTestQuery(e.target.value)} placeholder="Search lab tests…" />
-                <Button variant="outline" onClick={() => void loadTests()} title="Search">
-                  <Search className="h-4 w-4" />
-                </Button>
-              </div>
-
-              <div className="mt-3 max-h-[320px] overflow-y-auto rounded-xl border border-zc-border bg-zc-panel/20">
-                {(tests || []).length === 0 ? (
-                  <div className="p-3 text-sm text-zc-muted">No matching tests.</div>
-                ) : (
-                  <div className="divide-y divide-zc-border">
-                    {(tests || []).map((t) => {
-                      const selected = t.id === selectedTestId;
-                      return (
-                        <button
-                          key={t.id}
-                          type="button"
-                          className={cn(
-                            "w-full text-left px-3 py-2 transition",
-                            selected ? "bg-sky-50/70 dark:bg-sky-900/20" : "hover:bg-zc-panel/30",
-                          )}
-                          onClick={() => setSelectedTestId(t.id)}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="truncate text-sm font-semibold text-zc-text">
-                                {t.name}
-                              </div>
-                              <div className="truncate text-xs text-zc-muted font-mono">{t.code}</div>
-                            </div>
-                            <Badge variant="secondary">LAB</Badge>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="md:col-span-2">
-              <div className="rounded-xl border border-zc-border">
-                <div className="flex items-center justify-between gap-3 border-b border-zc-border px-4 py-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-zc-text">Parameters</div>
-                    <div className="text-xs text-zc-muted">
-                      {selectedTest ? (
-                        <span>
-                          For <span className="font-mono">{selectedTest.code}</span> — {selectedTest.name}
-                        </span>
-                      ) : (
-                        "Select a test to manage parameters."
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-xs text-zc-muted tabular-nums">{(parameters || []).length} total</div>
-                </div>
-
-                {!selectedTest ? (
-                  <div className="p-4 text-sm text-zc-muted">Choose a non-panel lab test from the left list.</div>
-                ) : (parameters || []).length === 0 ? (
-                  <div className="p-4 text-sm text-zc-muted">No parameters added yet.</div>
-                ) : (
-                  <div className="divide-y divide-zc-border">
-                    {(parameters || []).map((p) => (
-                      <div key={p.id} className="p-4">
-                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="text-sm font-semibold text-zc-text">
-                                {p.name}
-                              </div>
-                              <Badge variant="secondary" className="font-mono">
-                                {p.code}
-                              </Badge>
-                              <Badge className="border border-zc-border bg-zc-panel/20 text-zc-text" variant="secondary">
-                                {p.dataType}
-                              </Badge>
-                              {p.unit ? (
-                                <Badge variant="outline" className="font-mono">
-                                  {p.unit}
-                                </Badge>
-                              ) : null}
-                            </div>
-                            <div className="mt-1 text-xs text-zc-muted">
-                              Sort: <span className="font-mono">{p.sortOrder ?? 0}</span>
-                              {p.dataType === "CHOICE" && p.allowedText ? (
-                                <span className="ml-2">Choices: {p.allowedText}</span>
-                              ) : null}
-                            </div>
-
-                            {(p.ranges || []).length ? (
-                              <div className="mt-3 rounded-lg border border-zc-border bg-zc-panel/10 p-3">
-                                <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Reference ranges</div>
-                                <div className="mt-2 space-y-1">
-                                  {(p.ranges || []).map((r) => (
-                                    <div key={r.id} className="flex flex-wrap items-center gap-2 text-xs">
-                                      <Badge variant="outline">{r.sex || "Any"}</Badge>
-                                      <span className="text-zc-muted">
-                                        Age: {r.ageMinDays ?? "—"} to {r.ageMaxDays ?? "—"} days
-                                      </span>
-                                      <span className="text-zc-text">
-                                        {r.low !== null && r.low !== undefined ? r.low : "—"} — {r.high !== null && r.high !== undefined ? r.high : "—"}
-                                      </span>
-                                      {r.textRange ? <span className="text-zc-muted">({r.textRange})</span> : null}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="mt-3 text-xs text-zc-muted">No reference ranges defined.</div>
-                            )}
-                          </div>
-
-                          <div className="flex shrink-0 items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setEditingParam(p);
-                                setParamModalOpen(true);
-                              }}
-                            >
-                              <Pencil className="mr-2 h-4 w-4" />
-                              Edit
-                            </Button>
-
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setRangesParam(p);
-                                setRangesModalOpen(true);
-                              }}
-                            >
-                              <ClipboardList className="mr-2 h-4 w-4" />
-                              Ranges
-                            </Button>
-
-                            {p.isActive ? (
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={async () => {
-                                  try {
-                                    await apiFetch(`/api/infrastructure/diagnostics/parameters/${encodeURIComponent(p.id)}`, { method: "DELETE" });
-                                    toast({ title: "Deactivated", description: "Parameter deactivated." });
-                                    await loadParameters(selectedTestId);
-                                  } catch (e: any) {
-                                    toast({ title: "Deactivate failed", description: e?.message || "Failed", variant: "destructive" as any });
-                                  }
-                                }}
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Deactivate
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <ParameterEditorModal
-        open={paramModalOpen}
-        onOpenChange={setParamModalOpen}
-        testId={selectedTestId}
-        initial={editingParam}
-        onSaved={async () => {
-          setEditingParam(null);
-          setParamModalOpen(false);
-          if (selectedTestId) await loadParameters(selectedTestId);
-        }}
-      />
-
-      <ReferenceRangesModal
-        open={rangesModalOpen}
-        onOpenChange={setRangesModalOpen}
-        parameter={rangesParam}
-        onSaved={async () => {
-          setRangesParam(null);
-          setRangesModalOpen(false);
-          if (selectedTestId) await loadParameters(selectedTestId);
-        }}
-      />
-    </div>
-  );
-}
-
-function ParameterEditorModal({
-  open,
-  onOpenChange,
-  testId,
-  initial,
-  onSaved,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  testId: string;
-  initial: ParameterRow | null;
-  onSaved: () => void | Promise<void>;
-}) {
-  const { toast } = useToast();
-  const isEdit = !!initial?.id;
-
-  const [code, setCode] = React.useState("");
-  const [name, setName] = React.useState("");
-  const [dataType, setDataType] = React.useState<ResultDataType>("NUMERIC");
-  const [unit, setUnit] = React.useState("");
-  const [precision, setPrecision] = React.useState<string>("");
-  const [allowedText, setAllowedText] = React.useState("");
-  const [criticalLow, setCriticalLow] = React.useState<string>("");
-  const [criticalHigh, setCriticalHigh] = React.useState<string>("");
-  const [sortOrder, setSortOrder] = React.useState<string>("0");
-
-  const [saving, setSaving] = React.useState(false);
-  const [fieldErr, setFieldErr] = React.useState<Record<string, string>>({});
-
-  React.useEffect(() => {
-    if (!open) return;
-    setFieldErr({});
-    setCode(initial?.code ?? "");
-    setName(initial?.name ?? "");
-    setDataType(initial?.dataType ?? "NUMERIC");
-    setUnit(initial?.unit ?? "");
-    setPrecision(initial?.precision !== null && initial?.precision !== undefined ? String(initial.precision) : "");
-    setAllowedText(initial?.allowedText ?? "");
-    setCriticalLow(initial?.criticalLow !== null && initial?.criticalLow !== undefined ? String(initial.criticalLow) : "");
-    setCriticalHigh(initial?.criticalHigh !== null && initial?.criticalHigh !== undefined ? String(initial.criticalHigh) : "");
-    setSortOrder(String(initial?.sortOrder ?? 0));
-  }, [open, initial]);
-
-  function validate(): boolean {
-    const next: Record<string, string> = {};
-    const e1 = validateCode(code, "Parameter");
-    const e2 = validateName(name, "Parameter");
-    if (e1) next.code = e1;
-    if (e2) next.name = e2;
-    if (dataType === "CHOICE" && isBlank(allowedText)) {
-      next.allowedText = "allowedText is required for CHOICE dataType";
-    }
-    setFieldErr(next);
-    return Object.keys(next).length === 0;
-  }
-
-  async function save() {
-    if (!testId && !isEdit) {
-      toast({ title: "Select a test", description: "Choose a lab test first.", variant: "destructive" as any });
-      return;
-    }
-    if (!validate()) return;
-
-    setSaving(true);
-    try {
-      const payload = {
-        code: normalizeCode(code),
-        name: String(name).trim(),
-        dataType,
-        unit: unit.trim() || undefined,
-        precision: toInt(precision),
-        allowedText: allowedText.trim() || undefined,
-        criticalLow: toFloat(criticalLow),
-        criticalHigh: toFloat(criticalHigh),
-        sortOrder: toInt(sortOrder) ?? 0,
-      };
-
-      if (isEdit && initial?.id) {
-        await apiFetch(`/api/infrastructure/diagnostics/parameters/${encodeURIComponent(initial.id)}`, {
-          method: "PUT",
-          body: JSON.stringify(payload),
-        });
-        toast({ title: "Saved", description: "Parameter updated." });
-      } else {
-        await apiFetch(`/api/infrastructure/diagnostics/items/${encodeURIComponent(testId)}/parameters`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        toast({ title: "Created", description: "Parameter created." });
-      }
-
-      await onSaved();
-    } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Failed", variant: "destructive" as any });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Parameter" : "New Parameter"}</DialogTitle>
-          <DialogDescription>
-            Validation rules match the backend service (code format, name, CHOICE requires allowedText).
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Code" error={fieldErr.code}>
-            <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="HB" className="font-mono" />
-          </Field>
-          <Field label="Name" error={fieldErr.name}>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Hemoglobin" />
-          </Field>
-
-          <Field label="Data Type">
-            <Select value={dataType} onValueChange={(v) => setDataType(v as ResultDataType)}>
-              <SelectTrigger className="h-10">
-                <SelectValue placeholder="Data type" />
-              </SelectTrigger>
-              <SelectContent>
-                {RESULT_TYPES.map((t) => (
-                  <SelectItem key={t.value} value={t.value}>
-                    {t.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field label="Unit (optional)">
-            <Input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="g/dL" className="font-mono" />
-          </Field>
-
-          <Field label="Precision (optional)">
-            <Input value={precision} onChange={(e) => setPrecision(e.target.value)} placeholder="2" inputMode="numeric" />
-          </Field>
-
-          <Field label="Sort Order">
-            <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} placeholder="0" inputMode="numeric" />
-          </Field>
-
-          <Field label="Critical Low (optional)">
-            <Input value={criticalLow} onChange={(e) => setCriticalLow(e.target.value)} placeholder="" inputMode="decimal" />
-          </Field>
-          <Field label="Critical High (optional)">
-            <Input value={criticalHigh} onChange={(e) => setCriticalHigh(e.target.value)} placeholder="" inputMode="decimal" />
-          </Field>
-
-          <div className="md:col-span-2">
-            <Field label="Allowed Text (CHOICE only)" error={fieldErr.allowedText}>
-              <Textarea
-                value={allowedText}
-                onChange={(e) => setAllowedText(e.target.value)}
-                placeholder="e.g., Positive | Negative | Borderline"
-                className="min-h-[90px]"
-              />
-            </Field>
-            <div className="mt-1 text-xs text-zc-muted">
-              Backend rule: required when dataType = CHOICE.
-            </div>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void save()} disabled={saving}>
-            {saving ? "Saving…" : isEdit ? "Save Changes" : "Create Parameter"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ReferenceRangesModal({
-  open,
-  onOpenChange,
-  parameter,
-  onSaved,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  parameter: ParameterRow | null;
-  onSaved: () => void | Promise<void>;
-}) {
-  const { toast } = useToast();
-
-  const [loading, setLoading] = React.useState(false);
-  const [ranges, setRanges] = React.useState<RangeRow[]>([]);
-  const [editing, setEditing] = React.useState<RangeRow | null>(null);
-  const [editorOpen, setEditorOpen] = React.useState(false);
-
-  async function load() {
-    if (!parameter?.id) return;
-    setLoading(true);
-    try {
-      const rows = await apiFetch<RangeRow[]>(`/api/infrastructure/diagnostics/parameters/${encodeURIComponent(parameter.id)}/ranges`);
-      setRanges(rows || []);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  React.useEffect(() => {
-    if (!open) return;
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, parameter?.id]);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Reference Ranges</DialogTitle>
-          <DialogDescription>
-            {parameter ? (
-              <span>
-                For <span className="font-mono">{parameter.code}</span> — {parameter.name}
-              </span>
-            ) : (
-              "Select a parameter."
-            )}
-          </DialogDescription>
-        </DialogHeader>
-
-        {!parameter ? (
-          <div className="text-sm text-zc-muted">No parameter selected.</div>
-        ) : (
-          <>
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-xs text-zc-muted">Backend rule: ageMinDays and ageMaxDays must be ≥ 0, and ageMinDays ≤ ageMaxDays.</div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-                  <RefreshCw className={cn("mr-2 h-4 w-4", loading ? "animate-spin" : "")} />
-                  Refresh
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setEditing(null);
-                    setEditorOpen(true);
-                  }}
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Range
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-3 max-h-[360px] overflow-y-auto rounded-xl border border-zc-border">
-              {(ranges || []).length === 0 ? (
-                <div className="p-4 text-sm text-zc-muted">No ranges defined.</div>
-              ) : (
-                <div className="divide-y divide-zc-border">
-                  {(ranges || []).map((r) => (
-                    <div key={r.id} className="p-4">
-                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="outline">Sex: {r.sex || "Any"}</Badge>
-                            <Badge variant="outline">Age: {r.ageMinDays ?? "—"}–{r.ageMaxDays ?? "—"} days</Badge>
-                            <Badge className="border border-zc-border bg-zc-panel/20 text-zc-text" variant="secondary">
-                              {r.low !== null && r.low !== undefined ? r.low : "—"} — {r.high !== null && r.high !== undefined ? r.high : "—"}
-                            </Badge>
-                            {r.textRange ? <span className="text-xs text-zc-muted">({r.textRange})</span> : null}
-                          </div>
-                          <div className="mt-1 text-xs text-zc-muted">Sort: <span className="font-mono">{r.sortOrder ?? 0}</span></div>
-                        </div>
-
-                        <div className="flex shrink-0 items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setEditing(r);
-                              setEditorOpen(true);
-                            }}
-                          >
-                            <Pencil className="mr-2 h-4 w-4" />
-                            Edit
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={async () => {
-                              try {
-                                await apiFetch(`/api/infrastructure/diagnostics/ranges/${encodeURIComponent(r.id)}`, { method: "DELETE" });
-                                toast({ title: "Deactivated", description: "Range deactivated." });
-                                await load();
-                              } catch (e: any) {
-                                toast({ title: "Delete failed", description: e?.message || "Failed", variant: "destructive" as any });
-                              }
-                            }}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Deactivate
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <RangeEditorModal
-              open={editorOpen}
-              onOpenChange={setEditorOpen}
-              parameterId={parameter.id}
-              initial={editing}
-              onSaved={async () => {
-                setEditing(null);
-                setEditorOpen(false);
-                await load();
-                await onSaved();
-              }}
-            />
-          </>
-        )}
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Close
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function RangeEditorModal({
-  open,
-  onOpenChange,
-  parameterId,
-  initial,
-  onSaved,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  parameterId: string;
-  initial: RangeRow | null;
-  onSaved: () => void | Promise<void>;
-}) {
-  const { toast } = useToast();
-  const isEdit = !!initial?.id;
-
-  const [sex, setSex] = React.useState("");
-  const [ageMinDays, setAgeMinDays] = React.useState<string>("");
-  const [ageMaxDays, setAgeMaxDays] = React.useState<string>("");
-  const [low, setLow] = React.useState<string>("");
-  const [high, setHigh] = React.useState<string>("");
-  const [textRange, setTextRange] = React.useState("");
-  const [sortOrder, setSortOrder] = React.useState<string>("0");
-
-  const [saving, setSaving] = React.useState(false);
-  const [fieldErr, setFieldErr] = React.useState<Record<string, string>>({});
-
-  React.useEffect(() => {
-    if (!open) return;
-    setFieldErr({});
-    setSex(initial?.sex ?? "");
-    setAgeMinDays(initial?.ageMinDays !== null && initial?.ageMinDays !== undefined ? String(initial.ageMinDays) : "");
-    setAgeMaxDays(initial?.ageMaxDays !== null && initial?.ageMaxDays !== undefined ? String(initial.ageMaxDays) : "");
-    setLow(initial?.low !== null && initial?.low !== undefined ? String(initial.low) : "");
-    setHigh(initial?.high !== null && initial?.high !== undefined ? String(initial.high) : "");
-    setTextRange(initial?.textRange ?? "");
-    setSortOrder(String(initial?.sortOrder ?? 0));
-  }, [open, initial]);
-
-  function validate(): boolean {
-    const next: Record<string, string> = {};
-    const minN = toInt(ageMinDays);
-    const maxN = toInt(ageMaxDays);
-    if (minN !== null && minN < 0) next.ageMinDays = "ageMinDays must be >= 0";
-    if (maxN !== null && maxN < 0) next.ageMaxDays = "ageMaxDays must be >= 0";
-    if (minN !== null && maxN !== null && minN > maxN) next.ageMaxDays = "ageMaxDays must be >= ageMinDays";
-    setFieldErr(next);
-    return Object.keys(next).length === 0;
-  }
-
-  async function save() {
-    if (!validate()) return;
-    setSaving(true);
-    try {
-      const payload = {
-        sex: sex.trim() || null,
-        ageMinDays: toInt(ageMinDays),
-        ageMaxDays: toInt(ageMaxDays),
-        low: toFloat(low),
-        high: toFloat(high),
-        textRange: textRange.trim() || null,
-        sortOrder: toInt(sortOrder) ?? 0,
-      };
-
-      if (isEdit && initial?.id) {
-        await apiFetch(`/api/infrastructure/diagnostics/ranges/${encodeURIComponent(initial.id)}`, {
-          method: "PUT",
-          body: JSON.stringify(payload),
-        });
-        toast({ title: "Saved", description: "Range updated." });
-      } else {
-        await apiFetch(`/api/infrastructure/diagnostics/parameters/${encodeURIComponent(parameterId)}/ranges`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        toast({ title: "Created", description: "Range created." });
-      }
-
-      await onSaved();
-    } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Failed", variant: "destructive" as any });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Range" : "New Range"}</DialogTitle>
-          <DialogDescription>Age rules are enforced as in the backend service.</DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Sex (optional)">
-            <Input value={sex} onChange={(e) => setSex(e.target.value)} placeholder="M / F / Any" />
-          </Field>
-          <Field label="Sort Order">
-            <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} inputMode="numeric" />
-          </Field>
-
-          <Field label="Age Min (days)" error={fieldErr.ageMinDays}>
-            <Input value={ageMinDays} onChange={(e) => setAgeMinDays(e.target.value)} inputMode="numeric" />
-          </Field>
-          <Field label="Age Max (days)" error={fieldErr.ageMaxDays}>
-            <Input value={ageMaxDays} onChange={(e) => setAgeMaxDays(e.target.value)} inputMode="numeric" />
-          </Field>
-
-          <Field label="Low (optional)">
-            <Input value={low} onChange={(e) => setLow(e.target.value)} inputMode="decimal" />
-          </Field>
-          <Field label="High (optional)">
-            <Input value={high} onChange={(e) => setHigh(e.target.value)} inputMode="decimal" />
-          </Field>
-
-          <div className="md:col-span-2">
-            <Field label="Text Range (optional)">
-              <Textarea value={textRange} onChange={(e) => setTextRange(e.target.value)} className="min-h-[80px]" />
-            </Field>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void save()} disabled={saving}>
-            {saving ? "Saving…" : isEdit ? "Save Changes" : "Create Range"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------------- Shared UI helpers ----------------
+/* =========================================================
+   Small UI helpers
+   ========================================================= */
 
 function Field({
   label,
@@ -2235,21 +615,398 @@ function Field({
         {hint ? <div className="text-xs text-zc-muted">{hint}</div> : null}
       </div>
       {children}
-      {error ? (
-        <div className="text-xs text-rose-700 dark:text-rose-200">{error}</div>
-      ) : null}
+      {error ? <div className="text-xs text-rose-700 dark:text-rose-200">{error}</div> : null}
     </div>
   );
 }
 
-// ---------------- Catalog dialogs (Sections/Categories/Specimens/Items) ----------------
 
-type DialogBaseProps = {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  branchId: string;
-  onSaved: () => void;
-};
+type BadgeTone = "slate" | "sky" | "emerald" | "violet" | "amber" | "rose";
+
+function badgeToneClass(tone: BadgeTone) {
+  switch (tone) {
+    case "sky":
+      return "border-sky-200/70 bg-sky-50/80 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/25 dark:text-sky-200";
+    case "emerald":
+      return "border-emerald-200/70 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/25 dark:text-emerald-200";
+    case "violet":
+      return "border-violet-200/70 bg-violet-50/80 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/25 dark:text-violet-200";
+    case "amber":
+      return "border-amber-200/70 bg-amber-50/80 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/25 dark:text-amber-200";
+    case "rose":
+      return "border-rose-200/70 bg-rose-50/80 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/25 dark:text-rose-200";
+    default:
+      return "border-zc-border bg-zc-panel/30 text-zc-text";
+  }
+}
+
+function ToneBadge({
+  tone,
+  className,
+  children,
+}: {
+  tone: BadgeTone;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Badge variant="outline" className={cn("border", badgeToneClass(tone), className)}>
+      {children}
+    </Badge>
+  );
+}
+
+function toneForDiagnosticKind(kind: DiagnosticKind): BadgeTone {
+  if (kind === "LAB") return "emerald";
+  if (kind === "IMAGING") return "sky";
+  return "violet";
+}
+
+function toneForResultDataType(dt: ResultDataType): BadgeTone {
+  if (dt === "NUMERIC") return "sky";
+  if (dt === "CHOICE") return "violet";
+  if (dt === "BOOLEAN") return "amber";
+  return "slate";
+}
+
+function toneForServicePointType(t: ServicePointType): BadgeTone {
+  if (t === "LAB") return "emerald";
+  if (t === "RADIOLOGY") return "sky";
+  if (t === "ENDOSCOPY") return "amber";
+  return "violet";
+}
+
+function modalClassName(extra?: string) {
+  return cn("rounded-2xl border border-indigo-200/50 dark:border-indigo-800/50 bg-zc-card shadow-2xl shadow-indigo-500/10", extra);
+}
+
+function ModalHeader({
+  title,
+  description,
+  onClose,
+}: {
+  title: string;
+  description?: string;
+  onClose: () => void;
+}) {
+  // onClose is kept for API compatibility with existing call sites.
+  // DialogContent already renders its own close button; this header matches OT/Branch modal styling.
+  void onClose;
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-3 text-indigo-700 dark:text-indigo-400">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/30">
+            <Settings2 className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+          </div>
+          {title}
+        </DialogTitle>
+        {description ? <DialogDescription>{description}</DialogDescription> : null}
+      </DialogHeader>
+
+      <Separator className="my-4" />
+    </>
+  );
+}
+
+/* =========================================================
+   TAB 1: Catalog (Sections, Categories, Specimens, Items)
+   ========================================================= */
+/* ---------------  NOTE ---------------
+   The remaining tabs + dialogs are included,
+   but to keep this message within reasonable size,
+   I am splitting the file continuation into the next block.
+   ------------------------------------- */
+
+function CatalogTab({ branchId }: TabProps) {
+  const { toast } = useToast();
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  const [sections, setSections] = React.useState<SectionRow[]>([]);
+  const [categories, setCategories] = React.useState<CategoryRow[]>([]);
+  const [specimens, setSpecimens] = React.useState<SpecimenRow[]>([]);
+  const [items, setItems] = React.useState<DiagnosticItemRow[]>([]);
+
+  const [kind, setKind] = React.useState<DiagnosticKind>("LAB");
+  const [q, setQ] = React.useState("");
+  const [includeInactive, setIncludeInactive] = React.useState(false);
+  const [panelFilter, setPanelFilter] = React.useState<"all" | "panel" | "test">("all");
+
+  const [sectionId, setSectionId] = React.useState("all");
+  const [categoryId, setCategoryId] = React.useState("all");
+
+  const [sectionDialogOpen, setSectionDialogOpen] = React.useState(false);
+  const [categoryDialogOpen, setCategoryDialogOpen] = React.useState(false);
+  const [specimenDialogOpen, setSpecimenDialogOpen] = React.useState(false);
+  const [itemDialogOpen, setItemDialogOpen] = React.useState(false);
+
+  const [editingSection, setEditingSection] = React.useState<SectionRow | null>(null);
+  const [editingCategory, setEditingCategory] = React.useState<CategoryRow | null>(null);
+  const [editingSpecimen, setEditingSpecimen] = React.useState<SpecimenRow | null>(null);
+  const [editingItem, setEditingItem] = React.useState<DiagnosticItemRow | null>(null);
+
+  function qs(params: Record<string, any>) {
+    const u = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v === undefined || v === null) return;
+      if (v === false) return;
+      if (v === true) {
+        u.set(k, "true");
+        return;
+      }
+      const s = String(v);
+      if (!s || s === "all") return;
+      u.set(k, s);
+    });
+    return u.toString();
+  }
+
+  async function loadAll() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const sec = await apiFetch<SectionRow[]>(`/api/infrastructure/diagnostics/sections?${qs({ branchId })}`);
+      const cat = await apiFetch<CategoryRow[]>(`/api/infrastructure/diagnostics/categories?${qs({ branchId })}`);
+      const sp = await apiFetch<SpecimenRow[]>(`/api/infrastructure/diagnostics/specimens?${qs({ branchId })}`);
+      setSections(safeArray(sec));
+      setCategories(safeArray(cat));
+      setSpecimens(safeArray(sp));
+
+      const itemQs: any = { branchId, kind, q: q.trim() || undefined };
+      if (sectionId !== "all") itemQs.sectionId = sectionId;
+      if (categoryId !== "all") itemQs.categoryId = categoryId;
+
+      const its = await apiFetch<DiagnosticItemRow[]>(`/api/infrastructure/diagnostics/items?${qs(itemQs)}`);
+      let nextItems = safeArray(its);
+      if (!includeInactive) nextItems = nextItems.filter((it) => it.isActive);
+      if (panelFilter === "panel") nextItems = nextItems.filter((it) => it.isPanel);
+      if (panelFilter === "test") nextItems = nextItems.filter((it) => !it.isPanel);
+      setItems(nextItems);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load catalog");
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    void loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchId, kind, includeInactive, panelFilter, sectionId, categoryId]);
+
+  React.useEffect(() => {
+    const t = setTimeout(() => void loadAll(), 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
+  const visibleCategories = categories.filter((c) => c.sectionId === sectionId && c.isActive);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Catalog</CardTitle>
+        <CardDescription>Sections, categories, specimens and diagnostic items. Payloads match Create/Update DTOs.</CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        {err ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{err}</div> : null}
+
+        <div className="grid gap-3 md:grid-cols-4">
+          <Field label="Kind">
+            <Select value={kind} onValueChange={(v) => setKind(v as DiagnosticKind)}>
+              <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {DIAG_KINDS.map((k) => <SelectItem key={k.value} value={k.value}>{k.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field label="Section filter">
+            <Select value={sectionId} onValueChange={setSectionId}>
+              <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+              <SelectContent className="max-h-[320px] overflow-y-auto">
+                <SelectItem value="all">All</SelectItem>
+                {sections.filter((s) => s.isActive).map((s) => (
+                  <SelectItem key={s.id} value={s.id}>{s.name} ({s.code})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field label="Category filter">
+            <Select value={categoryId} onValueChange={setCategoryId} disabled={sectionId === "all"}>
+              <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+              <SelectContent className="max-h-[320px] overflow-y-auto">
+                <SelectItem value="all">All</SelectItem>
+                {visibleCategories.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name} ({c.code})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field label="Search">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-zc-muted" />
+                <Input className="h-10 pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search code/name" />
+              </div>
+              <Button variant="outline" className="h-10" onClick={loadAll} disabled={loading}>
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+          </Field>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Checkbox checked={includeInactive} onCheckedChange={(v) => setIncludeInactive(Boolean(v))} />
+            <span className="text-sm text-zc-muted">Include inactive</span>
+
+            <Select value={panelFilter} onValueChange={(v) => setPanelFilter(v as any)}>
+              <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All items</SelectItem>
+                <SelectItem value="panel">Panels only</SelectItem>
+                <SelectItem value="test">Tests only</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => { setEditingSection(null); setSectionDialogOpen(true); }}>
+              <Plus className="mr-2 h-4 w-4" /> Section
+            </Button>
+            <Button variant="outline" onClick={() => { setEditingCategory(null); setCategoryDialogOpen(true); }}>
+              <Plus className="mr-2 h-4 w-4" /> Category
+            </Button>
+            <Button variant="outline" onClick={() => { setEditingSpecimen(null); setSpecimenDialogOpen(true); }}>
+              <Plus className="mr-2 h-4 w-4" /> Specimen
+            </Button>
+            <Button onClick={() => { setEditingItem(null); setItemDialogOpen(true); }}>
+              <Plus className="mr-2 h-4 w-4" /> Item
+            </Button>
+          </div>
+        </div>
+
+        <Separator className="my-4" />
+
+        <div className="grid gap-3">
+          {items.map((it) => (
+            <div key={it.id} className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ToneBadge tone="violet" className="font-mono">{it.code}</ToneBadge>
+                    <div className="text-sm font-semibold text-zc-text">{it.name}</div>
+                    <ToneBadge tone={toneForDiagnosticKind(it.kind)}>{it.kind}</ToneBadge>
+                    {it.isPanel ? <ToneBadge tone="amber">PANEL</ToneBadge> : null}
+                    {!it.isActive ? <ToneBadge tone="rose">INACTIVE</ToneBadge> : null}
+                    {it.specimen?.code ? <ToneBadge tone="sky">Specimen: {it.specimen.code}</ToneBadge> : null}
+                  </div>
+
+                  <div className="mt-1 text-xs text-zc-muted">
+                    Section: <span className="font-mono">{it.section?.code}</span> ·
+                    Category: <span className="font-mono">{it.category?.code ?? "—"}</span> ·
+                    Routine TAT: <span className="font-mono">{it.tatMinsRoutine ?? "—"}</span> mins ·
+                    Stat TAT: <span className="font-mono">{it.tatMinsStat ?? "—"}</span> mins
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => { setEditingItem(it); setItemDialogOpen(true); }}>
+                    <Pencil className="mr-2 h-4 w-4" /> Edit
+                  </Button>
+
+                  {it.isActive ? (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await apiFetch(`/api/infrastructure/diagnostics/items/${encodeURIComponent(it.id)}`, { method: "DELETE" });
+                          toast({ title: "Deactivated", description: "Item marked inactive." });
+                          await loadAll();
+                        } catch (e: any) {
+                          toast({ title: "Deactivate failed", description: e?.message || "Error", variant: "destructive" as any });
+                        }
+                      }}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" /> Deactivate
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await apiFetch(`/api/infrastructure/diagnostics/items/${encodeURIComponent(it.id)}`, {
+                            method: "PUT",
+                            body: JSON.stringify({ branchId, isActive: true }),
+                          });
+                          toast({ title: "Activated", description: "Item is active again." });
+                          await loadAll();
+                        } catch (e: any) {
+                          toast({ title: "Activate failed", description: e?.message || "Error", variant: "destructive" as any });
+                        }
+                      }}
+                    >
+                      Activate
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Dialogs */}
+        <SectionDialog
+          open={sectionDialogOpen}
+          onOpenChange={setSectionDialogOpen}
+          branchId={branchId}
+          editing={editingSection}
+          onSaved={loadAll}
+        />
+
+        <CategoryDialog
+          open={categoryDialogOpen}
+          onOpenChange={setCategoryDialogOpen}
+          branchId={branchId}
+          editing={editingCategory}
+          sections={sections}
+          onSaved={loadAll}
+        />
+
+        <SpecimenDialog
+          open={specimenDialogOpen}
+          onOpenChange={setSpecimenDialogOpen}
+          branchId={branchId}
+          editing={editingSpecimen}
+          onSaved={loadAll}
+        />
+
+        <ItemDialog
+          open={itemDialogOpen}
+          onOpenChange={setItemDialogOpen}
+          branchId={branchId}
+          editing={editingItem}
+          sections={sections}
+          categories={categories}
+          specimens={specimens}
+          onSaved={loadAll}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+/* =========================================================
+   Dialogs: Sections, Categories, Specimens, Items
+   ========================================================= */
 
 function SectionDialog({
   open,
@@ -2257,139 +1014,104 @@ function SectionDialog({
   branchId,
   editing,
   onSaved,
-}: DialogBaseProps & { editing: SectionRow | null }) {
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  editing: SectionRow | null;
+  onSaved: () => void | Promise<void>;
+}) {
   const { toast } = useToast();
-
   const [code, setCode] = React.useState("");
   const [name, setName] = React.useState("");
-  const [sortOrder, setSortOrder] = React.useState<string>("0");
-  const [busy, setBusy] = React.useState(false);
-
-  const [errCode, setErrCode] = React.useState<string | null>(null);
-  const [errName, setErrName] = React.useState<string | null>(null);
+  const [sortOrder, setSortOrder] = React.useState("");
+  const [isActive, setIsActive] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
-    setCode(editing?.code || "");
-    setName(editing?.name || "");
-    setSortOrder(String(editing?.sortOrder ?? 0));
-    setErrCode(null);
-    setErrName(null);
-    setBusy(false);
+    setCode(editing?.code ?? "");
+    setName(editing?.name ?? "");
+    setSortOrder(editing?.sortOrder != null ? String(editing.sortOrder) : "");
+    setIsActive(editing?.isActive ?? true);
+    setErr(null);
   }, [open, editing]);
 
-  function validate() {
-    const c = validateCode(code, "Section");
-    const n = validateName(name, "Section");
-    setErrCode(c);
-    setErrName(n);
-    return !(c || n);
-  }
-
   async function save() {
-    if (!validate()) return;
-    setBusy(true);
+    const codeErr = validateCode(code, "Section");
+    const nameErr = validateName(name, "Section");
+    if (codeErr || nameErr) {
+      setErr(codeErr || nameErr);
+      return;
+    }
+    setSaving(true);
+    setErr(null);
     try {
-      const payload: any = {
-        branchId,
-        code: normalizeCode(code),
-        name: String(name).trim(),
-        sortOrder: toInt(sortOrder) ?? 0,
-      };
-
-      if (editing?.id) {
+      if (editing) {
         await apiFetch(`/api/infrastructure/diagnostics/sections/${encodeURIComponent(editing.id)}`, {
           method: "PUT",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            branchId,
+            code: normalizeCode(code),
+            name: name.trim(),
+            sortOrder: toInt(sortOrder) ?? undefined,
+            isActive,
+          }),
         });
-        toast({ title: "Updated", description: "Section updated." });
       } else {
-        await apiFetch(`/api/infrastructure/diagnostics/sections`, {
+        await apiFetch("/api/infrastructure/diagnostics/sections", {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            branchId,
+            code: normalizeCode(code),
+            name: name.trim(),
+            sortOrder: toInt(sortOrder) ?? undefined,
+          }),
         });
-        toast({ title: "Created", description: "Section created." });
       }
-      onSaved();
+      toast({ title: editing ? "Section updated" : "Section created" });
+      onOpenChange(false);
+      await onSaved();
     } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Failed", variant: "destructive" as any });
+      setErr(e?.message || "Save failed");
     } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deactivate() {
-    if (!editing?.id) return;
-    setBusy(true);
-    try {
-      await apiFetch(`/api/infrastructure/diagnostics/sections/${encodeURIComponent(editing.id)}`, { method: "DELETE" });
-      toast({ title: "Deactivated", description: "Section marked inactive." });
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Cannot deactivate", description: e?.message || "Failed", variant: "destructive" as any });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function activate() {
-    if (!editing?.id) return;
-    setBusy(true);
-    try {
-      await apiFetch(`/api/infrastructure/diagnostics/sections/${encodeURIComponent(editing.id)}`, {
-        method: "PUT",
-        body: JSON.stringify({ branchId, isActive: true }),
-      });
-      toast({ title: "Activated", description: "Section is now active." });
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Action failed", description: e?.message || "Failed", variant: "destructive" as any });
-    } finally {
-      setBusy(false);
+      setSaving(false);
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{editing ? "Edit Section" : "Create Section"}</DialogTitle>
-          <DialogDescription>Code must be unique per branch. Use uppercase; hyphen allowed.</DialogDescription>
-        </DialogHeader>
-
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[560px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title={editing ? "Edit Section" : "Create Section"}
+          description="Sections group diagnostic items in the catalog."
+          onClose={() => onOpenChange(false)}
+        />
         <div className="grid gap-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Code" required error={errCode}>
-              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g., LAB" className="h-10" />
-            </Field>
-            <Field label="Sort order" hint="Lower comes first">
-              <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="h-10" />
-            </Field>
-          </div>
-
-          <Field label="Name" required error={errName}>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Pathology" className="h-10" />
+          {err ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">{err}</div> : null}
+          <Field label="Code" required>
+            <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="LAB, RADIOLOGY" />
           </Field>
-        </div>
-
-        <DialogFooter className="gap-2">
-          {editing?.id ? (
-            editing.isActive ? (
-              <Button variant="destructive" onClick={deactivate} disabled={busy}>
-                Deactivate
-              </Button>
-            ) : (
-              <Button variant="secondary" onClick={activate} disabled={busy}>
-                Activate
-              </Button>
-            )
+          <Field label="Name" required>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Laboratory" />
+          </Field>
+          <Field label="Sort order">
+            <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} placeholder="0" />
+          </Field>
+          {editing ? (
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Active</div>
+              <Switch checked={isActive} onCheckedChange={setIsActive} />
+            </div>
           ) : null}
-
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={busy}>
-            {editing ? "Save" : "Create"}
+          <Button onClick={save} disabled={saving}>
+            {editing ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2404,161 +1126,120 @@ function CategoryDialog({
   editing,
   sections,
   onSaved,
-}: DialogBaseProps & { editing: CategoryRow | null; sections: Array<{ id: string; code: string; name: string }> }) {
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  editing: CategoryRow | null;
+  sections: SectionRow[];
+  onSaved: () => void | Promise<void>;
+}) {
   const { toast } = useToast();
-
-  const [sectionId, setSectionId] = React.useState<string>("");
+  const [sectionId, setSectionId] = React.useState("");
   const [code, setCode] = React.useState("");
   const [name, setName] = React.useState("");
-  const [sortOrder, setSortOrder] = React.useState<string>("0");
-  const [busy, setBusy] = React.useState(false);
-
-  const [errSection, setErrSection] = React.useState<string | null>(null);
-  const [errCode, setErrCode] = React.useState<string | null>(null);
-  const [errName, setErrName] = React.useState<string | null>(null);
+  const [sortOrder, setSortOrder] = React.useState("");
+  const [isActive, setIsActive] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
-    setSectionId(editing?.sectionId || (sections?.[0]?.id ?? ""));
-    setCode(editing?.code || "");
-    setName(editing?.name || "");
-    setSortOrder(String(editing?.sortOrder ?? 0));
-    setErrSection(null);
-    setErrCode(null);
-    setErrName(null);
-    setBusy(false);
-  }, [open, editing, sections]);
-
-  function validate() {
-    const es = !sectionId ? "Section is required" : null;
-    const ec = validateCode(code, "Category");
-    const en = validateName(name, "Category");
-    setErrSection(es);
-    setErrCode(ec);
-    setErrName(en);
-    return !(es || ec || en);
-  }
+    setSectionId(editing?.sectionId ?? "");
+    setCode(editing?.code ?? "");
+    setName(editing?.name ?? "");
+    setSortOrder(editing?.sortOrder != null ? String(editing.sortOrder) : "");
+    setIsActive(editing?.isActive ?? true);
+    setErr(null);
+  }, [open, editing]);
 
   async function save() {
-    if (!validate()) return;
-    setBusy(true);
+    const codeErr = validateCode(code, "Category");
+    const nameErr = validateName(name, "Category");
+    if (!sectionId) return setErr("Section is required");
+    if (codeErr || nameErr) {
+      setErr(codeErr || nameErr);
+      return;
+    }
+    setSaving(true);
+    setErr(null);
     try {
-      const payload: any = {
-        branchId,
-        sectionId,
-        code: normalizeCode(code),
-        name: String(name).trim(),
-        sortOrder: toInt(sortOrder) ?? 0,
-      };
-
-      if (editing?.id) {
+      if (editing) {
         await apiFetch(`/api/infrastructure/diagnostics/categories/${encodeURIComponent(editing.id)}`, {
           method: "PUT",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            branchId,
+            sectionId,
+            code: normalizeCode(code),
+            name: name.trim(),
+            sortOrder: toInt(sortOrder) ?? undefined,
+            isActive,
+          }),
         });
-        toast({ title: "Updated", description: "Category updated." });
       } else {
-        await apiFetch(`/api/infrastructure/diagnostics/categories`, {
+        await apiFetch("/api/infrastructure/diagnostics/categories", {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            branchId,
+            sectionId,
+            code: normalizeCode(code),
+            name: name.trim(),
+            sortOrder: toInt(sortOrder) ?? undefined,
+          }),
         });
-        toast({ title: "Created", description: "Category created." });
       }
-      onSaved();
+      toast({ title: editing ? "Category updated" : "Category created" });
+      onOpenChange(false);
+      await onSaved();
     } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Failed", variant: "destructive" as any });
+      setErr(e?.message || "Save failed");
     } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deactivate() {
-    if (!editing?.id) return;
-    setBusy(true);
-    try {
-      await apiFetch(`/api/infrastructure/diagnostics/categories/${encodeURIComponent(editing.id)}`, { method: "DELETE" });
-      toast({ title: "Deactivated", description: "Category marked inactive." });
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Cannot deactivate", description: e?.message || "Failed", variant: "destructive" as any });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function activate() {
-    if (!editing?.id) return;
-    setBusy(true);
-    try {
-      await apiFetch(`/api/infrastructure/diagnostics/categories/${encodeURIComponent(editing.id)}`, {
-        method: "PUT",
-        body: JSON.stringify({ branchId, isActive: true }),
-      });
-      toast({ title: "Activated", description: "Category is now active." });
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Action failed", description: e?.message || "Failed", variant: "destructive" as any });
-    } finally {
-      setBusy(false);
+      setSaving(false);
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{editing ? "Edit Category" : "Create Category"}</DialogTitle>
-          <DialogDescription>Category must belong to an active section in this branch.</DialogDescription>
-        </DialogHeader>
-
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[560px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title={editing ? "Edit Category" : "Create Category"}
+          description="Categories are scoped to a section."
+          onClose={() => onOpenChange(false)}
+        />
         <div className="grid gap-4">
-          <Field label="Section" required error={errSection}>
-            <Select value={sectionId} onValueChange={(v) => setSectionId(v)}>
-              <SelectTrigger className="h-10">
-                <SelectValue placeholder="Select section" />
-              </SelectTrigger>
-              <SelectContent className="max-h-[320px] overflow-y-auto">
-                {sections.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name} ({s.code})
-                  </SelectItem>
+          {err ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">{err}</div> : null}
+          <Field label="Section" required>
+            <Select value={sectionId} onValueChange={setSectionId}>
+              <SelectTrigger className="h-10"><SelectValue placeholder="Select section" /></SelectTrigger>
+              <SelectContent className="max-h-[280px] overflow-y-auto">
+                {sections.filter((s) => s.isActive).map((s) => (
+                  <SelectItem key={s.id} value={s.id}>{s.name} ({s.code})</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </Field>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Code" required error={errCode}>
-              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g., BIO" className="h-10" />
-            </Field>
-            <Field label="Sort order" hint="Lower comes first">
-              <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="h-10" />
-            </Field>
-          </div>
-
-          <Field label="Name" required error={errName}>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Biochemistry" className="h-10" />
+          <Field label="Code" required>
+            <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="BIOCHEM" />
           </Field>
-        </div>
-
-        <DialogFooter className="gap-2">
-          {editing?.id ? (
-            editing.isActive ? (
-              <Button variant="destructive" onClick={deactivate} disabled={busy}>
-                Deactivate
-              </Button>
-            ) : (
-              <Button variant="secondary" onClick={activate} disabled={busy}>
-                Activate
-              </Button>
-            )
+          <Field label="Name" required>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Biochemistry" />
+          </Field>
+          <Field label="Sort order">
+            <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} placeholder="0" />
+          </Field>
+          {editing ? (
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Active</div>
+              <Switch checked={isActive} onCheckedChange={setIsActive} />
+            </div>
           ) : null}
-
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={busy}>
-            {editing ? "Save" : "Create"}
+          <Button onClick={save} disabled={saving}>
+            {editing ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2572,164 +1253,118 @@ function SpecimenDialog({
   branchId,
   editing,
   onSaved,
-}: DialogBaseProps & { editing: SpecimenRow | null }) {
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  editing: SpecimenRow | null;
+  onSaved: () => void | Promise<void>;
+}) {
   const { toast } = useToast();
-
   const [code, setCode] = React.useState("");
   const [name, setName] = React.useState("");
   const [container, setContainer] = React.useState("");
-  const [minVolumeMl, setMinVolumeMl] = React.useState<string>("");
+  const [minVolumeMl, setMinVolumeMl] = React.useState("");
   const [handlingNotes, setHandlingNotes] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-
-  const [errCode, setErrCode] = React.useState<string | null>(null);
-  const [errName, setErrName] = React.useState<string | null>(null);
-  const [errMl, setErrMl] = React.useState<string | null>(null);
+  const [isActive, setIsActive] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
-    setCode(editing?.code || "");
-    setName(editing?.name || "");
-    setContainer(String(editing?.container ?? ""));
+    setCode(editing?.code ?? "");
+    setName(editing?.name ?? "");
+    setContainer(editing?.container ?? "");
     setMinVolumeMl(editing?.minVolumeMl != null ? String(editing.minVolumeMl) : "");
-    setHandlingNotes(String(editing?.handlingNotes ?? ""));
-    setErrCode(null);
-    setErrName(null);
-    setErrMl(null);
-    setBusy(false);
+    setHandlingNotes(editing?.handlingNotes ?? "");
+    setIsActive(editing?.isActive ?? true);
+    setErr(null);
   }, [open, editing]);
 
-  function validate() {
-    const ec = validateCode(code, "Specimen");
-    const en = validateName(name, "Specimen");
-    const ml = toFloat(minVolumeMl);
-    const eml = minVolumeMl.trim() && (ml === null || ml < 0) ? "Min volume must be a positive number" : null;
-    setErrCode(ec);
-    setErrName(en);
-    setErrMl(eml);
-    return !(ec || en || eml);
-  }
-
   async function save() {
-    if (!validate()) return;
-    setBusy(true);
+    const codeErr = validateCode(code, "Specimen");
+    const nameErr = validateName(name, "Specimen");
+    if (codeErr || nameErr) {
+      setErr(codeErr || nameErr);
+      return;
+    }
+    setSaving(true);
+    setErr(null);
     try {
-      const payload: any = {
-        branchId,
-        code: normalizeCode(code),
-        name: String(name).trim(),
-        container: String(container).trim() || undefined,
-        minVolumeMl: minVolumeMl.trim() ? String(minVolumeMl).trim() : undefined,
-        handlingNotes: String(handlingNotes).trim() || undefined,
-      };
-
-      if (editing?.id) {
+      if (editing) {
         await apiFetch(`/api/infrastructure/diagnostics/specimens/${encodeURIComponent(editing.id)}`, {
           method: "PUT",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            branchId,
+            code: normalizeCode(code),
+            name: name.trim(),
+            container: container.trim() || null,
+            minVolumeMl: toFloat(minVolumeMl),
+            handlingNotes: handlingNotes.trim() || null,
+            isActive,
+          }),
         });
-        toast({ title: "Updated", description: "Specimen updated." });
       } else {
-        await apiFetch(`/api/infrastructure/diagnostics/specimens`, {
+        await apiFetch("/api/infrastructure/diagnostics/specimens", {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            branchId,
+            code: normalizeCode(code),
+            name: name.trim(),
+            container: container.trim() || undefined,
+            minVolumeMl: toFloat(minVolumeMl) ?? undefined,
+            handlingNotes: handlingNotes.trim() || undefined,
+          }),
         });
-        toast({ title: "Created", description: "Specimen created." });
       }
-      onSaved();
+      toast({ title: editing ? "Specimen updated" : "Specimen created" });
+      onOpenChange(false);
+      await onSaved();
     } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Failed", variant: "destructive" as any });
+      setErr(e?.message || "Save failed");
     } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deactivate() {
-    if (!editing?.id) return;
-    setBusy(true);
-    try {
-      await apiFetch(`/api/infrastructure/diagnostics/specimens/${encodeURIComponent(editing.id)}`, { method: "DELETE" });
-      toast({ title: "Deactivated", description: "Specimen marked inactive." });
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Cannot deactivate", description: e?.message || "Failed", variant: "destructive" as any });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function activate() {
-    if (!editing?.id) return;
-    setBusy(true);
-    try {
-      await apiFetch(`/api/infrastructure/diagnostics/specimens/${encodeURIComponent(editing.id)}`, {
-        method: "PUT",
-        body: JSON.stringify({ branchId, isActive: true }),
-      });
-      toast({ title: "Activated", description: "Specimen is now active." });
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Action failed", description: e?.message || "Failed", variant: "destructive" as any });
-    } finally {
-      setBusy(false);
+      setSaving(false);
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{editing ? "Edit Specimen" : "Create Specimen"}</DialogTitle>
-          <DialogDescription>Specimens are used only for LAB items. Deactivation is blocked if used by active items.</DialogDescription>
-        </DialogHeader>
-
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[620px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title={editing ? "Edit Specimen" : "Create Specimen"}
+          description="Specimens are referenced by lab items."
+          onClose={() => onOpenChange(false)}
+        />
         <div className="grid gap-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Code" required error={errCode}>
-              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g., SERUM" className="h-10" />
-            </Field>
-            <Field label="Name" required error={errName}>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Serum" className="h-10" />
-            </Field>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Container">
-              <Input value={container} onChange={(e) => setContainer(e.target.value)} placeholder="e.g., Red top" className="h-10" />
-            </Field>
-            <Field label="Min volume (ml)" error={errMl}>
-              <Input value={minVolumeMl} onChange={(e) => setMinVolumeMl(e.target.value)} placeholder="e.g., 2" className="h-10" />
-            </Field>
-          </div>
-
-          <Field label="Handling notes">
-            <Textarea
-              value={handlingNotes}
-              onChange={(e) => setHandlingNotes(e.target.value)}
-              placeholder="e.g., Keep chilled, deliver within 30 min"
-              className="min-h-[90px]"
-            />
+          {err ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">{err}</div> : null}
+          <Field label="Code" required>
+            <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="SERUM" />
           </Field>
-        </div>
-
-        <DialogFooter className="gap-2">
-          {editing?.id ? (
-            editing.isActive ? (
-              <Button variant="destructive" onClick={deactivate} disabled={busy}>
-                Deactivate
-              </Button>
-            ) : (
-              <Button variant="secondary" onClick={activate} disabled={busy}>
-                Activate
-              </Button>
-            )
+          <Field label="Name" required>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Serum" />
+          </Field>
+          <Field label="Container">
+            <Input value={container} onChange={(e) => setContainer(e.target.value)} placeholder="Vacutainer" />
+          </Field>
+          <Field label="Minimum volume (ml)">
+            <Input value={minVolumeMl} onChange={(e) => setMinVolumeMl(e.target.value)} placeholder="2" />
+          </Field>
+          <Field label="Handling notes">
+            <Textarea value={handlingNotes} onChange={(e) => setHandlingNotes(e.target.value)} placeholder="Keep chilled, process within 2 hours" />
+          </Field>
+          {editing ? (
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Active</div>
+              <Switch checked={isActive} onCheckedChange={setIsActive} />
+            </div>
           ) : null}
-
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={busy}>
-            {editing ? "Save" : "Create"}
+          <Button onClick={save} disabled={saving}>
+            {editing ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2746,302 +1381,206 @@ function ItemDialog({
   categories,
   specimens,
   onSaved,
-}: DialogBaseProps & {
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
   editing: DiagnosticItemRow | null;
-  sections: Array<{ id: string; code: string; name: string; isActive?: boolean }>;
+  sections: SectionRow[];
   categories: CategoryRow[];
-  specimens: Array<{ id: string; code: string; name: string; isActive?: boolean }>;
+  specimens: SpecimenRow[];
+  onSaved: () => void | Promise<void>;
 }) {
   const { toast } = useToast();
-
-  const isEdit = !!editing?.id;
-
-  const [kind, setKind] = React.useState<DiagnosticKind>("LAB");
   const [code, setCode] = React.useState("");
   const [name, setName] = React.useState("");
-  const [sectionId, setSectionId] = React.useState<string>("");
-  const [categoryId, setCategoryId] = React.useState<string>("");
-  const [isPanel, setIsPanel] = React.useState(false);
-  const [specimenId, setSpecimenId] = React.useState<string>("");
+  const [kind, setKind] = React.useState<DiagnosticKind>("LAB");
+  const [sectionId, setSectionId] = React.useState("");
+  const [categoryId, setCategoryId] = React.useState("none");
+  const [specimenId, setSpecimenId] = React.useState("none");
+  const [tatRoutine, setTatRoutine] = React.useState("");
+  const [tatStat, setTatStat] = React.useState("");
   const [preparationText, setPreparationText] = React.useState("");
   const [consentRequired, setConsentRequired] = React.useState(false);
-  const [appointmentRequired, setAppointmentRequired] = React.useState(false);
-  const [sortOrder, setSortOrder] = React.useState<string>("0");
-
-  const [busy, setBusy] = React.useState(false);
-
-  const [errCode, setErrCode] = React.useState<string | null>(null);
-  const [errName, setErrName] = React.useState<string | null>(null);
-  const [errSection, setErrSection] = React.useState<string | null>(null);
-  const [errSpecimen, setErrSpecimen] = React.useState<string | null>(null);
-
-  const filteredCategories = React.useMemo(() => {
-    const list = safeArray(categories)
-      .filter((c) => c.sectionId === sectionId)
-      .filter((c) => c.isActive);
-    return list;
-  }, [categories, sectionId]);
+  const [requiresAppointment, setRequiresAppointment] = React.useState(false);
+  const [isPanel, setIsPanel] = React.useState(false);
+  const [isActive, setIsActive] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
-    setKind(editing?.kind || "LAB");
-    setCode(editing?.code || "");
-    setName(editing?.name || "");
-    setSectionId(editing?.sectionId || (sections?.[0]?.id ?? ""));
-    setCategoryId(editing?.categoryId || "");
-    setIsPanel(!!editing?.isPanel);
-    setSpecimenId(editing?.specimenId || "");
-    setPreparationText(String(editing?.preparationText ?? ""));
-    setConsentRequired(!!editing?.consentRequired);
-    setAppointmentRequired(!!editing?.appointmentRequired);
-    setSortOrder(String(editing?.sortOrder ?? 0));
+    setCode(editing?.code ?? "");
+    setName(editing?.name ?? "");
+    setKind(editing?.kind ?? "LAB");
+    setSectionId(editing?.sectionId ?? "");
+    setCategoryId(editing?.categoryId ?? "none");
+    setSpecimenId(editing?.specimenId ?? "none");
+    setTatRoutine(editing?.tatMinsRoutine != null ? String(editing.tatMinsRoutine) : "");
+    setTatStat(editing?.tatMinsStat != null ? String(editing.tatMinsStat) : "");
+    setPreparationText(editing?.preparationText ?? "");
+    setConsentRequired(editing?.consentRequired ?? false);
+    setRequiresAppointment(editing?.requiresAppointment ?? false);
+    setIsPanel(editing?.isPanel ?? false);
+    setIsActive(editing?.isActive ?? true);
+    setErr(null);
+  }, [open, editing]);
 
-    setErrCode(null);
-    setErrName(null);
-    setErrSection(null);
-    setErrSpecimen(null);
-    setBusy(false);
-  }, [open, editing, sections]);
-
-  // enforce service rules in UI
-  React.useEffect(() => {
-    if (kind !== "LAB") {
-      setSpecimenId("");
-    }
-  }, [kind]);
-
-  React.useEffect(() => {
-    if (kind === "LAB" && isPanel) {
-      setSpecimenId("");
-    }
-  }, [kind, isPanel]);
-
-  function validate() {
-    const ec = validateCode(code, "Item");
-    const en = validateName(name, "Item");
-    const es = !sectionId ? "Section is required" : null;
-
-    // backend rule: specimen only for LAB, and not for LAB panels
-    const eSp = kind === "LAB" && !isPanel && specimenId && !specimens.some((s) => s.id === specimenId)
-      ? "Invalid specimen"
-      : null;
-
-    setErrCode(ec);
-    setErrName(en);
-    setErrSection(es);
-    setErrSpecimen(eSp);
-
-    return !(ec || en || es || eSp);
-  }
+  const visibleCategories = categories.filter((c) => c.sectionId === sectionId && c.isActive);
 
   async function save() {
-    if (!validate()) return;
-    setBusy(true);
+    const codeErr = validateCode(code, "Item");
+    const nameErr = validateName(name, "Item");
+    if (!sectionId) return setErr("Section is required");
+    if (codeErr || nameErr) {
+      setErr(codeErr || nameErr);
+      return;
+    }
 
+    const payload: any = {
+      branchId,
+      code: normalizeCode(code),
+      name: name.trim(),
+      kind,
+      sectionId,
+      categoryId: categoryId === "none" ? null : categoryId,
+      specimenId: specimenId === "none" ? null : specimenId,
+      tatMinsRoutine: toInt(tatRoutine) ?? undefined,
+      tatMinsStat: toInt(tatStat) ?? undefined,
+      preparationText: preparationText.trim() || null,
+      consentRequired,
+      requiresAppointment,
+      isPanel,
+      isActive,
+    };
+
+    setSaving(true);
+    setErr(null);
     try {
-      if (!isEdit) {
-        // create payload: send full object
-        const payload: any = {
-          branchId,
-          code: normalizeCode(code),
-          name: String(name).trim(),
-          kind,
-          sectionId,
-          categoryId: categoryId || undefined,
-          isPanel,
-          specimenId: kind === "LAB" && !isPanel ? (specimenId || undefined) : undefined,
-          preparationText: preparationText.trim() || undefined,
-          consentRequired,
-          appointmentRequired,
-          sortOrder: toInt(sortOrder) ?? 0,
-        };
-
-        await apiFetch(`/api/infrastructure/diagnostics/items`, { method: "POST", body: JSON.stringify(payload) });
-        toast({ title: "Created", description: "Diagnostic item created." });
-        onSaved();
-        return;
+      if (editing) {
+        await apiFetch(`/api/infrastructure/diagnostics/items/${encodeURIComponent(editing.id)}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await apiFetch("/api/infrastructure/diagnostics/items", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
       }
-
-      // update payload: send diffs to avoid breaking on inactive legacy references
-      const payload: any = { branchId };
-
-      const nextCode = normalizeCode(code);
-      if (nextCode && nextCode !== editing!.code) payload.code = nextCode;
-      const nextName = String(name).trim();
-      if (nextName && nextName !== editing!.name) payload.name = nextName;
-
-      if (sectionId && sectionId !== editing!.sectionId) payload.sectionId = sectionId;
-
-      // categoryId: only if changed (including clearing)
-      const curCat = editing!.categoryId || "";
-      if ((categoryId || "") !== curCat) payload.categoryId = categoryId || null;
-
-      // isPanel can be changed
-      if (!!isPanel !== !!editing!.isPanel) payload.isPanel = isPanel;
-
-      // specimen: only valid for LAB non-panel; send only if changed
-      const desiredSpec = kind === "LAB" && !isPanel ? (specimenId || "") : "";
-      const curSpec = editing!.specimenId || "";
-      if (desiredSpec !== curSpec) payload.specimenId = desiredSpec ? desiredSpec : null;
-
-      const nextPrep = preparationText.trim();
-      const curPrep = String(editing!.preparationText ?? "").trim();
-      if (nextPrep !== curPrep) payload.preparationText = nextPrep || null;
-
-      if (!!consentRequired !== !!editing!.consentRequired) payload.consentRequired = consentRequired;
-      if (!!appointmentRequired !== !!editing!.appointmentRequired) payload.appointmentRequired = appointmentRequired;
-
-      const nextSort = toInt(sortOrder) ?? 0;
-      if (nextSort !== (editing!.sortOrder ?? 0)) payload.sortOrder = nextSort;
-
-      await apiFetch(`/api/infrastructure/diagnostics/items/${encodeURIComponent(editing!.id)}`, {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      });
-
-      toast({ title: "Saved", description: "Item updated." });
-      onSaved();
+      toast({ title: editing ? "Item updated" : "Item created" });
+      onOpenChange(false);
+      await onSaved();
     } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Failed", variant: "destructive" as any });
+      setErr(e?.message || "Save failed");
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>{editing ? `Edit Item: ${editing.code}` : "Create Diagnostic Item"}</DialogTitle>
-          <DialogDescription>
-            Validations match backend rules: code format, section/category ownership, specimen for LAB only, and no specimen on LAB panels.
-          </DialogDescription>
-        </DialogHeader>
-
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[720px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title={editing ? "Edit Item" : "Create Item"}
+          description="Catalog items can be lab tests, imaging, or procedures."
+          onClose={() => onOpenChange(false)}
+        />
         <div className="grid gap-4">
-          <div className="grid gap-4 md:grid-cols-3">
-            <Field label="Kind" required hint={isEdit ? "Kind cannot be changed" : undefined}>
-              <Select value={kind} onValueChange={(v) => setKind(v as DiagnosticKind)} disabled={isEdit}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Kind" />
-                </SelectTrigger>
+          {err ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">{err}</div> : null}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Code" required>
+              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="CBC" />
+            </Field>
+            <Field label="Name" required>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Complete Blood Count" />
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Kind" required>
+              <Select value={kind} onValueChange={(v) => setKind(v as DiagnosticKind)}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {DIAG_KINDS.map((k) => (
-                    <SelectItem key={k.value} value={k.value}>
-                      {k.label}
-                    </SelectItem>
-                  ))}
+                  {DIAG_KINDS.map((k) => <SelectItem key={k.value} value={k.value}>{k.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </Field>
-
-            <Field label="Code" required error={errCode}>
-              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g., CBC" className="h-10" />
-            </Field>
-
-            <Field label="Sort order" hint="Lower comes first">
-              <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="h-10" />
-            </Field>
-          </div>
-
-          <Field label="Name" required error={errName}>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Complete Blood Count" className="h-10" />
-          </Field>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <Field label="Section" required error={errSection}>
-              <Select value={sectionId} onValueChange={(v) => setSectionId(v)}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Select section" />
-                </SelectTrigger>
-                <SelectContent className="max-h-[320px] overflow-y-auto">
-                  {sections.filter((s) => s.isActive !== false).map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name} ({s.code})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            <Field label="Category" hint="Optional">
-              <Select value={categoryId || "none"} onValueChange={(v) => setCategoryId(v === "none" ? "" : v)}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="None" />
-                </SelectTrigger>
-                <SelectContent className="max-h-[320px] overflow-y-auto">
-                  <SelectItem value="none">None</SelectItem>
-                  {filteredCategories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name} ({c.code})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            <Field label="Specimen" hint={kind !== "LAB" ? "Only for LAB items" : isPanel ? "Disabled for LAB panels" : "Optional"} error={errSpecimen}>
-              <Select
-                value={specimenId || "none"}
-                onValueChange={(v) => setSpecimenId(v === "none" ? "" : v)}
-                disabled={kind !== "LAB" || isPanel}
-              >
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="None" />
-                </SelectTrigger>
-                <SelectContent className="max-h-[320px] overflow-y-auto">
-                  <SelectItem value="none">None</SelectItem>
-                  {specimens.filter((s) => s.isActive !== false).map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name} ({s.code})
-                    </SelectItem>
+            <Field label="Section" required>
+              <Select value={sectionId} onValueChange={setSectionId}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Select section" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  {sections.filter((s) => s.isActive).map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.name} ({s.code})</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
           </div>
-
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Category">
+              <Select value={categoryId} onValueChange={setCategoryId} disabled={!sectionId}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="No category" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  <SelectItem value="none">No category</SelectItem>
+                  {visibleCategories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name} ({c.code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Specimen" hint={kind !== "LAB" ? "Lab only" : undefined}>
+              <Select value={specimenId} onValueChange={setSpecimenId} disabled={kind !== "LAB"}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="No specimen" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  <SelectItem value="none">No specimen</SelectItem>
+                  {specimens.filter((s) => s.isActive).map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.name} ({s.code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          {kind === "LAB" ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Routine TAT (mins)">
+                <Input value={tatRoutine} onChange={(e) => setTatRoutine(e.target.value)} placeholder="60" />
+              </Field>
+              <Field label="Stat TAT (mins)">
+                <Input value={tatStat} onChange={(e) => setTatStat(e.target.value)} placeholder="30" />
+              </Field>
+            </div>
+          ) : (
+            <Field label="Preparation text">
+              <Textarea value={preparationText} onChange={(e) => setPreparationText(e.target.value)} placeholder="Any preparation notes" />
+            </Field>
+          )}
           <div className="grid gap-3 md:grid-cols-3">
-            <label className="flex items-center gap-2 text-sm">
-              <Switch checked={isPanel} onCheckedChange={(v) => setIsPanel(Boolean(v))} />
-              Panel item
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <Switch checked={consentRequired} onCheckedChange={(v) => setConsentRequired(Boolean(v))} />
-              Consent required
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <Switch checked={appointmentRequired} onCheckedChange={(v) => setAppointmentRequired(Boolean(v))} />
-              Appointment required
-            </label>
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Panel item</div>
+              <Switch checked={isPanel} onCheckedChange={setIsPanel} />
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Requires appointment</div>
+              <Switch checked={requiresAppointment} onCheckedChange={setRequiresAppointment} />
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Consent required</div>
+              <Switch checked={consentRequired} onCheckedChange={setConsentRequired} />
+            </div>
           </div>
-
-          <Field label="Preparation / notes" hint="Optional; stored as preparationText">
-            <Textarea
-              value={preparationText}
-              onChange={(e) => setPreparationText(e.target.value)}
-              placeholder="e.g., Fast 8 hours, avoid tea/coffee"
-              className="min-h-[90px]"
-            />
-          </Field>
-
-          <div className={cn("rounded-xl border p-3 text-xs", toneByKind(kind))}>
-            <div className="font-semibold">Backend rules enforced</div>
-            <ul className="mt-2 list-disc pl-5 space-y-1">
-              <li>Code format and uniqueness per branch</li>
-              <li>Section & category must belong to the same branch and be active</li>
-              <li>Specimen can be used only for LAB items</li>
-              <li>LAB panels cannot have a specimenId (set specimen at child tests)</li>
-            </ul>
-          </div>
+          {editing ? (
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Active</div>
+              <Switch checked={isActive} onCheckedChange={setIsActive} />
+            </div>
+          ) : null}
         </div>
-
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={busy}>
-            {editing ? "Save" : "Create"}
+          <Button onClick={save} disabled={saving}>
+            {editing ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -3049,39 +1588,644 @@ function ItemDialog({
   );
 }
 
-// ---------------- Imaging Templates ----------------
+/* =========================================================
+   TAB 2: Panels
+   ========================================================= */
 
-function ImagingTemplatesTab({ branchId }: TabProps) {
+function PanelsTab({ branchId }: TabProps) {
   const { toast } = useToast();
-
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
+  const [panels, setPanels] = React.useState<DiagnosticItemRow[]>([]);
+  const [allItems, setAllItems] = React.useState<DiagnosticItemRow[]>([]);
+  const [panelId, setPanelId] = React.useState("");
+  const [panelItems, setPanelItems] = React.useState<PanelItemRow[]>([]);
+  const [addItemId, setAddItemId] = React.useState("none");
+  const [saving, setSaving] = React.useState(false);
 
-  const [q, setQ] = React.useState("");
+  async function loadLists() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const itemRows = await apiFetch<DiagnosticItemRow[]>(`/api/infrastructure/diagnostics/items?branchId=${encodeURIComponent(branchId)}`);
+      const nextItems = safeArray(itemRows);
+      const nextPanels = nextItems.filter((p) => p.isPanel);
+      setPanels(nextPanels);
+      setAllItems(nextItems);
+      if (!panelId && nextPanels?.[0]?.id) setPanelId(nextPanels[0].id);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load panels");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadPanelItems(id: string) {
+    if (!id) {
+      setPanelItems([]);
+      return;
+    }
+    setLoading(true);
+    setErr(null);
+    try {
+      const rows = await apiFetch<PanelItemRow[]>(`/api/infrastructure/diagnostics/items/${encodeURIComponent(id)}/panel-items?branchId=${encodeURIComponent(branchId)}`);
+      setPanelItems(safeArray(rows));
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load panel items");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    void loadLists();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchId]);
+
+  React.useEffect(() => {
+    void loadPanelItems(panelId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelId]);
+
+  function addItem() {
+    if (!panelId || addItemId === "none") return;
+    if (panelItems.some((p) => p.itemId === addItemId)) {
+      toast({ title: "Item already added", description: "This item is already in the panel." });
+      return;
+    }
+    const item = allItems.find((i) => i.id === addItemId);
+    setPanelItems((prev) => [...prev, { panelId, itemId: addItemId, sortOrder: prev.length, isActive: true, item }]);
+    setAddItemId("none");
+  }
+
+  function move(index: number, dir: -1 | 1) {
+    setPanelItems((prev) => {
+      const next = [...prev];
+      const newIndex = index + dir;
+      if (newIndex < 0 || newIndex >= next.length) return prev;
+      const temp = next[index];
+      next[index] = next[newIndex];
+      next[newIndex] = temp;
+      return next;
+    });
+  }
+
+  function remove(index: number) {
+    setPanelItems((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  async function savePanel() {
+    if (!panelId) return;
+    setSaving(true);
+    try {
+      await apiFetch(`/api/infrastructure/diagnostics/items/${encodeURIComponent(panelId)}/panel-items?branchId=${encodeURIComponent(branchId)}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          items: panelItems.map((p, idx) => ({ itemId: p.itemId, sortOrder: idx })),
+        }),
+      });
+      toast({ title: "Panel saved" });
+      await loadPanelItems(panelId);
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e?.message || "Error", variant: "destructive" as any });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Panels</CardTitle>
+        <CardDescription>Compose panel items from the catalog.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {err ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{err}</div> : null}
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field label="Panel">
+            <Select value={panelId} onValueChange={setPanelId} disabled={loading}>
+              <SelectTrigger className="h-10"><SelectValue placeholder="Select panel" /></SelectTrigger>
+              <SelectContent className="max-h-[280px] overflow-y-auto">
+                {panels.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>{p.name} ({p.code})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Add item">
+            <div className="flex gap-2">
+              <Select value={addItemId} onValueChange={setAddItemId}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Select item" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  <SelectItem value="none">Select item</SelectItem>
+                  {allItems.filter((i) => i.id !== panelId).map((i) => (
+                    <SelectItem key={i.id} value={i.id}>{i.name} ({i.code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" onClick={addItem} disabled={!panelId || addItemId === "none"}>
+                Add
+              </Button>
+            </div>
+          </Field>
+        </div>
+        <Separator className="my-4" />
+        <div className="grid gap-2">
+          {panelItems.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No panel items added.</div>
+          ) : (
+            panelItems.map((p, idx) => (
+              <div key={`${p.itemId}-${idx}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-zc-text">{p.item?.name || p.itemId}</div>
+                  <div className="text-xs text-zc-muted">{p.item?.code || "ITEM"}</div>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => move(idx, -1)}><ArrowUp className="h-4 w-4" /></Button>
+                  <Button variant="outline" size="sm" onClick={() => move(idx, 1)}><ArrowDown className="h-4 w-4" /></Button>
+                  <Button variant="destructive" size="sm" onClick={() => remove(idx)}><X className="h-4 w-4" /></Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="mt-4 flex justify-end">
+          <Button onClick={savePanel} disabled={!panelId || saving}>
+            Save panel
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* =========================================================
+   TAB 3: Lab Params
+   ========================================================= */
+
+function LabParamsTab({ branchId }: TabProps) {
+  const { toast } = useToast();
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  const [tests, setTests] = React.useState<DiagnosticItemRow[]>([]);
+  const [testId, setTestId] = React.useState("");
+  const [parameters, setParameters] = React.useState<ParameterRow[]>([]);
+  const [paramDialogOpen, setParamDialogOpen] = React.useState(false);
+  const [rangeDialogOpen, setRangeDialogOpen] = React.useState(false);
+  const [editingParam, setEditingParam] = React.useState<ParameterRow | null>(null);
+  const [editingRange, setEditingRange] = React.useState<RangeRow | null>(null);
+  const [rangeParamId, setRangeParamId] = React.useState("");
+
+  async function loadTests() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const rows = await apiFetch<DiagnosticItemRow[]>(`/api/infrastructure/diagnostics/items?branchId=${encodeURIComponent(branchId)}&kind=LAB`);
+      setTests(safeArray(rows).filter((r) => !r.isPanel));
+      if (!testId && rows?.[0]?.id) setTestId(rows[0].id);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load lab tests");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadParameters(id: string) {
+    if (!id) {
+      setParameters([]);
+      return;
+    }
+    setLoading(true);
+    setErr(null);
+    try {
+      const rows = await apiFetch<ParameterRow[]>(`/api/infrastructure/diagnostics/items/${encodeURIComponent(id)}/parameters?branchId=${encodeURIComponent(branchId)}`);
+      setParameters(safeArray(rows));
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load parameters");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    void loadTests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchId]);
+
+  React.useEffect(() => {
+    void loadParameters(testId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testId]);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Lab Parameters</CardTitle>
+        <CardDescription>Define parameters and reference ranges for lab tests.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {err ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{err}</div> : null}
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="Lab test">
+            <Select value={testId} onValueChange={setTestId} disabled={loading}>
+              <SelectTrigger className="h-10 w-[320px]"><SelectValue placeholder="Select test" /></SelectTrigger>
+              <SelectContent className="max-h-[280px] overflow-y-auto">
+                {tests.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name} ({t.code})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Button onClick={() => { setEditingParam(null); setParamDialogOpen(true); }} disabled={!testId}>
+            <Plus className="mr-2 h-4 w-4" /> Parameter
+          </Button>
+        </div>
+        <Separator className="my-4" />
+        <div className="grid gap-3">
+          {parameters.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No parameters configured.</div>
+          ) : (
+            parameters.map((p) => (
+              <div key={p.id} className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <ToneBadge tone="violet" className="font-mono">{p.code}</ToneBadge>
+                      <div className="text-sm font-semibold text-zc-text">{p.name}</div>
+                      <ToneBadge tone={toneForResultDataType(p.dataType)}>{p.dataType}</ToneBadge>
+                      {!p.isActive ? <ToneBadge tone="rose">INACTIVE</ToneBadge> : null}
+                    </div>
+                    <div className="mt-1 text-xs text-zc-muted">
+                      Unit: <span className="font-mono">{p.unit || "-"}</span> | Precision: <span className="font-mono">{p.precision ?? "-"}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => { setEditingParam(p); setParamDialogOpen(true); }}>
+                      <Pencil className="mr-2 h-4 w-4" /> Edit
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => { setRangeParamId(p.id); setEditingRange(null); setRangeDialogOpen(true); }}>
+                      <Plus className="mr-2 h-4 w-4" /> Range
+                    </Button>
+                  </div>
+                </div>
+                {p.ranges?.length ? (
+                  <div className="mt-3 grid gap-2">
+                    {p.ranges.map((r) => (
+                      <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zc-border bg-white/50 p-2 text-xs">
+                        <div className="text-zc-muted">
+                          Sex: <span className="font-mono">{r.sex || "-"}</span> | Age: <span className="font-mono">{r.ageMinDays ?? "-"}</span> - <span className="font-mono">{r.ageMaxDays ?? "-"}</span> days
+                        </div>
+                        <div className="text-zc-muted">
+                          Low: <span className="font-mono">{r.low ?? "-"}</span> | High: <span className="font-mono">{r.high ?? "-"}</span> | Text: <span className="font-mono">{r.textRange || "-"}</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" onClick={() => { setRangeParamId(p.id); setEditingRange(r); setRangeDialogOpen(true); }}>
+                            Edit
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                await apiFetch(`/api/infrastructure/diagnostics/ranges/${encodeURIComponent(r.id)}?branchId=${encodeURIComponent(branchId)}`, { method: "DELETE" });
+                                toast({ title: "Range removed" });
+                                await loadParameters(testId);
+                              } catch (e: any) {
+                                toast({ title: "Remove failed", description: e?.message || "Error", variant: "destructive" as any });
+                              }
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
+        <ParameterDialog
+          open={paramDialogOpen}
+          onOpenChange={setParamDialogOpen}
+          branchId={branchId}
+          testId={testId}
+          editing={editingParam}
+          onSaved={() => loadParameters(testId)}
+        />
+        <RangeDialog
+          open={rangeDialogOpen}
+          onOpenChange={setRangeDialogOpen}
+          branchId={branchId}
+          parameterId={rangeParamId}
+          editing={editingRange}
+          onSaved={() => loadParameters(testId)}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+function ParameterDialog({
+  open,
+  onOpenChange,
+  branchId,
+  testId,
+  editing,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  testId: string;
+  editing: ParameterRow | null;
+  onSaved: () => void | Promise<void>;
+}) {
+  const { toast } = useToast();
+  const [code, setCode] = React.useState("");
+  const [name, setName] = React.useState("");
+  const [dataType, setDataType] = React.useState<ResultDataType>("NUMERIC");
+  const [unit, setUnit] = React.useState("");
+  const [precision, setPrecision] = React.useState("");
+  const [allowedText, setAllowedText] = React.useState("");
+  const [isActive, setIsActive] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setCode(editing?.code ?? "");
+    setName(editing?.name ?? "");
+    setDataType(editing?.dataType ?? "NUMERIC");
+    setUnit(editing?.unit ?? "");
+    setPrecision(editing?.precision != null ? String(editing.precision) : "");
+    setAllowedText(editing?.allowedText ?? "");
+    setIsActive(editing?.isActive ?? true);
+    setErr(null);
+  }, [open, editing]);
+
+  async function save() {
+    const codeErr = validateCode(code, "Parameter");
+    const nameErr = validateName(name, "Parameter");
+    if (codeErr || nameErr) {
+      setErr(codeErr || nameErr);
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      if (editing) {
+        await apiFetch(`/api/infrastructure/diagnostics/parameters/${encodeURIComponent(editing.id)}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            branchId,
+            code: normalizeCode(code),
+            name: name.trim(),
+            dataType,
+            unit: unit.trim() || null,
+            precision: toInt(precision) ?? null,
+            allowedText: allowedText.trim() || null,
+            isActive,
+          }),
+        });
+      } else {
+        await apiFetch(`/api/infrastructure/diagnostics/items/${encodeURIComponent(testId)}/parameters?branchId=${encodeURIComponent(branchId)}`, {
+          method: "POST",
+          body: JSON.stringify({
+            code: normalizeCode(code),
+            name: name.trim(),
+            dataType,
+            unit: unit.trim() || undefined,
+            precision: toInt(precision) ?? undefined,
+            allowedText: allowedText.trim() || undefined,
+          }),
+        });
+      }
+      toast({ title: editing ? "Parameter updated" : "Parameter created" });
+      onOpenChange(false);
+      await onSaved();
+    } catch (e: any) {
+      setErr(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[620px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title={editing ? "Edit Parameter" : "Add Parameter"}
+          description="Define result data type and validation details."
+          onClose={() => onOpenChange(false)}
+        />
+        <div className="grid gap-4">
+          {err ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">{err}</div> : null}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Code" required>
+              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="HGB" />
+            </Field>
+            <Field label="Name" required>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Hemoglobin" />
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field label="Data type" required>
+              <Select value={dataType} onValueChange={(v) => setDataType(v as ResultDataType)}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {RESULT_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Unit">
+              <Input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="g/dL" />
+            </Field>
+            <Field label="Precision">
+              <Input value={precision} onChange={(e) => setPrecision(e.target.value)} placeholder="1" />
+            </Field>
+          </div>
+          <Field label="Allowed text (for choice)">
+            <Input value={allowedText} onChange={(e) => setAllowedText(e.target.value)} placeholder="Low,Normal,High" />
+          </Field>
+          {editing ? (
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Active</div>
+              <Switch checked={isActive} onCheckedChange={setIsActive} />
+            </div>
+          ) : null}
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving || !testId}>
+            {editing ? "Update" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RangeDialog({
+  open,
+  onOpenChange,
+  branchId,
+  parameterId,
+  editing,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  parameterId: string;
+  editing: RangeRow | null;
+  onSaved: () => void | Promise<void>;
+}) {
+  const { toast } = useToast();
+  const [sex, setSex] = React.useState("");
+  const [ageMinDays, setAgeMinDays] = React.useState("");
+  const [ageMaxDays, setAgeMaxDays] = React.useState("");
+  const [low, setLow] = React.useState("");
+  const [high, setHigh] = React.useState("");
+  const [textRange, setTextRange] = React.useState("");
+  const [isActive, setIsActive] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setSex(editing?.sex ?? "");
+    setAgeMinDays(editing?.ageMinDays != null ? String(editing.ageMinDays) : "");
+    setAgeMaxDays(editing?.ageMaxDays != null ? String(editing.ageMaxDays) : "");
+    setLow(editing?.low != null ? String(editing.low) : "");
+    setHigh(editing?.high != null ? String(editing.high) : "");
+    setTextRange(editing?.textRange ?? "");
+    setIsActive(editing?.isActive ?? true);
+    setErr(null);
+  }, [open, editing]);
+
+  async function save() {
+    if (!parameterId) return;
+    setSaving(true);
+    setErr(null);
+    try {
+      if (editing) {
+        await apiFetch(`/api/infrastructure/diagnostics/ranges/${encodeURIComponent(editing.id)}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            branchId,
+            sex: sex.trim() || null,
+            ageMinDays: toInt(ageMinDays),
+            ageMaxDays: toInt(ageMaxDays),
+            low: toFloat(low),
+            high: toFloat(high),
+            textRange: textRange.trim() || null,
+            isActive,
+          }),
+        });
+      } else {
+        await apiFetch(`/api/infrastructure/diagnostics/parameters/${encodeURIComponent(parameterId)}/ranges?branchId=${encodeURIComponent(branchId)}`, {
+          method: "POST",
+          body: JSON.stringify({
+            sex: sex.trim() || undefined,
+            ageMinDays: toInt(ageMinDays) ?? undefined,
+            ageMaxDays: toInt(ageMaxDays) ?? undefined,
+            low: toFloat(low) ?? undefined,
+            high: toFloat(high) ?? undefined,
+            textRange: textRange.trim() || undefined,
+          }),
+        });
+      }
+      toast({ title: editing ? "Range updated" : "Range added" });
+      onOpenChange(false);
+      await onSaved();
+    } catch (e: any) {
+      setErr(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[620px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title={editing ? "Edit Range" : "Add Range"}
+          description="Reference ranges for numeric or text results."
+          onClose={() => onOpenChange(false)}
+        />
+        <div className="grid gap-4">
+          {err ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">{err}</div> : null}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Sex">
+              <Input value={sex} onChange={(e) => setSex(e.target.value)} placeholder="M/F/Other" />
+            </Field>
+            <Field label="Text range">
+              <Input value={textRange} onChange={(e) => setTextRange(e.target.value)} placeholder="Normal" />
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Age min (days)">
+              <Input value={ageMinDays} onChange={(e) => setAgeMinDays(e.target.value)} placeholder="0" />
+            </Field>
+            <Field label="Age max (days)">
+              <Input value={ageMaxDays} onChange={(e) => setAgeMaxDays(e.target.value)} placeholder="365" />
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Low">
+              <Input value={low} onChange={(e) => setLow(e.target.value)} placeholder="0" />
+            </Field>
+            <Field label="High">
+              <Input value={high} onChange={(e) => setHigh(e.target.value)} placeholder="10" />
+            </Field>
+          </div>
+          {editing ? (
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Active</div>
+              <Switch checked={isActive} onCheckedChange={setIsActive} />
+            </div>
+          ) : null}
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving || !parameterId}>
+            {editing ? "Update" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* =========================================================
+   TAB 4: Templates
+   ========================================================= */
+
+function TemplatesTab({ branchId }: TabProps) {
+  const { toast } = useToast();
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
   const [items, setItems] = React.useState<DiagnosticItemRow[]>([]);
-  const [itemId, setItemId] = React.useState<string>("");
-
-  const selectedItem = React.useMemo(() => items.find((i) => i.id === itemId) || null, [items, itemId]);
-
+  const [itemId, setItemId] = React.useState("");
   const [templates, setTemplates] = React.useState<TemplateRow[]>([]);
-
-  const [editorOpen, setEditorOpen] = React.useState(false);
+  const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editingTemplate, setEditingTemplate] = React.useState<TemplateRow | null>(null);
 
   async function loadItems() {
     setLoading(true);
     setErr(null);
     try {
-      const qs = new URLSearchParams();
-      qs.set("branchId", branchId);
-      qs.set("kind", "IMAGING");
-      if (q.trim()) qs.set("q", q.trim());
-      const list = await apiFetch<DiagnosticItemRow[]>(`/api/infrastructure/diagnostics/items?${qs.toString()}`);
-      setItems(safeArray(list));
-      if (!itemId && safeArray(list)[0]?.id) setItemId(safeArray(list)[0].id);
+      const rows = await apiFetch<DiagnosticItemRow[]>(`/api/infrastructure/diagnostics/items?branchId=${encodeURIComponent(branchId)}`);
+      setItems(safeArray(rows));
+      if (!itemId && rows?.[0]?.id) setItemId(rows[0].id);
     } catch (e: any) {
-      setErr(e?.message || "Failed to load imaging items");
-      setItems([]);
+      setErr(e?.message || "Failed to load items");
     } finally {
       setLoading(false);
     }
@@ -3095,11 +2239,10 @@ function ImagingTemplatesTab({ branchId }: TabProps) {
     setLoading(true);
     setErr(null);
     try {
-      const rows = await apiFetch<TemplateRow[]>(`/api/infrastructure/diagnostics/items/${encodeURIComponent(id)}/templates`);
+      const rows = await apiFetch<TemplateRow[]>(`/api/infrastructure/diagnostics/items/${encodeURIComponent(id)}/templates?branchId=${encodeURIComponent(branchId)}`);
       setTemplates(safeArray(rows));
     } catch (e: any) {
       setErr(e?.message || "Failed to load templates");
-      setTemplates([]);
     } finally {
       setLoading(false);
     }
@@ -3111,327 +2254,199 @@ function ImagingTemplatesTab({ branchId }: TabProps) {
   }, [branchId]);
 
   React.useEffect(() => {
-    const t = setTimeout(() => void loadItems(), 300);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
-
-  React.useEffect(() => {
     void loadTemplates(itemId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemId]);
 
-  async function deactivateTemplate(tpl: TemplateRow) {
-    try {
-      await apiFetch(`/api/infrastructure/diagnostics/templates/${encodeURIComponent(tpl.id)}`, { method: "DELETE" });
-      toast({ title: "Deactivated", description: "Template marked inactive." });
-      await loadTemplates(itemId);
-    } catch (e: any) {
-      toast({ title: "Cannot deactivate", description: e?.message || "Failed", variant: "destructive" as any });
-    }
-  }
-
   return (
-    <div className="grid gap-4">
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="text-base">Imaging Templates</CardTitle>
-          <CardDescription>CRUD templates per imaging item. Use textarea for body with quick preview.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="md:col-span-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Imaging item</div>
-              <Select value={itemId} onValueChange={(v) => setItemId(v)}>
-                <SelectTrigger className="mt-1 h-10">
-                  <SelectValue placeholder="Select imaging item" />
-                </SelectTrigger>
-                <SelectContent className="max-h-[320px] overflow-y-auto">
-                  {items.map((i) => (
-                    <SelectItem key={i.id} value={i.id}>
-                      {itemLabel(i)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="mt-2 text-xs text-zc-muted">Search by code/name to find the item faster.</div>
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Search</div>
-              <div className="relative mt-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zc-muted" />
-                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Code or name" className="h-10 pl-9" />
-              </div>
-            </div>
-          </div>
-
-          {err ? (
-            <div className="rounded-xl border border-rose-200/70 bg-rose-50/70 p-3 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-200">
-              {err}
-            </div>
-          ) : null}
-
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-sm text-zc-muted">
-              {selectedItem ? (
-                <span>
-                  Selected: <span className="font-semibold text-zc-text">{selectedItem.code}</span>
-                  <span className="text-zc-muted"> — {selectedItem.name}</span>
-                </span>
-              ) : (
-                "Select an imaging item"
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setEditingTemplate(null);
-                  setEditorOpen(true);
-                }}
-                disabled={!selectedItem}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                New Template
-              </Button>
-              <Button variant="outline" onClick={() => loadTemplates(itemId)} disabled={!selectedItem || loading}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border p-3">
-              <div className="text-sm font-semibold text-zc-text">Templates</div>
-              <div className="mt-2 max-h-[420px] overflow-y-auto rounded-xl border bg-zc-panel/10">
-                {templates.length ? (
-                  <div className="divide-y divide-zc-border">
-                    {templates.map((tpl) => (
-                      <div key={tpl.id} className="p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-zc-text">{tpl.name}</div>
-                            <div className="mt-1 text-xs text-zc-muted">
-                              Kind: <span className="font-mono">{tpl.kind}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setEditingTemplate(tpl);
-                                setEditorOpen(true);
-                              }}
-                            >
-                              <Pencil className="mr-2 h-4 w-4" /> Edit
-                            </Button>
-                            <Button variant="destructive" size="sm" onClick={() => deactivateTemplate(tpl)}>
-                              Deactivate
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="mt-3 rounded-lg border bg-white/60 p-2 text-xs text-zc-muted dark:bg-black/10">
-                          <div className="font-semibold text-zc-text/80">Preview</div>
-                          <pre className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words">{tpl.body}</pre>
-                        </div>
-                      </div>
-                    ))}
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Templates</CardTitle>
+        <CardDescription>Report templates for lab or imaging items.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {err ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{err}</div> : null}
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="Item">
+            <Select value={itemId} onValueChange={setItemId} disabled={loading}>
+              <SelectTrigger className="h-10 w-[320px]"><SelectValue placeholder="Select item" /></SelectTrigger>
+              <SelectContent className="max-h-[280px] overflow-y-auto">
+                {items.map((i) => (
+                  <SelectItem key={i.id} value={i.id}>{i.name} ({i.code})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Button onClick={() => { setEditingTemplate(null); setDialogOpen(true); }} disabled={!itemId}>
+            <Plus className="mr-2 h-4 w-4" /> Template
+          </Button>
+        </div>
+        <Separator className="my-4" />
+        <div className="grid gap-3">
+          {templates.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No templates available.</div>
+          ) : (
+            templates.map((t) => (
+              <div key={t.id} className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-semibold text-zc-text">{t.name}</div>
+                    <div className="text-xs text-zc-muted">{t.kind}</div>
                   </div>
-                ) : (
-                  <div className="p-3 text-sm text-zc-muted">No templates for this item.</div>
-                )}
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => { setEditingTemplate(t); setDialogOpen(true); }}>
+                      <Pencil className="mr-2 h-4 w-4" /> Edit
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await apiFetch(`/api/infrastructure/diagnostics/templates/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+                          toast({ title: "Template deactivated" });
+                          await loadTemplates(itemId);
+                        } catch (e: any) {
+                          toast({ title: "Deactivate failed", description: e?.message || "Error", variant: "destructive" as any });
+                        }
+                      }}
+                    >
+                      Deactivate
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-2 text-xs text-zc-muted whitespace-pre-wrap">{t.body}</div>
               </div>
-            </div>
-
-            <div className="rounded-xl border p-3">
-              <div className="text-sm font-semibold text-zc-text">Usage notes</div>
-
-              <div className="mt-2 space-y-2 text-sm text-zc-muted">
-                <p>
-                  Template body is stored as plain text. Keep placeholders consistent across reports (e.g.,{" "}
-                  <span className="font-mono">{"{{FINDINGS}}"}</span>).
-                </p>
-                <p>
-                  Deactivation is a soft-delete (<span className="font-mono">isActive=false</span>). Only active templates are
-                  returned by the list endpoint.
-                </p>
-              </div>
-
-              <div className="mt-4 rounded-xl border border-amber-200/70 bg-amber-50/70 p-3 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
-                If you need versioning per template, we can extend this to keep history + effective dates.
-              </div>
-            </div>
-
-          </div>
-        </CardContent>
-      </Card>
-
-      <TemplateEditorModal
-        open={editorOpen}
-        onOpenChange={setEditorOpen}
-        item={selectedItem}
-        editing={editingTemplate}
-        onSaved={async () => {
-          setEditorOpen(false);
-          setEditingTemplate(null);
-          await loadTemplates(itemId);
-        }}
-      />
-    </div>
+            ))
+          )}
+        </div>
+        <TemplateDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          branchId={branchId}
+          itemId={itemId}
+          editing={editingTemplate}
+          onSaved={() => loadTemplates(itemId)}
+        />
+      </CardContent>
+    </Card>
   );
 }
 
-function TemplateEditorModal({
+function TemplateDialog({
   open,
   onOpenChange,
-  item,
+  branchId,
+  itemId,
   editing,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  item: DiagnosticItemRow | null;
+  branchId: string;
+  itemId: string;
   editing: TemplateRow | null;
-  onSaved: () => void;
+  onSaved: () => void | Promise<void>;
 }) {
   const { toast } = useToast();
-
-  const [kind, setKind] = React.useState<TemplateKind>("IMAGING_REPORT");
   const [name, setName] = React.useState("");
+  const [kind, setKind] = React.useState<TemplateKind>("IMAGING_REPORT");
   const [body, setBody] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-
-  const [errName, setErrName] = React.useState<string | null>(null);
-  const [errBody, setErrBody] = React.useState<string | null>(null);
+  const [isActive, setIsActive] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
-    setKind(editing?.kind || "IMAGING_REPORT");
-    setName(editing?.name || "");
-    setBody(editing?.body || "");
-    setErrName(null);
-    setErrBody(null);
-    setBusy(false);
+    setName(editing?.name ?? "");
+    setKind(editing?.kind ?? "IMAGING_REPORT");
+    setBody(editing?.body ?? "");
+    setIsActive(editing?.isActive ?? true);
+    setErr(null);
   }, [open, editing]);
 
-  function validate() {
-    const en = validateName(name, "Template");
-    const eb = isBlank(body) ? "Template body is required" : null;
-    setErrName(en);
-    setErrBody(eb);
-    return !(en || eb);
-  }
-
   async function save() {
-    if (!item?.id) {
-      toast({ title: "Select item", description: "Choose an imaging item first.", variant: "destructive" as any });
+    const nameErr = validateName(name, "Template");
+    if (nameErr) {
+      setErr(nameErr);
       return;
     }
-    if (!validate()) return;
-    setBusy(true);
+    if (!body.trim()) {
+      setErr("Template body is required");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
     try {
-      const payload: any = {
-        kind,
-        name: String(name).trim(),
-        body: String(body),
-      };
-
-      if (editing?.id) {
+      if (editing) {
         await apiFetch(`/api/infrastructure/diagnostics/templates/${encodeURIComponent(editing.id)}`, {
           method: "PUT",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            branchId,
+            name: name.trim(),
+            kind,
+            body: body.trim(),
+            isActive,
+          }),
         });
-        toast({ title: "Saved", description: "Template updated." });
       } else {
-        await apiFetch(`/api/infrastructure/diagnostics/items/${encodeURIComponent(item.id)}/templates`, {
+        await apiFetch(`/api/infrastructure/diagnostics/items/${encodeURIComponent(itemId)}/templates?branchId=${encodeURIComponent(branchId)}`, {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            name: name.trim(),
+            kind,
+            body: body.trim(),
+          }),
         });
-        toast({ title: "Created", description: "Template created." });
       }
-
-      onSaved();
+      toast({ title: editing ? "Template updated" : "Template created" });
+      onOpenChange(false);
+      await onSaved();
     } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Failed", variant: "destructive" as any });
+      setErr(e?.message || "Save failed");
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>{editing ? "Edit Template" : "New Template"}</DialogTitle>
-          <DialogDescription>
-            {item ? (
-              <span>
-                For <span className="font-semibold">{item.code}</span> — {item.name}
-              </span>
-            ) : (
-              "Select an imaging item"
-            )}
-          </DialogDescription>
-        </DialogHeader>
-
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[720px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title={editing ? "Edit Template" : "Create Template"}
+          description="Plain text report template (MVP)."
+          onClose={() => onOpenChange(false)}
+        />
         <div className="grid gap-4">
-          <div className="grid gap-4 md:grid-cols-3">
+          {err ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">{err}</div> : null}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Name" required>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Imaging report" />
+            </Field>
             <Field label="Kind" required>
               <Select value={kind} onValueChange={(v) => setKind(v as TemplateKind)}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Kind" />
-                </SelectTrigger>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {TEMPLATE_KINDS.map((k) => (
-                    <SelectItem key={k.value} value={k.value}>
-                      {k.label}
-                    </SelectItem>
-                  ))}
+                  {TEMPLATE_KINDS.map((k) => <SelectItem key={k.value} value={k.value}>{k.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </Field>
-
-            <div className="md:col-span-2">
-              <Field label="Name" required error={errName}>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Standard CXR" className="h-10" />
-              </Field>
-            </div>
           </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Field label="Body" required error={errBody}>
-              <Textarea
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                placeholder="Type template body…"
-                className="min-h-[320px] font-mono text-sm"
-              />
-            </Field>
-
-            <div className="rounded-xl border p-3">
-              <div className="text-sm font-semibold text-zc-text">Preview</div>
-              <div className="mt-2 rounded-xl border bg-zc-panel/10 p-3">
-                <pre className="max-h-[320px] overflow-y-auto whitespace-pre-wrap break-words text-sm text-zc-text">{body || "—"}</pre>
-              </div>
-              <div className="mt-2 text-xs text-zc-muted">
-                Tip: keep placeholders consistent across reports. We can later add a token helper UI.
-              </div>
+          <Field label="Body" required>
+            <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={8} placeholder="Template body..." />
+          </Field>
+          {editing ? (
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Active</div>
+              <Switch checked={isActive} onCheckedChange={setIsActive} />
             </div>
-          </div>
+          ) : null}
         </div>
-
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={busy}>
-            {editing ? "Save" : "Create"}
+          <Button onClick={save} disabled={saving || !itemId}>
+            {editing ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -3439,575 +2454,324 @@ function TemplateEditorModal({
   );
 }
 
-// ---------------- Charge Master Mapping ----------------
+/* =========================================================
+   TAB 5: Service Points
+   ========================================================= */
 
-function ChargeMappingTab({ branchId }: TabProps) {
+function ServicePointsTab({ branchId }: TabProps) {
   const { toast } = useToast();
-
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
-
-  const [kind, setKind] = React.useState<DiagnosticKind | "ALL">("ALL");
+  const [servicePoints, setServicePoints] = React.useState<DiagnosticServicePointRow[]>([]);
+  const [units, setUnits] = React.useState<UnitRow[]>([]);
+  const [locations, setLocations] = React.useState<FlatLocationNode[]>([]);
   const [includeInactive, setIncludeInactive] = React.useState(false);
-  const [q, setQ] = React.useState("");
+  const [typeFilter, setTypeFilter] = React.useState<ServicePointType | "all">("all");
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<DiagnosticServicePointRow | null>(null);
+  const [roomsDialog, setRoomsDialog] = React.useState<DiagnosticServicePointRow | null>(null);
+  const [resourcesDialog, setResourcesDialog] = React.useState<DiagnosticServicePointRow | null>(null);
+  const [equipmentDialog, setEquipmentDialog] = React.useState<DiagnosticServicePointRow | null>(null);
 
-  const [maps, setMaps] = React.useState<ChargeMapRow[]>([]);
-  const [unmapped, setUnmapped] = React.useState<DiagnosticItemRow[]>([]);
-
-  const [modalOpen, setModalOpen] = React.useState(false);
-  const [modalMode, setModalMode] = React.useState<"create" | "edit" | "replace">("create");
-  const [editingMap, setEditingMap] = React.useState<ChargeMapRow | null>(null);
-  const [selectedItem, setSelectedItem] = React.useState<DiagnosticItemRow | null>(null);
-
-  async function loadMaps() {
+  async function loadLists() {
     setLoading(true);
     setErr(null);
     try {
+      const locTree = await apiFetch<any>(`/api/infrastructure/locations/tree?branchId=${encodeURIComponent(branchId)}`);
+      setLocations(flattenLocationTree(normalizeLocationTree(locTree)));
+      const unitRows = await apiFetch<UnitRow[]>(`/api/infrastructure/units?branchId=${encodeURIComponent(branchId)}`);
+      setUnits(safeArray(unitRows));
+
       const qs = new URLSearchParams();
       qs.set("branchId", branchId);
-      if (includeInactive) qs.set("includeInactive", "true");
-      const rows = await apiFetch<ChargeMapRow[]>(`/api/infrastructure/diagnostics/charge-maps?${qs.toString()}`);
-      const list = safeArray(rows);
-
-      const filtered = kind === "ALL" ? list : list.filter((m) => (m.diagnosticItem?.kind || "") === kind);
-      const qv = q.trim().toLowerCase();
-      const qFiltered = !qv
-        ? filtered
-        : filtered.filter((m) => {
-          const i = m.diagnosticItem;
-          const hay = `${i?.code || ""} ${i?.name || ""} ${m.chargeMasterId || ""}`.toLowerCase();
-          return hay.includes(qv);
-        });
-
-      setMaps(qFiltered);
+      if (typeFilter !== "all") qs.set("type", typeFilter);
+      const rows = await apiFetch<DiagnosticServicePointRow[]>(`/api/infrastructure/diagnostics/service-points?${qs.toString()}`);
+      let next = safeArray(rows);
+      if (!includeInactive) next = next.filter((r) => r.isActive);
+      setServicePoints(next);
     } catch (e: any) {
-      setErr(e?.message || "Failed to load charge mappings");
-      setMaps([]);
+      setErr(e?.message || "Failed to load service points");
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadUnmapped() {
-    try {
-      const qs = new URLSearchParams();
-      qs.set("branchId", branchId);
-      if (kind !== "ALL") qs.set("kind", kind);
-      const rows = await apiFetch<DiagnosticItemRow[]>(`/api/infrastructure/diagnostics/unmapped?${qs.toString()}`);
-      setUnmapped(safeArray(rows));
-    } catch {
-      setUnmapped([]);
-    }
-  }
-
   React.useEffect(() => {
-    void loadMaps();
-    void loadUnmapped();
+    void loadLists();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId, includeInactive, kind]);
-
-  React.useEffect(() => {
-    const t = setTimeout(() => void loadMaps(), 250);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
-
-  async function deactivateMap(row: ChargeMapRow) {
-    try {
-      await apiFetch(`/api/infrastructure/diagnostics/charge-maps/${encodeURIComponent(row.id)}`, { method: "DELETE" });
-      toast({ title: "Deactivated", description: "Charge mapping marked inactive." });
-      await loadMaps();
-      await loadUnmapped();
-    } catch (e: any) {
-      toast({ title: "Cannot deactivate", description: e?.message || "Failed", variant: "destructive" as any });
-    }
-  }
+  }, [branchId, includeInactive, typeFilter]);
 
   return (
-    <div className="grid gap-4">
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="text-base">Charge Master Mapping</CardTitle>
-          <CardDescription>Search Charge Master and bind <span className="font-mono">chargeMasterId</span> per diagnostic item.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-4">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Kind</div>
-              <Select value={kind} onValueChange={(v) => setKind(v as any)}>
-                <SelectTrigger className="mt-1 h-10">
-                  <SelectValue placeholder="All" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All</SelectItem>
-                  {DIAG_KINDS.map((k) => (
-                    <SelectItem key={k.value} value={k.value}>
-                      {k.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="md:col-span-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Search</div>
-              <div className="relative mt-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zc-muted" />
-                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Item code/name or chargeMasterId" className="h-10 pl-9" />
-              </div>
-            </div>
-
-            <div className="flex items-end justify-end gap-2">
-              <Button variant="outline" className="h-10" onClick={() => { void loadMaps(); void loadUnmapped(); }} disabled={loading}>
-                <RefreshCw className="mr-2 h-4 w-4" /> Refresh
-              </Button>
-            </div>
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Service Points</CardTitle>
+        <CardDescription>Define diagnostic service points and map rooms/resources/equipment.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {err ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{err}</div> : null}
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Type filter">
+            <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as any)}>
+              <SelectTrigger className="h-10 w-[220px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                {SERVICE_POINT_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+          <div className="flex items-center gap-2">
+            <Checkbox checked={includeInactive} onCheckedChange={(v) => setIncludeInactive(Boolean(v))} />
+            <span className="text-sm text-zc-muted">Include inactive</span>
           </div>
-
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 text-sm">
-              <Switch checked={includeInactive} onCheckedChange={(v) => setIncludeInactive(Boolean(v))} />
-              Include inactive
-            </label>
-            {err ? <div className="text-sm text-rose-600">{err}</div> : null}
-          </div>
-
-          <Separator />
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm font-semibold text-zc-text">Unmapped items</div>
-                  <div className="text-xs text-zc-muted">Items without any active mapping. Click “Bind”.</div>
-                </div>
-                <Badge variant="outline" className="tabular-nums">{unmapped.length}</Badge>
-              </div>
-
-              <div className="mt-3 max-h-[440px] overflow-y-auto rounded-xl border bg-zc-panel/10">
-                {unmapped.length ? (
-                  <div className="divide-y divide-zc-border">
-                    {unmapped.map((u) => (
-                      <div key={u.id} className="flex items-center justify-between gap-3 p-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-zc-text">{u.code} — {u.name}</div>
-                          <div className="mt-0.5 text-xs text-zc-muted">
-                            {DIAG_KINDS.find((k) => k.value === u.kind)?.label ?? u.kind} • {u.section?.name || "—"}
-                          </div>
-                        </div>
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setSelectedItem(u);
-                            setEditingMap(null);
-                            setModalMode("create");
-                            setModalOpen(true);
-                          }}
-                        >
-                          Bind
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="p-3 text-sm text-zc-muted">No unmapped items.</div>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-xl border p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm font-semibold text-zc-text">Existing mappings</div>
-                  <div className="text-xs text-zc-muted">Edit price/dates, replace mapping, or deactivate.</div>
-                </div>
-                <Badge variant="outline" className="tabular-nums">{maps.length}</Badge>
-              </div>
-
-              <div className="mt-3 max-h-[440px] overflow-y-auto rounded-xl border bg-zc-panel/10">
-                {maps.length ? (
-                  <div className="divide-y divide-zc-border">
-                    {maps.map((m) => (
-                      <div key={m.id} className="p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-zc-text">
-                              {m.diagnosticItem ? `${m.diagnosticItem.code} — ${m.diagnosticItem.name}` : m.diagnosticItemId}
-                            </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zc-muted">
-                              <span className={cn("rounded-full px-2 py-0.5", toneByKind(m.diagnosticItem?.kind as any))}>
-                                {(m.diagnosticItem?.kind || "—").toString()}
-                              </span>
-                              <span className="font-mono">CM: {m.chargeMasterId}</span>
-                              {m.price != null ? <span>Price: {m.price}</span> : null}
-                              {m.effectiveFrom ? <span>From: {formatDateISO(m.effectiveFrom)}</span> : null}
-                              {m.effectiveTo ? <span>To: {formatDateISO(m.effectiveTo)}</span> : null}
-                              {!m.isActive ? <Badge variant="outline">Inactive</Badge> : null}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedItem(m.diagnosticItem || null);
-                                setEditingMap(m);
-                                setModalMode("edit");
-                                setModalOpen(true);
-                              }}
-                            >
-                              Edit
-                            </Button>
-
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedItem(m.diagnosticItem || null);
-                                setEditingMap(m);
-                                setModalMode("replace");
-                                setModalOpen(true);
-                              }}
-                            >
-                              Replace
-                            </Button>
-
-                            {m.isActive ? (
-                              <Button variant="destructive" size="sm" onClick={() => deactivateMap(m)}>
-                                Deactivate
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="p-3 text-sm text-zc-muted">No mappings found.</div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-sky-200/70 bg-sky-50/70 p-3 text-xs text-sky-800 dark:border-sky-900/40 dark:bg-sky-900/20 dark:text-sky-200">
-            Charge Master endpoint used by picker: <span className="font-mono">/api/infrastructure/charge-master</span>. The UI searches using <span className="font-mono">?q=</span>.
-          </div>
-        </CardContent>
-      </Card>
-
-      <ChargeMapEditorModal
-        open={modalOpen}
-        onOpenChange={setModalOpen}
-        branchId={branchId}
-        mode={modalMode}
-        item={selectedItem}
-        editing={editingMap}
-        onSaved={async () => {
-          setModalOpen(false);
-          setEditingMap(null);
-          setSelectedItem(null);
-          await loadMaps();
-          await loadUnmapped();
-        }}
-      />
-    </div>
-  );
-}
-
-function ChargeMasterPicker({
-  branchId,
-  value,
-  onChange,
-}: {
-  branchId: string;
-  value: string;
-  onChange: (id: string, row?: ChargeMasterRow | null) => void;
-}) {
-  const [q, setQ] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const [rows, setRows] = React.useState<ChargeMasterRow[]>([]);
-
-  async function searchNow(query: string) {
-    setBusy(true);
-    try {
-      const qs = new URLSearchParams();
-      qs.set("branchId", branchId);
-      if (query.trim()) qs.set("q", query.trim());
-      qs.set("take", "20");
-      const list = await apiFetch<ChargeMasterRow[]>(`/api/infrastructure/charge-master?${qs.toString()}`);
-      setRows(safeArray(list));
-    } catch {
-      setRows([]);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  React.useEffect(() => {
-    const t = setTimeout(() => void searchNow(q), 250);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search charge master (code/name)…" className="h-10" />
-        <Button variant="outline" className="h-10" onClick={() => searchNow(q)} disabled={busy}>
-          <Search className="mr-2 h-4 w-4" /> Search
-        </Button>
-      </div>
-
-      <div className="rounded-xl border bg-zc-panel/10">
-        <div className="max-h-[240px] overflow-y-auto">
-          {rows.length ? (
-            <div className="divide-y divide-zc-border">
-              {rows.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => onChange(r.id, r)}
-                  className={cn(
-                    "w-full px-3 py-2 text-left hover:bg-zc-panel/20 transition",
-                    value === r.id ? "bg-zc-panel/20" : "",
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-zc-text">
-                        {(r.code ? `${r.code} — ` : "") + (r.name || r.id)}
-                      </div>
-                      <div className="mt-0.5 text-xs text-zc-muted font-mono">{r.id}</div>
-                    </div>
-                    {r.price != null ? <Badge variant="secondary">{r.price}</Badge> : null}
-                  </div>
-                </button>
-              ))}
-            </div>
+          <Button onClick={() => { setEditing(null); setDialogOpen(true); }} disabled={loading}>
+            <Plus className="mr-2 h-4 w-4" /> Service point
+          </Button>
+        </div>
+        <Separator className="my-4" />
+        <div className="grid gap-3">
+          {servicePoints.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No service points yet.</div>
           ) : (
-            <div className="p-3 text-sm text-zc-muted">No results.</div>
+            servicePoints.map((sp) => (
+              <div key={sp.id} className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <ToneBadge tone="violet" className="font-mono">{sp.code}</ToneBadge>
+                      <div className="text-sm font-semibold text-zc-text">{sp.name}</div>
+                      <ToneBadge tone={toneForServicePointType(sp.type)}>{sp.type}</ToneBadge>
+                      {!sp.isActive ? <ToneBadge tone="rose">INACTIVE</ToneBadge> : null}
+                    </div>
+                    <div className="mt-1 text-xs text-zc-muted">
+                      Location: <span className="font-mono">{sp.locationNode?.name || sp.locationNodeId}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-zc-muted">
+                      Rooms: <span className="font-mono">{sp._count?.rooms ?? 0}</span> | Resources: <span className="font-mono">{sp._count?.resources ?? 0}</span> | Equipment: <span className="font-mono">{sp._count?.equipment ?? 0}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => { setEditing(sp); setDialogOpen(true); }}>
+                      <Pencil className="mr-2 h-4 w-4" /> Edit
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setRoomsDialog(sp)}>Rooms</Button>
+                    <Button variant="outline" size="sm" onClick={() => setResourcesDialog(sp)}>Resources</Button>
+                    <Button variant="outline" size="sm" onClick={() => setEquipmentDialog(sp)}>Equipment</Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await apiFetch(`/api/infrastructure/diagnostics/service-points/${encodeURIComponent(sp.id)}?branchId=${encodeURIComponent(branchId)}`, { method: "DELETE" });
+                          toast({ title: "Service point deactivated" });
+                          await loadLists();
+                        } catch (e: any) {
+                          toast({ title: "Deactivate failed", description: e?.message || "Error", variant: "destructive" as any });
+                        }
+                      }}
+                    >
+                      Deactivate
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))
           )}
         </div>
-      </div>
-    </div>
+        <ServicePointDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          branchId={branchId}
+          editing={editing}
+          locations={locations}
+          units={units}
+          onSaved={loadLists}
+        />
+        <ServicePointRoomsDialog
+          open={!!roomsDialog}
+          onOpenChange={(v) => !v && setRoomsDialog(null)}
+          branchId={branchId}
+          servicePoint={roomsDialog}
+        />
+        <ServicePointResourcesDialog
+          open={!!resourcesDialog}
+          onOpenChange={(v) => !v && setResourcesDialog(null)}
+          branchId={branchId}
+          servicePoint={resourcesDialog}
+        />
+        <ServicePointEquipmentDialog
+          open={!!equipmentDialog}
+          onOpenChange={(v) => !v && setEquipmentDialog(null)}
+          branchId={branchId}
+          servicePoint={equipmentDialog}
+        />
+      </CardContent>
+    </Card>
   );
 }
 
-function ChargeMapEditorModal({
+function ServicePointDialog({
   open,
   onOpenChange,
   branchId,
-  mode,
-  item,
   editing,
+  locations,
+  units,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   branchId: string;
-  mode: "create" | "edit" | "replace";
-  item: DiagnosticItemRow | null;
-  editing: ChargeMapRow | null;
-  onSaved: () => void;
+  editing: DiagnosticServicePointRow | null;
+  locations: FlatLocationNode[];
+  units: UnitRow[];
+  onSaved: () => void | Promise<void>;
 }) {
   const { toast } = useToast();
-
-  const [chargeMasterId, setChargeMasterId] = React.useState("");
-  const [price, setPrice] = React.useState<string>("");
-  const [effectiveFrom, setEffectiveFrom] = React.useState<string>("");
-  const [effectiveTo, setEffectiveTo] = React.useState<string>("");
-
-  const [busy, setBusy] = React.useState(false);
-
-  const [errCM, setErrCM] = React.useState<string | null>(null);
-  const [errDates, setErrDates] = React.useState<string | null>(null);
+  const [code, setCode] = React.useState("");
+  const [name, setName] = React.useState("");
+  const [type, setType] = React.useState<ServicePointType>("OTHER");
+  const [locationNodeId, setLocationNodeId] = React.useState("");
+  const [unitId, setUnitId] = React.useState("none");
+  const [sortOrder, setSortOrder] = React.useState("");
+  const [notes, setNotes] = React.useState("");
+  const [isActive, setIsActive] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
-
-    const isCreate = mode === "create";
-
-    setChargeMasterId(isCreate ? "" : (editing?.chargeMasterId || ""));
-    setPrice(editing?.price != null ? String(editing.price) : "");
-    setEffectiveFrom(formatDateISO(editing?.effectiveFrom || null));
-    setEffectiveTo(formatDateISO(editing?.effectiveTo || null));
-
-    setErrCM(null);
-    setErrDates(null);
-    setBusy(false);
-  }, [open, mode, editing]);
-
-  function validate() {
-    const needCM = mode !== "edit";
-    const ecm = needCM && !chargeMasterId ? "Charge Master is required" : null;
-
-    let ed = null;
-    if (effectiveFrom && effectiveTo && effectiveFrom > effectiveTo) {
-      ed = "effectiveFrom must be on/before effectiveTo";
-    }
-
-    setErrCM(ecm);
-    setErrDates(ed);
-
-    return !(ecm || ed);
-  }
+    setCode(editing?.code ?? "");
+    setName(editing?.name ?? "");
+    setType(editing?.type ?? "OTHER");
+    setLocationNodeId(editing?.locationNodeId ?? "");
+    setUnitId(editing?.unitId ?? "none");
+    setSortOrder(editing?.sortOrder != null ? String(editing.sortOrder) : "");
+    setNotes(editing?.notes ?? "");
+    setIsActive(editing?.isActive ?? true);
+    setErr(null);
+  }, [open, editing]);
 
   async function save() {
-    if (!item?.id && mode === "create") {
-      toast({ title: "Select item", description: "Choose an unmapped item to bind.", variant: "destructive" as any });
+    const codeErr = validateCode(code, "Service point");
+    const nameErr = validateName(name, "Service point");
+    if (!locationNodeId) return setErr("Location is required");
+    if (codeErr || nameErr) {
+      setErr(codeErr || nameErr);
       return;
     }
-    if (!validate()) return;
-
-    setBusy(true);
+    setSaving(true);
+    setErr(null);
     try {
-      if (mode === "edit") {
-        if (!editing?.id) throw new Error("Missing mapping id");
-
-        await apiFetch(`/api/infrastructure/diagnostics/charge-maps/${encodeURIComponent(editing.id)}`, {
+      if (editing) {
+        await apiFetch(`/api/infrastructure/diagnostics/service-points/${encodeURIComponent(editing.id)}`, {
           method: "PUT",
           body: JSON.stringify({
             branchId,
-            price: price.trim() ? toFloat(price) : null,
-            effectiveFrom: effectiveFrom || null,
-            effectiveTo: effectiveTo || null,
+            code: normalizeCode(code),
+            name: name.trim(),
+            type,
+            locationNodeId,
+            unitId: unitId === "none" ? null : unitId,
+            sortOrder: toInt(sortOrder) ?? undefined,
+            notes: notes.trim() || null,
+            isActive,
           }),
         });
-        toast({ title: "Saved", description: "Mapping updated." });
-        onSaved();
-        return;
-      }
-
-      if (mode === "replace") {
-        if (!editing?.id) throw new Error("Missing mapping id");
-        if (!editing?.diagnosticItemId) throw new Error("Missing item id");
-
-        // backend rule: chargeMasterId cannot be updated; replace means deactivate + create
-        await apiFetch(`/api/infrastructure/diagnostics/charge-maps/${encodeURIComponent(editing.id)}`, { method: "DELETE" });
-
-        await apiFetch(`/api/infrastructure/diagnostics/charge-maps`, {
+      } else {
+        await apiFetch("/api/infrastructure/diagnostics/service-points", {
           method: "POST",
           body: JSON.stringify({
             branchId,
-            diagnosticItemId: editing.diagnosticItemId,
-            chargeMasterId,
-            price: price.trim() ? toFloat(price) : null,
-            effectiveFrom: effectiveFrom || null,
-            effectiveTo: effectiveTo || null,
+            code: normalizeCode(code),
+            name: name.trim(),
+            type,
+            locationNodeId,
+            unitId: unitId === "none" ? undefined : unitId,
+            sortOrder: toInt(sortOrder) ?? undefined,
+            notes: notes.trim() || undefined,
           }),
         });
-
-        toast({ title: "Replaced", description: "Old mapping deactivated and a new mapping was created." });
-        onSaved();
-        return;
       }
-
-      // create
-      await apiFetch(`/api/infrastructure/diagnostics/charge-maps`, {
-        method: "POST",
-        body: JSON.stringify({
-          branchId,
-          diagnosticItemId: item!.id,
-          chargeMasterId,
-          price: price.trim() ? toFloat(price) : null,
-          effectiveFrom: effectiveFrom || null,
-          effectiveTo: effectiveTo || null,
-        }),
-      });
-
-      toast({ title: "Bound", description: "Charge master bound to item." });
-      onSaved();
+      toast({ title: editing ? "Service point updated" : "Service point created" });
+      onOpenChange(false);
+      await onSaved();
     } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Failed", variant: "destructive" as any });
+      setErr(e?.message || "Save failed");
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   }
 
-  const title = mode === "create" ? "Bind Charge Master" : mode === "edit" ? "Edit Mapping" : "Replace Mapping";
-
-  const showPicker = mode !== "edit";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>
-            {item ? (
-              <span>
-                For <span className="font-semibold">{item.code}</span> — {item.name}
-              </span>
-            ) : editing?.diagnosticItem ? (
-              <span>
-                For <span className="font-semibold">{editing.diagnosticItem.code}</span> — {editing.diagnosticItem.name}
-              </span>
-            ) : (
-              ""
-            )}
-          </DialogDescription>
-        </DialogHeader>
-
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[720px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title={editing ? "Edit Service Point" : "Create Service Point"}
+          description="Service points are diagnostic units bound to a location."
+          onClose={() => onOpenChange(false)}
+        />
         <div className="grid gap-4">
-          {showPicker ? (
-            <div className="grid gap-3">
-              <Field label="Charge Master" required error={errCM} hint="Search and select (endpoint: /api/infrastructure/charge-master)">
-                <div className="rounded-xl border p-3">
-                  {chargeMasterId ? (
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <div className="text-sm text-zc-muted">
-                        Selected: <span className="font-mono text-zc-text">{chargeMasterId}</span>
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => setChargeMasterId("")}>Clear</Button>
-                    </div>
-                  ) : null}
-
-                  <ChargeMasterPicker
-                    branchId={branchId}
-                    value={chargeMasterId}
-                    onChange={(id) => setChargeMasterId(id)}
-                  />
-
-                  <div className="mt-3 text-xs text-zc-muted">
-                    If your API uses a different query param, adjust the picker search in this file.
-                  </div>
-                </div>
-              </Field>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3 text-sm text-zc-muted">
-              Charge Master cannot be changed via edit (backend rule). Use <span className="font-semibold">Replace</span> instead.
-            </div>
-          )}
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <Field label="Price" hint="Optional override">
-              <Input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="e.g., 250" className="h-10" />
+          {err ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">{err}</div> : null}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Code" required>
+              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="LAB" />
             </Field>
-
-            <Field label="Effective from" error={errDates}>
-              <Input value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} placeholder="YYYY-MM-DD" className="h-10" />
-            </Field>
-
-            <Field label="Effective to" error={errDates}>
-              <Input value={effectiveTo} onChange={(e) => setEffectiveTo(e.target.value)} placeholder="YYYY-MM-DD" className="h-10" />
+            <Field label="Name" required>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Central Lab" />
             </Field>
           </div>
-
-          {mode === "replace" ? (
-            <div className="rounded-xl border border-amber-200/70 bg-amber-50/70 p-3 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
-              Replace executes: <span className="font-mono">DELETE /charge-maps/:id</span> then <span className="font-mono">POST /charge-maps</span> (because chargeMasterId cannot be updated).
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Type">
+              <Select value={type} onValueChange={(v) => setType(v as ServicePointType)}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {SERVICE_POINT_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Location" required>
+              <Select value={locationNodeId} onValueChange={setLocationNodeId}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Select location" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  {locations.map((l) => (
+                    <SelectItem key={l.id} value={l.id}>{l.path}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Unit (optional)">
+              <Select value={unitId} onValueChange={setUnitId}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="No unit" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  <SelectItem value="none">No unit</SelectItem>
+                  {units.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>{u.name} ({u.code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Sort order">
+              <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} placeholder="0" />
+            </Field>
+          </div>
+          <Field label="Notes">
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes" />
+          </Field>
+          {editing ? (
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Active</div>
+              <Switch checked={isActive} onCheckedChange={setIsActive} />
             </div>
           ) : null}
         </div>
-
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={busy}>
-            {mode === "edit" ? "Save" : mode === "replace" ? "Replace" : "Bind"}
+          <Button onClick={save} disabled={saving}>
+            {editing ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -4015,3 +2779,2053 @@ function ChargeMapEditorModal({
   );
 }
 
+function ServicePointRoomsDialog({
+  open,
+  onOpenChange,
+  branchId,
+  servicePoint,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  servicePoint: DiagnosticServicePointRow | null;
+}) {
+  const { toast } = useToast();
+  const [available, setAvailable] = React.useState<RoomRow[]>([]);
+  const [rows, setRows] = React.useState<RoomMapRow[]>([]);
+  const [roomId, setRoomId] = React.useState("none");
+  const [modality, setModality] = React.useState<Modality>("OTHER");
+  const [sortOrder, setSortOrder] = React.useState("");
+  const [notes, setNotes] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+
+  async function loadAll(sp: DiagnosticServicePointRow) {
+    setLoading(true);
+    try {
+      const rooms = await apiFetch<RoomRow[]>(`/api/infrastructure/rooms?branchId=${encodeURIComponent(branchId)}`);
+      setAvailable(safeArray(rooms));
+      const mapped = await apiFetch<RoomMapRow[]>(`/api/infrastructure/diagnostics/service-points/${encodeURIComponent(sp.id)}/rooms?branchId=${encodeURIComponent(branchId)}`);
+      setRows(safeArray(mapped));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    if (open && servicePoint) void loadAll(servicePoint);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, servicePoint?.id]);
+
+  async function add() {
+    if (!servicePoint || roomId === "none") return;
+    try {
+      await apiFetch(`/api/infrastructure/diagnostics/service-points/${encodeURIComponent(servicePoint.id)}/rooms?branchId=${encodeURIComponent(branchId)}`, {
+        method: "POST",
+        body: JSON.stringify({
+          roomId,
+          modality,
+          sortOrder: toInt(sortOrder) ?? undefined,
+          notes: notes.trim() || undefined,
+        }),
+      });
+      toast({ title: "Room added" });
+      setRoomId("none");
+      setSortOrder("");
+      setNotes("");
+      await loadAll(servicePoint);
+    } catch (e: any) {
+      toast({ title: "Add failed", description: e?.message || "Error", variant: "destructive" as any });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[760px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title="Map Rooms"
+          description={servicePoint?.name || "Service point"}
+          onClose={() => onOpenChange(false)}
+        />
+        <div className="grid gap-3">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="Room">
+              <Select value={roomId} onValueChange={setRoomId}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Select room" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  <SelectItem value="none">Select room</SelectItem>
+                  {available.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>{r.name} ({r.code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Modality">
+              <Select value={modality} onValueChange={(v) => setModality(v as Modality)}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  {MODALITIES.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Sort order">
+              <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} placeholder="0" />
+            </Field>
+            <Field label="Notes">
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" />
+            </Field>
+          </div>
+          <Button onClick={add} disabled={loading || roomId === "none"}>Add room</Button>
+          <Separator />
+          <div className="grid gap-2">
+            {rows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No rooms mapped.</div>
+            ) : (
+              rows.map((r) => (
+                <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zc-border bg-zc-panel/10 p-2 text-sm">
+                  <div>
+                    {r.room?.name || r.roomId} <span className="text-xs text-zc-muted">({r.modality || "OTHER"})</span>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={async () => {
+                      if (!servicePoint) return;
+                      try {
+                        await apiFetch(`/api/infrastructure/diagnostics/service-points/${encodeURIComponent(servicePoint.id)}/rooms/${encodeURIComponent(r.id)}?branchId=${encodeURIComponent(branchId)}`, { method: "DELETE" });
+                        toast({ title: "Removed" });
+                        await loadAll(servicePoint);
+                      } catch (e: any) {
+                        toast({ title: "Remove failed", description: e?.message || "Error", variant: "destructive" as any });
+                      }
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ServicePointResourcesDialog({
+  open,
+  onOpenChange,
+  branchId,
+  servicePoint,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  servicePoint: DiagnosticServicePointRow | null;
+}) {
+  const { toast } = useToast();
+  const [available, setAvailable] = React.useState<UnitResourceRow[]>([]);
+  const [rows, setRows] = React.useState<ResourceMapRow[]>([]);
+  const [resourceId, setResourceId] = React.useState("none");
+  const [modality, setModality] = React.useState<Modality>("OTHER");
+  const [sortOrder, setSortOrder] = React.useState("");
+  const [notes, setNotes] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+
+  async function loadAll(sp: DiagnosticServicePointRow) {
+    setLoading(true);
+    try {
+      const resources = await apiFetch<UnitResourceRow[]>(`/api/infrastructure/resources?branchId=${encodeURIComponent(branchId)}`);
+      setAvailable(safeArray(resources));
+      const mapped = await apiFetch<ResourceMapRow[]>(`/api/infrastructure/diagnostics/service-points/${encodeURIComponent(sp.id)}/resources?branchId=${encodeURIComponent(branchId)}`);
+      setRows(safeArray(mapped));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    if (open && servicePoint) void loadAll(servicePoint);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, servicePoint?.id]);
+
+  async function add() {
+    if (!servicePoint || resourceId === "none") return;
+    try {
+      await apiFetch(`/api/infrastructure/diagnostics/service-points/${encodeURIComponent(servicePoint.id)}/resources?branchId=${encodeURIComponent(branchId)}`, {
+        method: "POST",
+        body: JSON.stringify({
+          resourceId,
+          modality,
+          sortOrder: toInt(sortOrder) ?? undefined,
+          notes: notes.trim() || undefined,
+        }),
+      });
+      toast({ title: "Resource added" });
+      setResourceId("none");
+      setSortOrder("");
+      setNotes("");
+      await loadAll(servicePoint);
+    } catch (e: any) {
+      toast({ title: "Add failed", description: e?.message || "Error", variant: "destructive" as any });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[760px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title="Map Resources"
+          description={servicePoint?.name || "Service point"}
+          onClose={() => onOpenChange(false)}
+        />
+        <div className="grid gap-3">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="Resource">
+              <Select value={resourceId} onValueChange={setResourceId}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Select resource" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  <SelectItem value="none">Select resource</SelectItem>
+                  {available.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>{r.name} ({r.code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Modality">
+              <Select value={modality} onValueChange={(v) => setModality(v as Modality)}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  {MODALITIES.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Sort order">
+              <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} placeholder="0" />
+            </Field>
+            <Field label="Notes">
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" />
+            </Field>
+          </div>
+          <Button onClick={add} disabled={loading || resourceId === "none"}>Add resource</Button>
+          <Separator />
+          <div className="grid gap-2">
+            {rows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No resources mapped.</div>
+            ) : (
+              rows.map((r) => (
+                <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zc-border bg-zc-panel/10 p-2 text-sm">
+                  <div>
+                    {r.resource?.name || r.resourceId} <span className="text-xs text-zc-muted">({r.modality || "OTHER"})</span>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={async () => {
+                      if (!servicePoint) return;
+                      try {
+                        await apiFetch(`/api/infrastructure/diagnostics/service-points/${encodeURIComponent(servicePoint.id)}/resources/${encodeURIComponent(r.id)}?branchId=${encodeURIComponent(branchId)}`, { method: "DELETE" });
+                        toast({ title: "Removed" });
+                        await loadAll(servicePoint);
+                      } catch (e: any) {
+                        toast({ title: "Remove failed", description: e?.message || "Error", variant: "destructive" as any });
+                      }
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ServicePointEquipmentDialog({
+  open,
+  onOpenChange,
+  branchId,
+  servicePoint,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  servicePoint: DiagnosticServicePointRow | null;
+}) {
+  const { toast } = useToast();
+  const [available, setAvailable] = React.useState<EquipmentAssetRow[]>([]);
+  const [rows, setRows] = React.useState<EquipmentMapRow[]>([]);
+  const [equipmentId, setEquipmentId] = React.useState("none");
+  const [modality, setModality] = React.useState<Modality>("OTHER");
+  const [sortOrder, setSortOrder] = React.useState("");
+  const [notes, setNotes] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+
+  async function loadAll(sp: DiagnosticServicePointRow) {
+    setLoading(true);
+    try {
+      const equipment = await apiFetch<EquipmentAssetRow[]>(`/api/infrastructure/equipment?branchId=${encodeURIComponent(branchId)}`);
+      setAvailable(safeArray(equipment));
+      const mapped = await apiFetch<EquipmentMapRow[]>(`/api/infrastructure/diagnostics/service-points/${encodeURIComponent(sp.id)}/equipment?branchId=${encodeURIComponent(branchId)}`);
+      setRows(safeArray(mapped));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    if (open && servicePoint) void loadAll(servicePoint);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, servicePoint?.id]);
+
+  async function add() {
+    if (!servicePoint || equipmentId === "none") return;
+    try {
+      await apiFetch(`/api/infrastructure/diagnostics/service-points/${encodeURIComponent(servicePoint.id)}/equipment?branchId=${encodeURIComponent(branchId)}`, {
+        method: "POST",
+        body: JSON.stringify({
+          equipmentId,
+          modality,
+          sortOrder: toInt(sortOrder) ?? undefined,
+          notes: notes.trim() || undefined,
+        }),
+      });
+      toast({ title: "Equipment added" });
+      setEquipmentId("none");
+      setSortOrder("");
+      setNotes("");
+      await loadAll(servicePoint);
+    } catch (e: any) {
+      toast({ title: "Add failed", description: e?.message || "Error", variant: "destructive" as any });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[760px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title="Map Equipment"
+          description={servicePoint?.name || "Service point"}
+          onClose={() => onOpenChange(false)}
+        />
+        <div className="grid gap-3">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="Equipment">
+              <Select value={equipmentId} onValueChange={setEquipmentId}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Select equipment" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  <SelectItem value="none">Select equipment</SelectItem>
+                  {available.map((e) => (
+                    <SelectItem key={e.id} value={e.id}>{e.name} ({e.code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Modality">
+              <Select value={modality} onValueChange={(v) => setModality(v as Modality)}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  {MODALITIES.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Sort order">
+              <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} placeholder="0" />
+            </Field>
+            <Field label="Notes">
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" />
+            </Field>
+          </div>
+          <Button onClick={add} disabled={loading || equipmentId === "none"}>Add equipment</Button>
+          <Separator />
+          <div className="grid gap-2">
+            {rows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No equipment mapped.</div>
+            ) : (
+              rows.map((r) => (
+                <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zc-border bg-zc-panel/10 p-2 text-sm">
+                  <div>
+                    {r.equipment?.name || r.equipmentId} <span className="text-xs text-zc-muted">({r.modality || "OTHER"})</span>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={async () => {
+                      if (!servicePoint) return;
+                      try {
+                        await apiFetch(`/api/infrastructure/diagnostics/service-points/${encodeURIComponent(servicePoint.id)}/equipment/${encodeURIComponent(r.id)}?branchId=${encodeURIComponent(branchId)}`, { method: "DELETE" });
+                        toast({ title: "Removed" });
+                        await loadAll(servicePoint);
+                      } catch (e: any) {
+                        toast({ title: "Remove failed", description: e?.message || "Error", variant: "destructive" as any });
+                      }
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* =========================================================
+   TAB 6: Capabilities
+   ========================================================= */
+
+function CapabilitiesTab({ branchId }: TabProps) {
+  const { toast } = useToast();
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  const [caps, setCaps] = React.useState<CapabilityRow[]>([]);
+  const [servicePoints, setServicePoints] = React.useState<DiagnosticServicePointRow[]>([]);
+  const [items, setItems] = React.useState<DiagnosticItemRow[]>([]);
+  const [includeInactive, setIncludeInactive] = React.useState(false);
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<CapabilityRow | null>(null);
+  const [allowedRooms, setAllowedRooms] = React.useState<CapabilityRow | null>(null);
+  const [allowedResources, setAllowedResources] = React.useState<CapabilityRow | null>(null);
+  const [allowedEquipment, setAllowedEquipment] = React.useState<CapabilityRow | null>(null);
+
+  async function loadAll() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const sp = await apiFetch<DiagnosticServicePointRow[]>(`/api/infrastructure/diagnostics/service-points?branchId=${encodeURIComponent(branchId)}`);
+      setServicePoints(safeArray(sp));
+      const it = await apiFetch<DiagnosticItemRow[]>(`/api/infrastructure/diagnostics/items?branchId=${encodeURIComponent(branchId)}`);
+      setItems(safeArray(it));
+
+      const qs = new URLSearchParams();
+      qs.set("branchId", branchId);
+      const rows = await apiFetch<CapabilityRow[]>(`/api/infrastructure/diagnostics/capabilities?${qs.toString()}`);
+      let next = safeArray(rows);
+      if (!includeInactive) next = next.filter((c) => c.isActive);
+      setCaps(next);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load capabilities");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    void loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchId, includeInactive]);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Capabilities</CardTitle>
+        <CardDescription>Map diagnostic items to service points with modalities and constraints.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {err ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{err}</div> : null}
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex items-center gap-2">
+            <Checkbox checked={includeInactive} onCheckedChange={(v) => setIncludeInactive(Boolean(v))} />
+            <span className="text-sm text-zc-muted">Include inactive</span>
+          </div>
+          <Button onClick={() => { setEditing(null); setDialogOpen(true); }} disabled={loading}>
+            <Plus className="mr-2 h-4 w-4" /> Capability
+          </Button>
+        </div>
+        <Separator className="my-4" />
+        <div className="grid gap-3">
+          {caps.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No capabilities configured.</div>
+          ) : (
+            caps.map((c) => (
+              <div key={c.id} className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-semibold text-zc-text">
+                      {c.diagnosticItem?.name || "Item"} @ {c.servicePoint?.name || "Service point"}
+                    </div>
+                    <div className="mt-1 text-xs text-zc-muted">
+                      Modality: <span className="font-mono">{c.modality || "-"}</span> | Duration: <span className="font-mono">{c.defaultDurationMins ?? "-"}</span> mins
+                    </div>
+                    <div className="mt-1 text-xs text-zc-muted">
+                      Rooms: <span className="font-mono">{c._count?.allowedRooms ?? 0}</span> | Resources: <span className="font-mono">{c._count?.allowedResources ?? 0}</span> | Equipment: <span className="font-mono">{c._count?.allowedEquipment ?? 0}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => { setEditing(c); setDialogOpen(true); }}>
+                      <Pencil className="mr-2 h-4 w-4" /> Edit
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setAllowedRooms(c)}>Rooms</Button>
+                    <Button variant="outline" size="sm" onClick={() => setAllowedResources(c)}>Resources</Button>
+                    <Button variant="outline" size="sm" onClick={() => setAllowedEquipment(c)}>Equipment</Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await apiFetch(`/api/infrastructure/diagnostics/capabilities/${encodeURIComponent(c.id)}?branchId=${encodeURIComponent(branchId)}`, { method: "DELETE" });
+                          toast({ title: "Capability deactivated" });
+                          await loadAll();
+                        } catch (e: any) {
+                          toast({ title: "Deactivate failed", description: e?.message || "Error", variant: "destructive" as any });
+                        }
+                      }}
+                    >
+                      Deactivate
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        <CapabilityDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          branchId={branchId}
+          editing={editing}
+          servicePoints={servicePoints}
+          items={items}
+          onSaved={loadAll}
+        />
+        <CapabilityRoomsDialog
+          open={!!allowedRooms}
+          onOpenChange={(v) => !v && setAllowedRooms(null)}
+          branchId={branchId}
+          capability={allowedRooms}
+        />
+        <CapabilityResourcesDialog
+          open={!!allowedResources}
+          onOpenChange={(v) => !v && setAllowedResources(null)}
+          branchId={branchId}
+          capability={allowedResources}
+        />
+        <CapabilityEquipmentDialog
+          open={!!allowedEquipment}
+          onOpenChange={(v) => !v && setAllowedEquipment(null)}
+          branchId={branchId}
+          capability={allowedEquipment}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+function CapabilityDialog({
+  open,
+  onOpenChange,
+  branchId,
+  editing,
+  servicePoints,
+  items,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  editing: CapabilityRow | null;
+  servicePoints: DiagnosticServicePointRow[];
+  items: DiagnosticItemRow[];
+  onSaved: () => void | Promise<void>;
+}) {
+  const { toast } = useToast();
+  const [servicePointId, setServicePointId] = React.useState("");
+  const [diagnosticItemId, setDiagnosticItemId] = React.useState("");
+  const [modality, setModality] = React.useState<Modality | "none">("none");
+  const [defaultDurationMins, setDefaultDurationMins] = React.useState("");
+  const [isPrimary, setIsPrimary] = React.useState(false);
+  const [isActive, setIsActive] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setServicePointId(editing?.servicePointId ?? "");
+    setDiagnosticItemId(editing?.diagnosticItemId ?? "");
+    setModality((editing?.modality as Modality) ?? "none");
+    setDefaultDurationMins(editing?.defaultDurationMins != null ? String(editing.defaultDurationMins) : "");
+    setIsPrimary(editing?.isPrimary ?? false);
+    setIsActive(editing?.isActive ?? true);
+    setErr(null);
+  }, [open, editing]);
+
+  async function save() {
+    if (!servicePointId || !diagnosticItemId) {
+      setErr("Service point and diagnostic item are required");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      if (editing) {
+        await apiFetch(`/api/infrastructure/diagnostics/capabilities/${encodeURIComponent(editing.id)}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            branchId,
+            modality: modality === "none" ? null : modality,
+            defaultDurationMins: toInt(defaultDurationMins) ?? null,
+            isPrimary,
+            isActive,
+          }),
+        });
+      } else {
+        await apiFetch("/api/infrastructure/diagnostics/capabilities", {
+          method: "POST",
+          body: JSON.stringify({
+            branchId,
+            servicePointId,
+            diagnosticItemId,
+            modality: modality === "none" ? undefined : modality,
+            defaultDurationMins: toInt(defaultDurationMins) ?? undefined,
+            isPrimary,
+          }),
+        });
+      }
+      toast({ title: editing ? "Capability updated" : "Capability created" });
+      onOpenChange(false);
+      await onSaved();
+    } catch (e: any) {
+      setErr(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[720px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title={editing ? "Edit Capability" : "Create Capability"}
+          description="Connect an item to a service point and configure modality."
+          onClose={() => onOpenChange(false)}
+        />
+        <div className="grid gap-4">
+          {err ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">{err}</div> : null}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Service point" required>
+              <Select value={servicePointId} onValueChange={setServicePointId} disabled={!!editing}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Select service point" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  {servicePoints.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.name} ({s.code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Diagnostic item" required>
+              <Select value={diagnosticItemId} onValueChange={setDiagnosticItemId} disabled={!!editing}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Select item" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  {items.map((i) => (
+                    <SelectItem key={i.id} value={i.id}>{i.name} ({i.code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Modality">
+              <Select value={modality} onValueChange={(v) => setModality(v as any)}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  <SelectItem value="none">None</SelectItem>
+                  {MODALITIES.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Default duration (mins)">
+              <Input value={defaultDurationMins} onChange={(e) => setDefaultDurationMins(e.target.value)} placeholder="30" />
+            </Field>
+          </div>
+          <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+            <div className="text-sm font-semibold text-zc-text">Primary</div>
+            <Switch checked={isPrimary} onCheckedChange={setIsPrimary} />
+          </div>
+          {editing ? (
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Active</div>
+              <Switch checked={isActive} onCheckedChange={setIsActive} />
+            </div>
+          ) : null}
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {editing ? "Update" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CapabilityRoomsDialog({
+  open,
+  onOpenChange,
+  branchId,
+  capability,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  capability: CapabilityRow | null;
+}) {
+  const { toast } = useToast();
+  const [available, setAvailable] = React.useState<RoomRow[]>([]);
+  const [rows, setRows] = React.useState<AllowedRoomRow[]>([]);
+  const [roomId, setRoomId] = React.useState("none");
+
+  async function loadAll(cap: CapabilityRow) {
+    const rooms = await apiFetch<RoomRow[]>(`/api/infrastructure/rooms?branchId=${encodeURIComponent(branchId)}`);
+    setAvailable(safeArray(rooms));
+    const mapped = await apiFetch<AllowedRoomRow[]>(`/api/infrastructure/diagnostics/capabilities/${encodeURIComponent(cap.id)}/rooms?branchId=${encodeURIComponent(branchId)}`);
+    setRows(safeArray(mapped));
+  }
+
+  React.useEffect(() => {
+    if (open && capability) void loadAll(capability);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, capability?.id]);
+
+  async function add() {
+    if (!capability || roomId === "none") return;
+    try {
+      await apiFetch(`/api/infrastructure/diagnostics/capabilities/${encodeURIComponent(capability.id)}/rooms?branchId=${encodeURIComponent(branchId)}`, {
+        method: "POST",
+        body: JSON.stringify({ roomId }),
+      });
+      toast({ title: "Room allowed" });
+      setRoomId("none");
+      await loadAll(capability);
+    } catch (e: any) {
+      toast({ title: "Add failed", description: e?.message || "Error", variant: "destructive" as any });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[720px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title="Allowed Rooms"
+          description={capability?.diagnosticItem?.name || "Capability"}
+          onClose={() => onOpenChange(false)}
+        />
+        <div className="grid gap-3">
+          <div className="flex gap-2">
+            <Select value={roomId} onValueChange={setRoomId}>
+              <SelectTrigger className="h-10"><SelectValue placeholder="Select room" /></SelectTrigger>
+              <SelectContent className="max-h-[280px] overflow-y-auto">
+                <SelectItem value="none">Select room</SelectItem>
+                {available.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>{r.name} ({r.code})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={add} disabled={roomId === "none"}>Add</Button>
+          </div>
+          <Separator />
+          <div className="grid gap-2">
+            {rows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No allowed rooms.</div>
+            ) : (
+              rows.map((r) => (
+                <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zc-border bg-zc-panel/10 p-2 text-sm">
+                  <div>{r.room?.name || r.roomId}</div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={async () => {
+                      if (!capability) return;
+                      try {
+                        await apiFetch(`/api/infrastructure/diagnostics/capabilities/${encodeURIComponent(capability.id)}/rooms/${encodeURIComponent(r.id)}?branchId=${encodeURIComponent(branchId)}`, { method: "DELETE" });
+                        toast({ title: "Removed" });
+                        await loadAll(capability);
+                      } catch (e: any) {
+                        toast({ title: "Remove failed", description: e?.message || "Error", variant: "destructive" as any });
+                      }
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CapabilityResourcesDialog({
+  open,
+  onOpenChange,
+  branchId,
+  capability,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  capability: CapabilityRow | null;
+}) {
+  const { toast } = useToast();
+  const [available, setAvailable] = React.useState<UnitResourceRow[]>([]);
+  const [rows, setRows] = React.useState<AllowedResourceRow[]>([]);
+  const [resourceId, setResourceId] = React.useState("none");
+
+  async function loadAll(cap: CapabilityRow) {
+    const resources = await apiFetch<UnitResourceRow[]>(`/api/infrastructure/resources?branchId=${encodeURIComponent(branchId)}`);
+    setAvailable(safeArray(resources));
+    const mapped = await apiFetch<AllowedResourceRow[]>(`/api/infrastructure/diagnostics/capabilities/${encodeURIComponent(cap.id)}/resources?branchId=${encodeURIComponent(branchId)}`);
+    setRows(safeArray(mapped));
+  }
+
+  React.useEffect(() => {
+    if (open && capability) void loadAll(capability);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, capability?.id]);
+
+  async function add() {
+    if (!capability || resourceId === "none") return;
+    try {
+      await apiFetch(`/api/infrastructure/diagnostics/capabilities/${encodeURIComponent(capability.id)}/resources?branchId=${encodeURIComponent(branchId)}`, {
+        method: "POST",
+        body: JSON.stringify({ resourceId }),
+      });
+      toast({ title: "Resource allowed" });
+      setResourceId("none");
+      await loadAll(capability);
+    } catch (e: any) {
+      toast({ title: "Add failed", description: e?.message || "Error", variant: "destructive" as any });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[720px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title="Allowed Resources"
+          description={capability?.diagnosticItem?.name || "Capability"}
+          onClose={() => onOpenChange(false)}
+        />
+        <div className="grid gap-3">
+          <div className="flex gap-2">
+            <Select value={resourceId} onValueChange={setResourceId}>
+              <SelectTrigger className="h-10"><SelectValue placeholder="Select resource" /></SelectTrigger>
+              <SelectContent className="max-h-[280px] overflow-y-auto">
+                <SelectItem value="none">Select resource</SelectItem>
+                {available.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>{r.name} ({r.code})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={add} disabled={resourceId === "none"}>Add</Button>
+          </div>
+          <Separator />
+          <div className="grid gap-2">
+            {rows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No allowed resources.</div>
+            ) : (
+              rows.map((r) => (
+                <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zc-border bg-zc-panel/10 p-2 text-sm">
+                  <div>{r.resource?.name || r.resourceId}</div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={async () => {
+                      if (!capability) return;
+                      try {
+                        await apiFetch(`/api/infrastructure/diagnostics/capabilities/${encodeURIComponent(capability.id)}/resources/${encodeURIComponent(r.id)}?branchId=${encodeURIComponent(branchId)}`, { method: "DELETE" });
+                        toast({ title: "Removed" });
+                        await loadAll(capability);
+                      } catch (e: any) {
+                        toast({ title: "Remove failed", description: e?.message || "Error", variant: "destructive" as any });
+                      }
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CapabilityEquipmentDialog({
+  open,
+  onOpenChange,
+  branchId,
+  capability,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  capability: CapabilityRow | null;
+}) {
+  const { toast } = useToast();
+  const [available, setAvailable] = React.useState<EquipmentAssetRow[]>([]);
+  const [rows, setRows] = React.useState<AllowedEquipmentRow[]>([]);
+  const [equipmentId, setEquipmentId] = React.useState("none");
+
+  async function loadAll(cap: CapabilityRow) {
+    const equipment = await apiFetch<EquipmentAssetRow[]>(`/api/infrastructure/equipment?branchId=${encodeURIComponent(branchId)}`);
+    setAvailable(safeArray(equipment));
+    const mapped = await apiFetch<AllowedEquipmentRow[]>(`/api/infrastructure/diagnostics/capabilities/${encodeURIComponent(cap.id)}/equipment?branchId=${encodeURIComponent(branchId)}`);
+    setRows(safeArray(mapped));
+  }
+
+  React.useEffect(() => {
+    if (open && capability) void loadAll(capability);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, capability?.id]);
+
+  async function add() {
+    if (!capability || equipmentId === "none") return;
+    try {
+      await apiFetch(`/api/infrastructure/diagnostics/capabilities/${encodeURIComponent(capability.id)}/equipment?branchId=${encodeURIComponent(branchId)}`, {
+        method: "POST",
+        body: JSON.stringify({ equipmentId }),
+      });
+      toast({ title: "Equipment allowed" });
+      setEquipmentId("none");
+      await loadAll(capability);
+    } catch (e: any) {
+      toast({ title: "Add failed", description: e?.message || "Error", variant: "destructive" as any });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[720px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title="Allowed Equipment"
+          description={capability?.diagnosticItem?.name || "Capability"}
+          onClose={() => onOpenChange(false)}
+        />
+        <div className="grid gap-3">
+          <div className="flex gap-2">
+            <Select value={equipmentId} onValueChange={setEquipmentId}>
+              <SelectTrigger className="h-10"><SelectValue placeholder="Select equipment" /></SelectTrigger>
+              <SelectContent className="max-h-[280px] overflow-y-auto">
+                <SelectItem value="none">Select equipment</SelectItem>
+                {available.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>{e.name} ({e.code})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={add} disabled={equipmentId === "none"}>Add</Button>
+          </div>
+          <Separator />
+          <div className="grid gap-2">
+            {rows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No allowed equipment.</div>
+            ) : (
+              rows.map((r) => (
+                <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zc-border bg-zc-panel/10 p-2 text-sm">
+                  <div>{r.equipment?.name || r.equipmentId}</div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={async () => {
+                      if (!capability) return;
+                      try {
+                        await apiFetch(`/api/infrastructure/diagnostics/capabilities/${encodeURIComponent(capability.id)}/equipment/${encodeURIComponent(r.id)}?branchId=${encodeURIComponent(branchId)}`, { method: "DELETE" });
+                        toast({ title: "Removed" });
+                        await loadAll(capability);
+                      } catch (e: any) {
+                        toast({ title: "Remove failed", description: e?.message || "Error", variant: "destructive" as any });
+                      }
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* =========================================================
+   TAB 7: Bootstrap
+   ========================================================= */
+
+function PacksTab({ branchId }: TabProps) {
+  const { toast } = useToast();
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  const [packs, setPacks] = React.useState<DiagnosticPackRow[]>([]);
+  const [packId, setPackId] = React.useState("");
+  const [versions, setVersions] = React.useState<DiagnosticPackVersionRow[]>([]);
+  const [versionId, setVersionId] = React.useState("");
+  const [locations, setLocations] = React.useState<FlatLocationNode[]>([]);
+  const [placements, setPlacements] = React.useState<Record<string, string>>({});
+  const [applying, setApplying] = React.useState(false);
+  const [labType, setLabType] = React.useState<LabType>("LAB_CORE");
+  const [quickLocationId, setQuickLocationId] = React.useState("");
+
+  const [packDialogOpen, setPackDialogOpen] = React.useState(false);
+  const [editingPack, setEditingPack] = React.useState<DiagnosticPackRow | null>(null);
+
+  const [versionDialogOpen, setVersionDialogOpen] = React.useState(false);
+  const [editingVersion, setEditingVersion] = React.useState<DiagnosticPackVersionRow | null>(null);
+
+  async function loadPacks() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const rows = await apiFetch<DiagnosticPackRow[]>("/api/infrastructure/diagnostics/packs");
+      setPacks(safeArray(rows));
+      if (!packId && rows?.[0]?.id) setPackId(rows[0].id);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load packs");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadVersions(id: string) {
+    if (!id) {
+      setVersions([]);
+      setVersionId("");
+      return;
+    }
+    setLoading(true);
+    setErr(null);
+    try {
+      const rows = await apiFetch<DiagnosticPackVersionRow[]>(`/api/infrastructure/diagnostics/packs/${encodeURIComponent(id)}/versions`);
+      const list = safeArray(rows);
+      setVersions(list);
+      const active = list.find((v) => v.status === "ACTIVE") || list[0];
+      setVersionId(active?.id ?? "");
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load versions");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadLocations() {
+    try {
+      const locTree = await apiFetch<any>(`/api/infrastructure/locations/tree?branchId=${encodeURIComponent(branchId)}`);
+      setLocations(flattenLocationTree(normalizeLocationTree(locTree)));
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load locations");
+    }
+  }
+
+  React.useEffect(() => {
+    void loadPacks();
+    void loadLocations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchId]);
+
+  React.useEffect(() => {
+    void loadVersions(packId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [packId]);
+
+  const selectedPack = packs.find((p) => p.id === packId) || null;
+  const selectedVersion = versions.find((v) => v.id === versionId) || null;
+  const labTypePacks = packs.filter((p) => (p.labType || "OTHER") === labType);
+  const payload = selectedVersion?.payload || {};
+  const servicePoints = safeArray<any>(payload.servicePoints).map((sp: any) => ({
+    code: normalizeCode(sp.code),
+    name: String(sp.name || sp.code || "").trim(),
+    requiresPlacement: sp.requiresPlacement !== false,
+  }));
+
+  React.useEffect(() => {
+    if (!labTypePacks.length) return;
+    if (!labTypePacks.some((p) => p.id === packId)) {
+      setPackId(labTypePacks[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labType, packs]);
+
+  async function applyPack() {
+    if (!selectedVersion) return;
+    const missing = servicePoints.filter((sp) => sp.requiresPlacement && !placements[sp.code]);
+    if (missing.length) {
+      setErr(`Missing placements: ${missing.map((m) => m.code).join(", ")}`);
+      return;
+    }
+    setApplying(true);
+    setErr(null);
+    try {
+      await apiFetch("/api/infrastructure/diagnostics/packs/apply", {
+        method: "POST",
+        body: JSON.stringify({
+          branchId,
+          packVersionId: selectedVersion.id,
+          placements: servicePoints
+            .filter((sp) => sp.requiresPlacement)
+            .map((sp) => ({ servicePointCode: sp.code, locationNodeId: placements[sp.code] })),
+        }),
+      });
+      toast({ title: "Pack applied", description: "Diagnostics configuration imported." });
+    } catch (e: any) {
+      setErr(e?.message || "Apply failed");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  async function applyQuickSetup() {
+    if (!selectedVersion) {
+      setErr("Select a template version");
+      return;
+    }
+    if (!quickLocationId) {
+      setErr("Select a location");
+      return;
+    }
+    const nextPlacements: Record<string, string> = {};
+    servicePoints.filter((sp) => sp.requiresPlacement).forEach((sp) => {
+      nextPlacements[sp.code] = quickLocationId;
+    });
+    if (!Object.keys(nextPlacements).length) {
+      setErr("Selected template has no service points");
+      return;
+    }
+    setPlacements(nextPlacements);
+    setApplying(true);
+    setErr(null);
+    try {
+      await apiFetch("/api/infrastructure/diagnostics/packs/apply", {
+        method: "POST",
+        body: JSON.stringify({
+          branchId,
+          packVersionId: selectedVersion.id,
+          placements: Object.entries(nextPlacements).map(([servicePointCode, locationNodeId]) => ({
+            servicePointCode,
+            locationNodeId,
+          })),
+        }),
+      });
+      toast({ title: "Template applied", description: "Lab setup imported." });
+    } catch (e: any) {
+      setErr(e?.message || "Apply failed");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Diagnostic Packs</CardTitle>
+        <CardDescription>Backend-stored packs with versioning. Import, edit, and apply to a branch.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {err ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{err}</div> : null}
+        <div className="mb-4 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+          <div className="text-sm font-semibold text-zc-text">Lab Type Setup</div>
+          <div className="mt-1 text-xs text-zc-muted">
+            Step 1: choose a lab type and location. Step 2: select a predefined template. Step 3: apply.
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <Field label="Lab type" required>
+              <Select value={labType} onValueChange={(v) => setLabType(v as LabType)}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {LAB_TYPE_OPTIONS.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Location" required>
+              <Select value={quickLocationId} onValueChange={setQuickLocationId}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Select location" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  {locations.map((l) => (
+                    <SelectItem key={l.id} value={l.id}>{l.path}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Template" required>
+              <Select value={packId} onValueChange={setPackId}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Select template" /></SelectTrigger>
+                <SelectContent className="max-h-[280px] overflow-y-auto">
+                  {labTypePacks.length === 0 ? (
+                    <SelectItem value="none" disabled>No templates for this lab type</SelectItem>
+                  ) : (
+                    labTypePacks.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <Button onClick={applyQuickSetup} disabled={applying || !selectedVersion || !quickLocationId || !labTypePacks.length}>
+              Apply template
+            </Button>
+            <div className="text-xs text-zc-muted">Uses the active version of the selected template.</div>
+          </div>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-[280px,1fr]">
+          <div className="rounded-xl border border-zc-border p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Packs</div>
+              <Button size="sm" onClick={() => { setEditingPack(null); setPackDialogOpen(true); }}>
+                <Plus className="mr-2 h-4 w-4" /> New
+              </Button>
+            </div>
+            <div className="grid gap-2">
+              {packs.length === 0 ? (
+                <div className="text-sm text-zc-muted">No packs yet.</div>
+              ) : (
+                packs.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setPackId(p.id)}
+                    className={cn(
+                      "w-full rounded-xl border px-3 py-2 text-left transition",
+                      packId === p.id
+                        ? "border-zc-accent bg-zc-accent shadow-sm"
+                        : "border-zc-border bg-zc-card hover:bg-zc-panel/20"
+                    )}
+                  >
+                    <div className={cn("text-sm font-semibold", packId === p.id ? "text-white" : "text-zc-text")}>{p.name}</div>
+                    <div className={cn("text-xs", packId === p.id ? "text-white/85" : "text-zc-muted")}>
+                      {p.code}{p.labType ? ` - ${p.labType}` : ""}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-4">
+            <div className="rounded-xl border border-zc-border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-zc-text">{selectedPack?.name || "Select a pack"}</div>
+                  <div className="text-xs text-zc-muted">{selectedPack?.description || "Create or select a pack to manage versions."}</div>
+                </div>
+                {selectedPack ? (
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => { setEditingPack(selectedPack); setPackDialogOpen(true); }}>
+                      Edit pack
+                    </Button>
+                    <Button size="sm" onClick={() => { setEditingVersion(null); setVersionDialogOpen(true); }}>
+                      <Plus className="mr-2 h-4 w-4" /> Version
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+
+              <Separator className="my-3" />
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Version">
+                  <Select value={versionId} onValueChange={setVersionId} disabled={!selectedPack || loading}>
+                    <SelectTrigger className="h-10"><SelectValue placeholder="Select version" /></SelectTrigger>
+                    <SelectContent className="max-h-[280px] overflow-y-auto">
+                      {versions.map((v) => (
+                        <SelectItem key={v.id} value={v.id}>
+                          v{v.version} • {v.status}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <div className="flex items-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => { if (selectedVersion) { setEditingVersion(selectedVersion); setVersionDialogOpen(true); } }} disabled={!selectedVersion}>
+                    Edit version
+                  </Button>
+                  <Button onClick={applyPack} disabled={!selectedVersion || applying}>
+                    Apply pack
+                  </Button>
+                </div>
+              </div>
+
+              {selectedVersion ? (
+                <div className="mt-4 grid gap-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Placements</div>
+                  {servicePoints.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-zc-border p-3 text-sm text-zc-muted">No service points in payload.</div>
+                  ) : (
+                    servicePoints.map((sp) => (
+                      <Field key={sp.code} label={`Placement for ${sp.name} (${sp.code})`} required>
+                        <Select
+                          value={placements[sp.code] || ""}
+                          onValueChange={(v) => setPlacements((prev) => ({ ...prev, [sp.code]: v }))}
+                        >
+                          <SelectTrigger className="h-10"><SelectValue placeholder="Select location" /></SelectTrigger>
+                          <SelectContent className="max-h-[280px] overflow-y-auto">
+                            {locations.map((l) => (
+                              <SelectItem key={l.id} value={l.id}>{l.path}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <PackDialog
+          open={packDialogOpen}
+          onOpenChange={setPackDialogOpen}
+          editing={editingPack}
+          onSaved={() => { void loadPacks(); }}
+        />
+        <PackVersionDialog
+          open={versionDialogOpen}
+          onOpenChange={setVersionDialogOpen}
+          packId={packId}
+          editing={editingVersion}
+          onSaved={() => { if (packId) void loadVersions(packId); }}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+const SAMPLE_PACK_PAYLOAD = {
+  servicePoints: [
+    { code: "LAB", name: "Central Laboratory", type: "LAB", requiresPlacement: true },
+  ],
+  sections: [{ code: "LAB", name: "Laboratory", sortOrder: 10 }],
+  categories: [{ code: "BIOCHEM", name: "Biochemistry", sectionCode: "LAB", sortOrder: 10 }],
+  specimens: [{ code: "SERUM", name: "Serum", container: "Vacutainer" }],
+  items: [
+    {
+      code: "GLU",
+      name: "Glucose (Fasting)",
+      kind: "LAB",
+      sectionCode: "LAB",
+      categoryCode: "BIOCHEM",
+      specimenCode: "SERUM",
+      tatMinsRoutine: 60,
+      isPanel: false,
+    },
+  ],
+  parameters: [
+    { itemCode: "GLU", code: "GLU", name: "Glucose", dataType: "NUMERIC", unit: "mg/dL", precision: 0 },
+  ],
+  ranges: [
+    { itemCode: "GLU", parameterCode: "GLU", low: 70, high: 100, textRange: "Normal" },
+  ],
+  templates: [
+    { itemCode: "GLU", kind: "LAB_REPORT", name: "Lab report", body: "Result: {{value}}" },
+  ],
+  capabilities: [
+    { servicePointCode: "LAB", itemCode: "GLU", modality: "LAB", defaultDurationMins: 10, isPrimary: true },
+  ],
+};
+
+function PackDialog({
+  open,
+  onOpenChange,
+  editing,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  editing: DiagnosticPackRow | null;
+  onSaved: () => void | Promise<void>;
+}) {
+  const { toast } = useToast();
+  const [code, setCode] = React.useState("");
+  const [name, setName] = React.useState("");
+  const [labType, setLabType] = React.useState<LabType | "none">("none");
+  const [description, setDescription] = React.useState("");
+  const [isActive, setIsActive] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setCode(editing?.code ?? "");
+    setName(editing?.name ?? "");
+    setLabType((editing?.labType as LabType) ?? "none");
+    setDescription(editing?.description ?? "");
+    setIsActive(editing?.isActive ?? true);
+    setErr(null);
+  }, [open, editing]);
+
+  async function save() {
+    const codeErr = validateCode(code, "Pack");
+    const nameErr = validateName(name, "Pack");
+    if (!editing && codeErr) {
+      setErr(codeErr);
+      return;
+    }
+    if (nameErr) {
+      setErr(nameErr);
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      if (editing) {
+        await apiFetch(`/api/infrastructure/diagnostics/packs/${encodeURIComponent(editing.id)}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            name: name.trim(),
+            labType: labType === "none" ? null : labType,
+            description: description.trim() || null,
+            isActive,
+          }),
+        });
+      } else {
+        await apiFetch("/api/infrastructure/diagnostics/packs", {
+          method: "POST",
+          body: JSON.stringify({
+            code: normalizeCode(code),
+            name: name.trim(),
+            labType: labType === "none" ? undefined : labType,
+            description: description.trim() || undefined,
+          }),
+        });
+      }
+      toast({ title: editing ? "Pack updated" : "Pack created" });
+      onOpenChange(false);
+      await onSaved();
+    } catch (e: any) {
+      setErr(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[620px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title={editing ? "Edit Pack" : "Create Pack"}
+          description="Pack metadata stored in the backend."
+          onClose={() => onOpenChange(false)}
+        />
+        <div className="grid gap-4">
+          {err ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">{err}</div> : null}
+          <Field label="Code" required>
+            <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="BASIC_DIAGNOSTICS" disabled={!!editing} />
+          </Field>
+          <Field label="Name" required>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Basic Diagnostics Pack" />
+          </Field>
+          <Field label="Lab type">
+            <Select value={labType} onValueChange={(v) => setLabType(v as LabType | "none")}>
+              <SelectTrigger className="h-10"><SelectValue placeholder="Select lab type" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No lab type</SelectItem>
+                {LAB_TYPE_OPTIONS.map((t) => (
+                  <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Description">
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Short description" />
+          </Field>
+          {editing ? (
+            <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+              <div className="text-sm font-semibold text-zc-text">Active</div>
+              <Switch checked={isActive} onCheckedChange={setIsActive} />
+            </div>
+          ) : null}
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {editing ? "Update" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PackVersionDialog({
+  open,
+  onOpenChange,
+  packId,
+  editing,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  packId: string;
+  editing: DiagnosticPackVersionRow | null;
+  onSaved: () => void | Promise<void>;
+}) {
+  const { toast } = useToast();
+  const [version, setVersion] = React.useState("");
+  const [status, setStatus] = React.useState<PackVersionStatus>("DRAFT");
+  const [notes, setNotes] = React.useState("");
+  const [mode, setMode] = React.useState<"guided" | "json">("guided");
+  const [payloadText, setPayloadText] = React.useState("");
+  const [builder, setBuilder] = React.useState<any>({
+    servicePoints: [],
+    sections: [],
+    categories: [],
+    specimens: [],
+    items: [],
+    templates: [],
+    capabilities: [],
+  });
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  function normalizePayload(input: any) {
+    const p = input ?? {};
+    return {
+      servicePoints: safeArray<any>(p.servicePoints).map((sp) => ({
+        code: sp.code ?? "",
+        name: sp.name ?? "",
+        type: sp.type ?? "OTHER",
+        requiresPlacement: sp.requiresPlacement !== false,
+      })),
+      sections: safeArray<any>(p.sections).map((s) => ({
+        code: s.code ?? "",
+        name: s.name ?? "",
+      })),
+      categories: safeArray<any>(p.categories).map((c) => ({
+        code: c.code ?? "",
+        name: c.name ?? "",
+        sectionCode: c.sectionCode ?? "",
+      })),
+      specimens: safeArray<any>(p.specimens).map((s) => ({
+        code: s.code ?? "",
+        name: s.name ?? "",
+        container: s.container ?? "",
+        minVolumeMl: s.minVolumeMl != null ? String(s.minVolumeMl) : "",
+        handlingNotes: s.handlingNotes ?? "",
+      })),
+      items: safeArray<any>(p.items).map((i) => ({
+        code: i.code ?? "",
+        name: i.name ?? "",
+        kind: i.kind ?? "LAB",
+        sectionCode: i.sectionCode ?? "",
+        categoryCode: i.categoryCode ?? "",
+        specimenCode: i.specimenCode ?? "",
+        isPanel: Boolean(i.isPanel),
+        requiresAppointment: Boolean(i.requiresAppointment),
+        consentRequired: Boolean(i.consentRequired),
+        preparationText: i.preparationText ?? "",
+      })),
+      templates: safeArray<any>(p.templates).map((t) => ({
+        itemCode: t.itemCode ?? "",
+        kind: t.kind ?? "IMAGING_REPORT",
+        name: t.name ?? "",
+        body: t.body ?? "",
+      })),
+      capabilities: safeArray<any>(p.capabilities).map((c) => ({
+        servicePointCode: c.servicePointCode ?? "",
+        itemCode: c.itemCode ?? "",
+        modality: c.modality ?? "",
+        defaultDurationMins: c.defaultDurationMins != null ? String(c.defaultDurationMins) : "",
+        isPrimary: Boolean(c.isPrimary),
+      })),
+    };
+  }
+
+  function buildPayloadFromBuilder(b: any) {
+    const payload: any = {};
+    const servicePoints = safeArray<any>(b.servicePoints)
+      .filter((sp) => sp.code || sp.name)
+      .map((sp) => ({
+        code: sp.code,
+        name: sp.name,
+        type: sp.type || "OTHER",
+        requiresPlacement: sp.requiresPlacement !== false,
+      }));
+    if (servicePoints.length) payload.servicePoints = servicePoints;
+
+    const sections = safeArray<any>(b.sections)
+      .filter((s) => s.code || s.name)
+      .map((s) => ({ code: s.code, name: s.name }));
+    if (sections.length) payload.sections = sections;
+
+    const categories = safeArray<any>(b.categories)
+      .filter((c) => c.code || c.name)
+      .map((c) => ({ code: c.code, name: c.name, sectionCode: c.sectionCode }));
+    if (categories.length) payload.categories = categories;
+
+    const specimens = safeArray<any>(b.specimens)
+      .filter((s) => s.code || s.name)
+      .map((s) => ({
+        code: s.code,
+        name: s.name,
+        container: s.container?.trim() || undefined,
+        minVolumeMl: toFloat(s.minVolumeMl) ?? undefined,
+        handlingNotes: s.handlingNotes?.trim() || undefined,
+      }));
+    if (specimens.length) payload.specimens = specimens;
+
+    const items = safeArray<any>(b.items)
+      .filter((i) => i.code || i.name)
+      .map((i) => ({
+        code: i.code,
+        name: i.name,
+        kind: i.kind || "LAB",
+        sectionCode: i.sectionCode,
+        categoryCode: i.categoryCode || undefined,
+        specimenCode: i.specimenCode || undefined,
+        isPanel: Boolean(i.isPanel),
+        requiresAppointment: Boolean(i.requiresAppointment),
+        consentRequired: Boolean(i.consentRequired),
+        preparationText: i.preparationText?.trim() || undefined,
+      }));
+    if (items.length) payload.items = items;
+
+    const templates = safeArray<any>(b.templates)
+      .filter((t) => t.itemCode && (t.name || t.body))
+      .map((t) => ({
+        itemCode: t.itemCode,
+        kind: t.kind || "IMAGING_REPORT",
+        name: t.name,
+        body: t.body,
+      }));
+    if (templates.length) payload.templates = templates;
+
+    const capabilities = safeArray<any>(b.capabilities)
+      .filter((c) => c.servicePointCode && c.itemCode)
+      .map((c) => ({
+        servicePointCode: c.servicePointCode,
+        itemCode: c.itemCode,
+        modality: c.modality || undefined,
+        defaultDurationMins: toInt(c.defaultDurationMins) ?? undefined,
+        isPrimary: Boolean(c.isPrimary),
+      }));
+    if (capabilities.length) payload.capabilities = capabilities;
+
+    return payload;
+  }
+
+  function addRow(key: string, row: any) {
+    setBuilder((prev: any) => ({ ...prev, [key]: [...safeArray(prev[key]), row] }));
+  }
+
+  function updateRow(key: string, index: number, patch: any) {
+    setBuilder((prev: any) => {
+      const list = [...safeArray(prev[key])];
+      list[index] = { ...list[index], ...patch };
+      return { ...prev, [key]: list };
+    });
+  }
+
+  function removeRow(key: string, index: number) {
+    setBuilder((prev: any) => {
+      const list = [...safeArray(prev[key])].filter((_: any, i: number) => i !== index);
+      return { ...prev, [key]: list };
+    });
+  }
+
+  React.useEffect(() => {
+    if (!open) return;
+    setVersion(editing?.version != null ? String(editing.version) : "");
+    setStatus(editing?.status ?? "DRAFT");
+    setNotes(editing?.notes ?? "");
+    const initialPayload = editing?.payload ?? SAMPLE_PACK_PAYLOAD;
+    setPayloadText(JSON.stringify(initialPayload, null, 2));
+    setBuilder(normalizePayload(initialPayload));
+    setMode("guided");
+    setErr(null);
+  }, [open, editing]);
+
+  async function save() {
+    if (!packId && !editing) {
+      setErr("Select a pack first");
+      return;
+    }
+    let payload: any;
+    if (mode === "json") {
+      try {
+        payload = JSON.parse(payloadText);
+      } catch {
+        setErr("Payload JSON is invalid");
+        return;
+      }
+    } else {
+      let base: any = {};
+      try {
+        base = JSON.parse(payloadText);
+      } catch {
+        base = {};
+      }
+      const guided = buildPayloadFromBuilder(builder);
+      payload = { ...asRecord(base), ...guided };
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      if (editing) {
+        await apiFetch(`/api/infrastructure/diagnostics/packs/versions/${encodeURIComponent(editing.id)}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            status,
+            notes: notes.trim() || null,
+            payload,
+          }),
+        });
+      } else {
+        await apiFetch(`/api/infrastructure/diagnostics/packs/${encodeURIComponent(packId)}/versions`, {
+          method: "POST",
+          body: JSON.stringify({
+            version: version.trim() ? Number.parseInt(version, 10) : undefined,
+            status,
+            notes: notes.trim() || undefined,
+            payload,
+          }),
+        });
+      }
+      toast({ title: editing ? "Version updated" : "Version created" });
+      onOpenChange(false);
+      await onSaved();
+    } catch (e: any) {
+      setErr(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("w-[95vw] sm:max-w-[900px] max-h-[85vh] overflow-y-auto")}>
+        <ModalHeader
+          title={editing ? "Edit Pack Version" : "Create Pack Version"}
+          description="Versions are immutable snapshots you can apply to branches."
+          onClose={() => onOpenChange(false)}
+        />
+        <div className="grid gap-4">
+          {err ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">{err}</div> : null}
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field label="Version">
+              <Input value={version} onChange={(e) => setVersion(e.target.value)} placeholder="Auto" disabled={!!editing} />
+            </Field>
+            <Field label="Status">
+              <Select value={status} onValueChange={(v) => setStatus(v as PackVersionStatus)}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="DRAFT">DRAFT</SelectItem>
+                  <SelectItem value="ACTIVE">ACTIVE</SelectItem>
+                  <SelectItem value="RETIRED">RETIRED</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Notes">
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes" />
+            </Field>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold text-zc-text">Payload Builder</div>
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant={mode === "guided" ? "primary" : "outline"} onClick={() => setMode("guided")}>
+                Guided
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={mode === "json" ? "primary" : "outline"}
+                onClick={() => {
+                  let base: any = {};
+                  try {
+                    base = JSON.parse(payloadText);
+                  } catch {
+                    base = {};
+                  }
+                  const guided = buildPayloadFromBuilder(builder);
+                  setPayloadText(JSON.stringify({ ...base, ...guided }, null, 2));
+                  setMode("json");
+                }}
+              >
+                JSON
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const payload = SAMPLE_PACK_PAYLOAD;
+                  setBuilder(normalizePayload(payload));
+                  setPayloadText(JSON.stringify(payload, null, 2));
+                }}
+              >
+                Load Sample
+              </Button>
+            </div>
+          </div>
+
+          {mode === "json" ? (
+            <Field label="Payload (JSON)">
+              <Textarea value={payloadText} onChange={(e) => setPayloadText(e.target.value)} rows={16} />
+              <div className="mt-2 flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    try {
+                      const payload = JSON.parse(payloadText);
+                      setBuilder(normalizePayload(payload));
+                      setMode("guided");
+                      setErr(null);
+                    } catch {
+                      setErr("Payload JSON is invalid");
+                    }
+                  }}
+                >
+                  Apply JSON to form
+                </Button>
+              </div>
+            </Field>
+          ) : (
+            <div className="grid gap-4">
+              <div className="rounded-xl border border-zc-border p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-semibold text-zc-text">Service Points</div>
+                  <Button size="sm" variant="outline" onClick={() => addRow("servicePoints", { code: "", name: "", type: "OTHER", requiresPlacement: true })}>
+                    <Plus className="mr-2 h-4 w-4" /> Add
+                  </Button>
+                </div>
+                {builder.servicePoints.length === 0 ? (
+                  <div className="text-sm text-zc-muted">No service points.</div>
+                ) : (
+                  builder.servicePoints.map((sp: any, idx: number) => (
+                    <div key={`sp-${idx}`} className="mb-3 grid gap-3 rounded-lg border border-zc-border p-3">
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <Input value={sp.code} onChange={(e) => updateRow("servicePoints", idx, { code: e.target.value })} placeholder="CODE" />
+                        <Input value={sp.name} onChange={(e) => updateRow("servicePoints", idx, { name: e.target.value })} placeholder="Name" />
+                        <Select value={sp.type} onValueChange={(v) => updateRow("servicePoints", idx, { type: v })}>
+                          <SelectTrigger className="h-10"><SelectValue placeholder="Type" /></SelectTrigger>
+                          <SelectContent>
+                            {SERVICE_POINT_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-[1fr,140px]">
+                        <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 px-3">
+                          <div className="text-xs font-semibold text-zc-muted">Placement required</div>
+                          <Switch checked={sp.requiresPlacement !== false} onCheckedChange={(v) => updateRow("servicePoints", idx, { requiresPlacement: Boolean(v) })} />
+                        </div>
+                        <Button variant="destructive" size="sm" onClick={() => removeRow("servicePoints", idx)}>Remove</Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="rounded-xl border border-zc-border p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-semibold text-zc-text">Sections</div>
+                  <Button size="sm" variant="outline" onClick={() => addRow("sections", { code: "", name: "" })}>
+                    <Plus className="mr-2 h-4 w-4" /> Add
+                  </Button>
+                </div>
+                {builder.sections.length === 0 ? (
+                  <div className="text-sm text-zc-muted">No sections.</div>
+                ) : (
+                  builder.sections.map((s: any, idx: number) => (
+                    <div key={`sec-${idx}`} className="mb-3 grid gap-3 rounded-lg border border-zc-border p-3 md:grid-cols-3">
+                      <Input value={s.code} onChange={(e) => updateRow("sections", idx, { code: e.target.value })} placeholder="CODE" />
+                      <Input value={s.name} onChange={(e) => updateRow("sections", idx, { name: e.target.value })} placeholder="Name" />
+                      <Button variant="destructive" size="sm" onClick={() => removeRow("sections", idx)}>Remove</Button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="rounded-xl border border-zc-border p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-semibold text-zc-text">Categories</div>
+                  <Button size="sm" variant="outline" onClick={() => addRow("categories", { code: "", name: "", sectionCode: "" })}>
+                    <Plus className="mr-2 h-4 w-4" /> Add
+                  </Button>
+                </div>
+                {builder.categories.length === 0 ? (
+                  <div className="text-sm text-zc-muted">No categories.</div>
+                ) : (
+                  builder.categories.map((c: any, idx: number) => (
+                    <div key={`cat-${idx}`} className="mb-3 grid gap-3 rounded-lg border border-zc-border p-3 md:grid-cols-4">
+                      <Input value={c.code} onChange={(e) => updateRow("categories", idx, { code: e.target.value })} placeholder="CODE" />
+                      <Input value={c.name} onChange={(e) => updateRow("categories", idx, { name: e.target.value })} placeholder="Name" />
+                      <Input value={c.sectionCode} onChange={(e) => updateRow("categories", idx, { sectionCode: e.target.value })} placeholder="Section code" />
+                      <Button variant="destructive" size="sm" onClick={() => removeRow("categories", idx)}>Remove</Button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="rounded-xl border border-zc-border p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-semibold text-zc-text">Specimens</div>
+                  <Button size="sm" variant="outline" onClick={() => addRow("specimens", { code: "", name: "", container: "", minVolumeMl: "", handlingNotes: "" })}>
+                    <Plus className="mr-2 h-4 w-4" /> Add
+                  </Button>
+                </div>
+                {builder.specimens.length === 0 ? (
+                  <div className="text-sm text-zc-muted">No specimens.</div>
+                ) : (
+                  builder.specimens.map((s: any, idx: number) => (
+                    <div key={`spm-${idx}`} className="mb-3 grid gap-3 rounded-lg border border-zc-border p-3 md:grid-cols-5">
+                      <Input value={s.code} onChange={(e) => updateRow("specimens", idx, { code: e.target.value })} placeholder="CODE" />
+                      <Input value={s.name} onChange={(e) => updateRow("specimens", idx, { name: e.target.value })} placeholder="Name" />
+                      <Input value={s.container} onChange={(e) => updateRow("specimens", idx, { container: e.target.value })} placeholder="Container" />
+                      <Input value={s.minVolumeMl} onChange={(e) => updateRow("specimens", idx, { minVolumeMl: e.target.value })} placeholder="Min volume (ml)" />
+                      <Button variant="destructive" size="sm" onClick={() => removeRow("specimens", idx)}>Remove</Button>
+                      <div className="md:col-span-5">
+                        <Input value={s.handlingNotes} onChange={(e) => updateRow("specimens", idx, { handlingNotes: e.target.value })} placeholder="Handling notes" />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="rounded-xl border border-zc-border p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-semibold text-zc-text">Items</div>
+                  <Button size="sm" variant="outline" onClick={() => addRow("items", { code: "", name: "", kind: "LAB", sectionCode: "", categoryCode: "", specimenCode: "", isPanel: false, requiresAppointment: false, consentRequired: false, preparationText: "" })}>
+                    <Plus className="mr-2 h-4 w-4" /> Add
+                  </Button>
+                </div>
+                {builder.items.length === 0 ? (
+                  <div className="text-sm text-zc-muted">No items.</div>
+                ) : (
+                  builder.items.map((i: any, idx: number) => (
+                    <div key={`item-${idx}`} className="mb-3 grid gap-3 rounded-lg border border-zc-border p-3">
+                      <div className="grid gap-3 md:grid-cols-4">
+                        <Input value={i.code} onChange={(e) => updateRow("items", idx, { code: e.target.value })} placeholder="CODE" />
+                        <Input value={i.name} onChange={(e) => updateRow("items", idx, { name: e.target.value })} placeholder="Name" />
+                        <Select value={i.kind} onValueChange={(v) => updateRow("items", idx, { kind: v })}>
+                          <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {DIAG_KINDS.map((k) => <SelectItem key={k.value} value={k.value}>{k.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Input value={i.sectionCode} onChange={(e) => updateRow("items", idx, { sectionCode: e.target.value })} placeholder="Section code" />
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-4">
+                        <Input value={i.categoryCode} onChange={(e) => updateRow("items", idx, { categoryCode: e.target.value })} placeholder="Category code" />
+                        <Input value={i.specimenCode} onChange={(e) => updateRow("items", idx, { specimenCode: e.target.value })} placeholder="Specimen code" />
+                        <Input value={i.preparationText} onChange={(e) => updateRow("items", idx, { preparationText: e.target.value })} placeholder="Preparation text" />
+                        <Button variant="destructive" size="sm" onClick={() => removeRow("items", idx)}>Remove</Button>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 px-3">
+                          <div className="text-xs font-semibold text-zc-muted">Panel</div>
+                          <Switch checked={Boolean(i.isPanel)} onCheckedChange={(v) => updateRow("items", idx, { isPanel: Boolean(v) })} />
+                        </div>
+                        <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 px-3">
+                          <div className="text-xs font-semibold text-zc-muted">Requires appointment</div>
+                          <Switch checked={Boolean(i.requiresAppointment)} onCheckedChange={(v) => updateRow("items", idx, { requiresAppointment: Boolean(v) })} />
+                        </div>
+                        <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 px-3">
+                          <div className="text-xs font-semibold text-zc-muted">Consent required</div>
+                          <Switch checked={Boolean(i.consentRequired)} onCheckedChange={(v) => updateRow("items", idx, { consentRequired: Boolean(v) })} />
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="rounded-xl border border-zc-border p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-semibold text-zc-text">Templates</div>
+                  <Button size="sm" variant="outline" onClick={() => addRow("templates", { itemCode: "", kind: "IMAGING_REPORT", name: "", body: "" })}>
+                    <Plus className="mr-2 h-4 w-4" /> Add
+                  </Button>
+                </div>
+                {builder.templates.length === 0 ? (
+                  <div className="text-sm text-zc-muted">No templates.</div>
+                ) : (
+                  builder.templates.map((t: any, idx: number) => (
+                    <div key={`tmpl-${idx}`} className="mb-3 grid gap-3 rounded-lg border border-zc-border p-3">
+                      <div className="grid gap-3 md:grid-cols-4">
+                        <Input value={t.itemCode} onChange={(e) => updateRow("templates", idx, { itemCode: e.target.value })} placeholder="Item code" />
+                        <Select value={t.kind} onValueChange={(v) => updateRow("templates", idx, { kind: v })}>
+                          <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {TEMPLATE_KINDS.map((k) => <SelectItem key={k.value} value={k.value}>{k.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Input value={t.name} onChange={(e) => updateRow("templates", idx, { name: e.target.value })} placeholder="Template name" />
+                        <Button variant="destructive" size="sm" onClick={() => removeRow("templates", idx)}>Remove</Button>
+                      </div>
+                      <Textarea value={t.body} onChange={(e) => updateRow("templates", idx, { body: e.target.value })} rows={4} placeholder="Template body" />
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="rounded-xl border border-zc-border p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-semibold text-zc-text">Capabilities</div>
+                  <Button size="sm" variant="outline" onClick={() => addRow("capabilities", { servicePointCode: "", itemCode: "", modality: "", defaultDurationMins: "", isPrimary: false })}>
+                    <Plus className="mr-2 h-4 w-4" /> Add
+                  </Button>
+                </div>
+                {builder.capabilities.length === 0 ? (
+                  <div className="text-sm text-zc-muted">No capabilities.</div>
+                ) : (
+                  builder.capabilities.map((c: any, idx: number) => (
+                    <div key={`cap-${idx}`} className="mb-3 grid gap-3 rounded-lg border border-zc-border p-3">
+                      <div className="grid gap-3 md:grid-cols-5">
+                        <Input value={c.servicePointCode} onChange={(e) => updateRow("capabilities", idx, { servicePointCode: e.target.value })} placeholder="Service point code" />
+                        <Input value={c.itemCode} onChange={(e) => updateRow("capabilities", idx, { itemCode: e.target.value })} placeholder="Item code" />
+                        <Select value={c.modality || "none"} onValueChange={(v) => updateRow("capabilities", idx, { modality: v === "none" ? null : v })}>
+                          <SelectTrigger className="h-10"><SelectValue placeholder="Modality" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">None</SelectItem>
+                            {MODALITIES.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Input value={c.defaultDurationMins} onChange={(e) => updateRow("capabilities", idx, { defaultDurationMins: e.target.value })} placeholder="Duration (mins)" />
+                        <Button variant="destructive" size="sm" onClick={() => removeRow("capabilities", idx)}>Remove</Button>
+                      </div>
+                      <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 px-3">
+                        <div className="text-xs font-semibold text-zc-muted">Primary</div>
+                        <Switch checked={Boolean(c.isPrimary)} onCheckedChange={(v) => updateRow("capabilities", idx, { isPrimary: Boolean(v) })} />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="text-xs text-zc-muted">
+                Use JSON mode for advanced fields (parameters, ranges, or panel composition).
+              </div>
+            </div>
+          )}
+        </div>
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {editing ? "Update" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

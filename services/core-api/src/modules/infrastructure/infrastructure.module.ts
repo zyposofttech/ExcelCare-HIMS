@@ -47,11 +47,15 @@ import { ImportService } from "./import/import.service";
 import { GoLiveController } from "./golive/golive.controller";
 import { GoLiveService } from "./golive/golive.service";
 
-import { DiagnosticsConfigController } from "./diagnostics-config/diagnostics-config.controller";
-import { DiagnosticsConfigService } from "./diagnostics-config/diagnostics-config.service";
+import { DiagnosticsModule } from "./diagnostics/diagnostics.module";
 
 @Module({
-  imports: [AuditModule, AuthModule, PolicyEngineModule],
+  imports: [
+    AuditModule,
+    AuthModule,
+    PolicyEngineModule,
+    DiagnosticsModule,
+  ],
   controllers: [
     LocationController,
     UnitTypesController,
@@ -67,7 +71,6 @@ import { DiagnosticsConfigService } from "./diagnostics-config/diagnostics-confi
     SchedulingController,
     ImportController,
     GoLiveController,
-    DiagnosticsConfigController,
   ],
   providers: [
     InfraContextService,
@@ -80,7 +83,6 @@ import { DiagnosticsConfigService } from "./diagnostics-config/diagnostics-confi
     EquipmentService,
     ChargeMasterService,
     ServiceChargeMappingService,
-    DiagnosticsConfigService,
     ServiceItemsService,
     FixItService,
     SchedulingService,
