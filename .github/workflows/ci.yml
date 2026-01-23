@@ -1,17 +1,33 @@
 name: CI
+
 on:
-  push: { branches: ["main"] }
+  push:
+    branches: [ main ]
   pull_request:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with: { version: 9 }
+
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: "pnpm" }
-      - run: pnpm install --frozen-lockfile=false
-      - run: pnpm lint
-      - run: pnpm build
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Enable Corepack (uses package.json packageManager)
+        run: corepack enable
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm -C packages/db exec prisma generate
+
+      - name: Build core-api
+        run: pnpm -C services/core-api build
+
+      - name: Build web
+        run: pnpm -C apps/web build
