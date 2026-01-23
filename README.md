@@ -57,7 +57,7 @@ A Python/FastAPI microservice providing role-aware intelligence:
 ### 3. Frontend (`apps/web`)
 A modern Next.js 15 application utilizing React 19, Tailwind CSS, and Radix UI. It connects to the Core API via REST and manages state with Zustand.
 
-## 🛠 Tech Stack
+## 🛠 Tech Stacks
 
 | Domain | Technologies |
 | :--- | :--- |
