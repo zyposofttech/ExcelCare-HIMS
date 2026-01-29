@@ -94,6 +94,28 @@ body {
   background: rgb(var(--zc-bg));
 }
 
+/* Scrollbar: no track background */
+.zc-scroll-no-track {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--zc-border)) transparent;
+}
+
+.zc-scroll-no-track::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.zc-scroll-no-track::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.zc-scroll-no-track::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--zc-border) / 0.6);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
 /* A consistent focus style for accessibility */
 *:focus-visible {
   outline: 2px solid rgb(var(--zc-accent));

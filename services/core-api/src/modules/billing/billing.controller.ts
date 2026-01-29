@@ -1,205 +1,100 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Query,
-  Inject,
-  BadRequestException,
-  ConflictException,
-} from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
-import { IsDateString, IsNumber, IsOptional, IsString } from "class-validator";
-import type { PrismaClient } from "@zypocare/db";
-import { AuditService } from "../audit/audit.service";
 import { Roles } from "../auth/roles.decorator";
-
-class CreateServiceDto {
-  @IsString() code!: string;
-  @IsString() name!: string;
-  @IsString() category!: string;
-  @IsOptional() @IsString() unit?: string;
-}
-
-class CreateTariffPlanDto {
-  @IsString() branchId!: string;
-
-  // Required by schema (we allow optional input but always persist something)
-  @IsOptional() @IsString() code?: string;
-
-  @IsString() name!: string;
-
-  // Required by schema (we allow optional input but default to ACTIVE)
-  @IsOptional() @IsString() status?: string;
-
-  @IsString() payerType!: string;
-
-  @IsDateString() effectiveFrom!: string;
-  @IsOptional() @IsDateString() effectiveTo?: string;
-}
-
-class UpsertRateDto {
-  @IsString() tariffPlanId!: string;
-  @IsString() serviceCode!: string;
-  @IsNumber() amount!: number;
-}
-
-function parseDateOrThrow(value: string, fieldName: string): Date {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) throw new BadRequestException(`Invalid ${fieldName}`);
-  return d;
-}
+import type { Principal } from "../auth/access-policy.service";
+import { BillingService } from "./billing.service";
+import { ActivateTariffPlanDto, CreateTariffPlanDto, UpdateTariffPlanDto, UpsertTariffRateDto } from "./dto";
 
 @ApiTags("billing")
 @Controller("billing")
+@Roles("SUPER_ADMIN", "BRANCH_ADMIN")
 export class BillingController {
-  constructor(
-    @Inject("PRISMA") private readonly prisma: PrismaClient,
-    private readonly audit: AuditService,
-  ) {}
+  constructor(private readonly svc: BillingService) {}
 
-  @Roles("BRANCH_ADMIN", "BILLING", "SUPER_ADMIN")
-  @Get("services")
-  async listServices(@Query("q") q?: string) {
-    const query = (q ?? "").trim();
-    return this.prisma.serviceCatalogItem.findMany({
-      where: query
-        ? {
-            OR: [
-              { code: { contains: query, mode: "insensitive" } },
-              { name: { contains: query, mode: "insensitive" } },
-              { category: { contains: query, mode: "insensitive" } },
-            ],
-          }
-        : {},
-      orderBy: [{ category: "asc" }, { name: "asc" }],
-      take: 200,
+  private principal(req: any): Principal {
+    return req.principal;
+  }
+
+  // -------- Tariff Plans
+
+  @Get("tariff-plans")
+  listPlans(
+    @Req() req: any,
+    @Query("branchId") branchId?: string,
+    @Query("kind") kind?: string,
+    @Query("status") status?: string,
+  ) {
+    return this.svc.listTariffPlans(this.principal(req), { branchId: branchId ?? null, kind, status });
+  }
+
+  @Get("tariff-plans/:id")
+  getPlan(@Req() req: any, @Param("id") id: string) {
+    return this.svc.getTariffPlan(this.principal(req), id);
+  }
+
+  @Post("tariff-plans")
+  createPlan(@Req() req: any, @Body() dto: CreateTariffPlanDto) {
+    return this.svc.createTariffPlan(this.principal(req), dto);
+  }
+
+  @Patch("tariff-plans/:id")
+  updatePlan(@Req() req: any, @Param("id") id: string, @Body() dto: UpdateTariffPlanDto) {
+    return this.svc.updateTariffPlan(this.principal(req), id, dto);
+  }
+
+  @Post("tariff-plans/:id/activate")
+  activate(@Req() req: any, @Param("id") id: string, @Body() dto: ActivateTariffPlanDto) {
+    return this.svc.activateTariffPlan(this.principal(req), id, dto);
+  }
+
+  @Post("tariff-plans/:id/retire")
+  retire(@Req() req: any, @Param("id") id: string) {
+    return this.svc.retireTariffPlan(this.principal(req), id);
+  }
+
+  // -------- Tariff Rates
+
+  @Get("tariff-plans/:tariffPlanId/rates")
+  listRates(
+    @Req() req: any,
+    @Param("tariffPlanId") tariffPlanId: string,
+    @Query("chargeMasterItemId") chargeMasterItemId?: string,
+    @Query("includeHistory") includeHistory?: string,
+  ) {
+    return this.svc.listTariffRates(this.principal(req), tariffPlanId, {
+      chargeMasterItemId,
+      includeHistory: includeHistory === "true",
     });
   }
 
-  @Roles("BRANCH_ADMIN", "BILLING", "SUPER_ADMIN")
-  @Post("services")
-  async createService(@Body() dto: CreateServiceDto) {
-    const code = dto.code.trim();
-    const name = dto.name.trim();
-    const category = dto.category.trim();
-
-    if (!code || !name || !category) {
-      throw new BadRequestException("code, name, category are required");
-    }
-
-    try {
-      const item = await this.prisma.serviceCatalogItem.create({
-        data: {
-          code,
-          name,
-          category,
-          unit: dto.unit?.trim() || null,
-        },
-      });
-
-      await this.audit.log({
-        action: "SERVICE_CREATE",
-        entity: "ServiceCatalogItem",
-        entityId: item.id,
-        meta: { code, name, category },
-      });
-
-      return item;
-    } catch (e: any) {
-      if (String(e?.code) === "P2002") {
-        throw new ConflictException("Service code already exists");
-      }
-      throw e;
-    }
+  @Post("tariff-plans/:tariffPlanId/rates")
+  upsertRate(@Req() req: any, @Param("tariffPlanId") tariffPlanId: string, @Body() dto: UpsertTariffRateDto) {
+    return this.svc.upsertTariffRate(this.principal(req), dto, tariffPlanId);
   }
 
-  @Roles("BRANCH_ADMIN", "BILLING", "SUPER_ADMIN")
+  @Post("tariff-plans/:tariffPlanId/rates/close")
+  closeCurrentRate(
+    @Req() req: any,
+    @Param("tariffPlanId") tariffPlanId: string,
+    @Query("chargeMasterItemId") chargeMasterItemId: string,
+    @Query("effectiveTo") effectiveTo: string,
+  ) {
+    return this.svc.closeCurrentTariffRate(this.principal(req), tariffPlanId, chargeMasterItemId, effectiveTo);
+  }
+
+  // -------- Legacy aliases (keeps your UI from breaking if it used older endpoints)
   @Get("tariffs")
-  async listTariffs(@Query("branchId") branchId?: string) {
-    return this.prisma.tariffPlan.findMany({
-      where: branchId ? { branchId } : {},
-      include: { rates: true },
-      orderBy: { effectiveFrom: "desc" },
-      take: 200,
-    });
+  listPlansAlias(@Req() req: any, @Query("branchId") branchId?: string) {
+    return this.svc.listTariffPlans(this.principal(req), { branchId: branchId ?? null });
   }
 
-  @Roles("BRANCH_ADMIN", "BILLING", "SUPER_ADMIN")
   @Post("tariffs")
-  async createTariff(@Body() dto: CreateTariffPlanDto) {
-    const branchId = dto.branchId.trim();
-    const name = dto.name.trim();
-    const payerType = dto.payerType.trim();
-
-    if (!branchId || !name || !payerType) {
-      throw new BadRequestException("branchId, name, payerType are required");
-    }
-
-    const effectiveFrom = parseDateOrThrow(dto.effectiveFrom, "effectiveFrom");
-    const effectiveTo = dto.effectiveTo ? parseDateOrThrow(dto.effectiveTo, "effectiveTo") : null;
-
-    // Schema requires code + status
-    const code = (dto.code?.trim() || `TP-${Date.now()}`).slice(0, 64);
-    const status = (dto.status?.trim() || "ACTIVE").slice(0, 32);
-
-    try {
-      const plan = await this.prisma.tariffPlan.create({
-        data: {
-          branchId,
-          code,
-          name,
-          status,
-          payerType,
-          effectiveFrom,
-          effectiveTo,
-        },
-        include: { rates: true },
-      });
-
-      await this.audit.log({
-        branchId,
-        action: "TARIFF_PLAN_CREATE",
-        entity: "TariffPlan",
-        entityId: plan.id,
-        meta: { branchId, code, name, status, payerType, effectiveFrom, effectiveTo },
-      });
-
-      return plan;
-    } catch (e: any) {
-      if (String(e?.code) === "P2002") {
-        // likely @@unique([branchId, code])
-        throw new ConflictException("Tariff plan code already exists for this branch");
-      }
-      throw e;
-    }
+  createPlanAlias(@Req() req: any, @Body() dto: CreateTariffPlanDto) {
+    return this.svc.createTariffPlan(this.principal(req), dto);
   }
 
-  @Roles("BRANCH_ADMIN", "BILLING", "SUPER_ADMIN")
   @Post("tariffs/rates")
-  async upsertRate(@Body() dto: UpsertRateDto) {
-    const tariffPlanId = dto.tariffPlanId.trim();
-    const serviceCode = dto.serviceCode.trim();
-
-    if (!tariffPlanId || !serviceCode) {
-      throw new BadRequestException("tariffPlanId and serviceCode are required");
-    }
-
-    const rate = await this.prisma.tariffRate.upsert({
-      where: {
-        tariffPlanId_serviceCode: { tariffPlanId, serviceCode },
-      },
-      update: { amount: dto.amount as any },
-      create: { tariffPlanId, serviceCode, amount: dto.amount as any },
-    });
-
-    await this.audit.log({
-      action: "TARIFF_RATE_UPSERT",
-      entity: "TariffRate",
-      entityId: rate.id,
-      meta: { tariffPlanId, serviceCode, amount: dto.amount },
-    });
-
-    return rate;
+  upsertRateAlias(@Req() req: any, @Body() dto: UpsertTariffRateDto) {
+    return this.svc.upsertTariffRate(this.principal(req), dto);
   }
 }

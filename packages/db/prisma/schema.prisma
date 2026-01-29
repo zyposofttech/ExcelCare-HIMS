@@ -129,17 +129,21 @@ model Branch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  departments Department[]
-  users       User[]
-  patients    Patient[]
-  wards       Ward[]
-  tariffPlans TariffPlan[]
-  assets      Asset[]
-  Specialty   Specialty[]
-  Staff       Staff[]
-  Encounter   Encounter[]
-  Bed         Bed[]
-  Admission   Admission[]
+  departments    Department[]
+  users          User[]
+  patients       Patient[]
+  wards          Ward[]
+  tariffPlans    TariffPlan[]
+  // Advanced billing setup (branch-scoped)
+  taxCodes       TaxCode[]
+  payers         Payer[]
+  payerContracts PayerContract[]
+  assets         Asset[]
+  Specialty      Specialty[]
+  Staff          Staff[]
+  Encounter      Encounter[]
+  Bed            Bed[]
+  Admission      Admission[]
 
   // Facilities enabled for this branch (multi-select from FacilityCatalog)
   branchFacilities BranchFacility[]
@@ -258,6 +262,7 @@ model Department {
   equipmentOwned    EquipmentAsset[]   @relation("EquipmentOwnerDepartment")
   serviceItems      ServiceItem[]
   serviceCatalogues ServiceCatalogue[]
+  OrderSet          OrderSet[]
 
   @@unique([branchId, facilityId, code])
   @@index([branchId, facilityId, isActive])
@@ -410,6 +415,25 @@ model User {
   createdBookings               ProcedureBooking[]      @relation("BookingCreatedBy")
   createdGoLiveReports          GoLiveReport[]          @relation("GoLiveCreatedBy")
   createdDiagnosticPackVersions DiagnosticPackVersion[] @relation("DiagnosticPackVersionCreatedBy")
+
+  // ---------------- Service Packages (Bundles) ----------------
+  createdServicePackages        ServicePackage[]        @relation("ServicePackageCreatedBy")
+  updatedServicePackages        ServicePackage[]        @relation("ServicePackageUpdatedBy")
+  submittedServicePackages      ServicePackage[]        @relation("ServicePackageSubmittedBy")
+  approvedServicePackages       ServicePackage[]        @relation("ServicePackageApprovedBy")
+  publishedServicePackages      ServicePackage[]        @relation("ServicePackagePublishedBy")
+  createdServicePackageVersions ServicePackageVersion[] @relation("ServicePackageVersionCreatedBy")
+
+  // ---------------- Order Sets (Clinical Presets) ----------------
+  createdOrderSets        OrderSet[]        @relation("OrderSetCreatedBy")
+  updatedOrderSets        OrderSet[]        @relation("OrderSetUpdatedBy")
+  submittedOrderSets      OrderSet[]        @relation("OrderSetSubmittedBy")
+  approvedOrderSets       OrderSet[]        @relation("OrderSetApprovedBy")
+  publishedOrderSets      OrderSet[]        @relation("OrderSetPublishedBy")
+  createdOrderSetVersions OrderSetVersion[] @relation("OrderSetVersionCreatedBy")
+
+  // ---------------- Tariffs (Rates) ----------------
+  createdTariffRates TariffRate[] @relation("TariffRateCreatedBy")
 
   // ---------------- Equipment Register (Infrastructure) ----------------
   createdEquipmentRevisions        EquipmentAssetRevision[]      @relation("EquipmentRevisionCreatedBy")
@@ -570,28 +594,123 @@ model Asset {
   @@unique([branchId, code])
 }
 
+model TaxCode {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  code String @db.VarChar(32)
+  name String @db.VarChar(160)
+
+  taxType TaxType @default(GST)
+
+  // e.g. 18.0000 (supports precise percentages)
+  ratePercent Decimal @db.Decimal(7, 4)
+
+  // Optional breakdown (CGST/SGST/IGST), exemptions, notes, etc.
+  components Json?
+
+  // Optional default HSN/SAC mapped to this tax code
+  hsnSac String? @db.VarChar(16)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chargeMasterItems ChargeMasterItem[]
+  serviceItems      ServiceItem[]
+  tariffRates       TariffRate[]
+  servicePackages   ServicePackage[]
+
+  @@unique([branchId, code])
+  @@index([branchId, taxType, isActive])
+}
+
+model Payer {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  code String @db.VarChar(48)
+  name String @db.VarChar(160)
+
+  kind     PayerKind @default(OTHER)
+  isActive Boolean   @default(true)
+
+  meta Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contracts   PayerContract[]
+  tariffPlans TariffPlan[]
+
+  @@unique([branchId, code])
+  @@index([branchId, kind, isActive])
+}
+
+model PayerContract {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  payerId String
+  payer   Payer  @relation(fields: [payerId], references: [id], onDelete: Cascade)
+
+  code String @db.VarChar(48)
+  name String @db.VarChar(160)
+
+  status  ContractStatus @default(ACTIVE)
+  startAt DateTime?
+  endAt   DateTime?
+
+  terms Json?
+  meta  Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tariffPlans TariffPlan[]
+
+  @@unique([branchId, code])
+  @@index([branchId, payerId, status])
+}
+
 model TariffPlan {
   id       String @id @default(cuid())
   branchId String
-  branch   Branch @relation(fields: [branchId], references: [id])
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
-  code   String
-  name   String
-  status String
+  kind   TariffPlanKind   @default(PRICE_LIST)
+  status TariffPlanStatus @default(DRAFT)
 
-  // Fields your billing controller expects
-  payerType     String
-  effectiveFrom DateTime
+  code String @db.VarChar(48)
+  name String @db.VarChar(160)
+
+  // Optional linkage: cash price list (no payer/contract) OR contract-based plan
+  payerId String?
+  payer   Payer?  @relation(fields: [payerId], references: [id], onDelete: SetNull)
+
+  contractId String?
+  contract   PayerContract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  currency       String  @default("INR") @db.VarChar(8)
+  isTaxInclusive Boolean @default(false)
+
+  effectiveFrom DateTime  @default(now())
   effectiveTo   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Relations your billing controller expects
   rates TariffRate[]
 
   @@unique([branchId, code])
+  @@index([branchId, kind, status])
   @@index([branchId, effectiveFrom])
+  @@index([branchId, payerId])
+  @@index([branchId, contractId])
 }
 
 model ServiceCatalogItem {
@@ -609,13 +728,33 @@ model TariffRate {
   tariffPlanId String
   tariffPlan   TariffPlan @relation(fields: [tariffPlanId], references: [id], onDelete: Cascade)
 
-  serviceCode String
-  amount      Decimal @db.Decimal(12, 2)
+  // ✅ Primary rate anchor (no legacy service-code). ChargeMaster-first billing.
+  chargeMasterItemId String
+  chargeMasterItem   ChargeMasterItem @relation(fields: [chargeMasterItemId], references: [id], onDelete: Restrict)
+
+  amount Decimal @db.Decimal(12, 2)
+
+  // Optional per-rate overrides
+  taxCodeId String?
+  taxCode   TaxCode? @relation(fields: [taxCodeId], references: [id], onDelete: SetNull)
+
+  // Overrides plan-level tax inclusion if set
+  isTaxInclusive Boolean?
+
+  rules Json?
+
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  version       Int       @default(1)
+
+  createdByUserId String?
+  createdByUser   User?   @relation("TariffRateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([tariffPlanId, serviceCode])
+  @@unique([tariffPlanId, chargeMasterItemId, version])
+  @@index([tariffPlanId, chargeMasterItemId, effectiveFrom])
   @@index([tariffPlanId])
 }
 
@@ -1217,15 +1356,33 @@ model ChargeMasterItem {
 
   category String?
   unit     String?
+
+  // ✅ Charge unit enforcement (end-to-end)
+  chargeUnit ServiceChargeUnit @default(PER_UNIT)
+
+  // ✅ Tax mapping (preferred over placeholder enums)
+  taxCodeId      String?
+  taxCode        TaxCode? @relation(fields: [taxCodeId], references: [id], onDelete: SetNull)
+  isTaxInclusive Boolean  @default(false)
+  hsnSac         String?  @db.VarChar(16)
+
+  // Optional: rounding/deposit/refund/etc.
+  billingPolicy Json?
+
   isActive Boolean @default(true)
 
-  createdAt               DateTime                  @default(now())
-  updatedAt               DateTime                  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
   mappings                ServiceChargeMapping[]
   ServicePackageComponent ServicePackageComponent[]
+  tariffRates             TariffRate[]
+  billedPackages          ServicePackage[]          @relation("ServicePackage_BillingChargeMaster")
 
   @@unique([branchId, code], name: "branchId_code")
   @@index([branchId, isActive])
+  @@index([branchId, taxCodeId])
 }
 
 model ServiceItem {
@@ -1247,6 +1404,10 @@ model ServiceItem {
   department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
 
   externalId String? @db.VarChar(80)
+
+  // Optional OT/procedure metadata
+  procedureKind   String? @db.VarChar(80)
+  anesthesiaClass String? @db.VarChar(80)
 
   // Orderability + lifecycle
   isOrderable     Boolean                @default(true)
@@ -1291,6 +1452,8 @@ model ServiceItem {
   // Billing definition
   chargeUnit       ServiceChargeUnit?
   taxApplicability TaxApplicability?
+  taxCodeId        String?
+  taxCode          TaxCode?           @relation(fields: [taxCodeId], references: [id], onDelete: SetNull)
   billingPolicy    Json? // rounding, deposit, refund, inclusive/exclusive flags, etc.
 
   createdAt DateTime @default(now())
@@ -1560,8 +1723,40 @@ model ServicePackage {
   status  PackageStatus @default(DRAFT)
   version Int           @default(1)
 
+  // ✅ Package pricing rules
+  pricingMode   PackagePricingMode @default(COMPONENT_SUM)
+  pricingValue  Decimal?           @db.Decimal(12, 2)
+  pricingPolicy Json?
+
+  // If billed as a single line item
+  billingChargeMasterItemId String?
+  billingChargeMasterItem   ChargeMasterItem? @relation("ServicePackage_BillingChargeMaster", fields: [billingChargeMasterItemId], references: [id], onDelete: SetNull)
+
+  // Charge unit for package billing
+  chargeUnit ServiceChargeUnit @default(PER_PACKAGE)
+
+  // Tax for package line (optional)
+  taxCodeId      String?
+  taxCode        TaxCode? @relation(fields: [taxCodeId], references: [id], onDelete: SetNull)
+  isTaxInclusive Boolean  @default(false)
+
   effectiveFrom DateTime  @default(now())
   effectiveTo   DateTime?
+
+  // Governance / workflow actors (maker-checker)
+  createdByUserId   String?
+  createdByUser     User?     @relation("ServicePackageCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUserId   String?
+  updatedByUser     User?     @relation("ServicePackageUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  submittedByUserId String?
+  submittedByUser   User?     @relation("ServicePackageSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
+  submittedAt       DateTime?
+  approvedByUserId  String?
+  approvedByUser    User?     @relation("ServicePackageApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  approvedAt        DateTime?
+  publishedByUserId String?
+  publishedByUser   User?     @relation("ServicePackagePublishedBy", fields: [publishedByUserId], references: [id], onDelete: SetNull)
+  publishedAt       DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1572,6 +1767,7 @@ model ServicePackage {
 
   @@unique([branchId, code])
   @@index([branchId, status])
+  @@index([branchId, pricingMode])
 }
 
 model ServicePackageComponent {
@@ -1614,6 +1810,9 @@ model ServicePackageVersion {
 
   snapshot Json
 
+  createdByUserId String?
+  createdByUser   User?   @relation("ServicePackageVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
   effectiveFrom DateTime
   effectiveTo   DateTime?
 
@@ -1634,6 +1833,9 @@ model OrderSet {
 
   description String?
 
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
   context CareContext?
   channel CatalogueChannel @default(ORDER_SET)
 
@@ -1643,6 +1845,21 @@ model OrderSet {
   effectiveFrom DateTime  @default(now())
   effectiveTo   DateTime?
 
+  // Governance / workflow actors (maker-checker)
+  createdByUserId   String?
+  createdByUser     User?     @relation("OrderSetCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUserId   String?
+  updatedByUser     User?     @relation("OrderSetUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  submittedByUserId String?
+  submittedByUser   User?     @relation("OrderSetSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
+  submittedAt       DateTime?
+  approvedByUserId  String?
+  approvedByUser    User?     @relation("OrderSetApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  approvedAt        DateTime?
+  publishedByUserId String?
+  publishedByUser   User?     @relation("OrderSetPublishedBy", fields: [publishedByUserId], references: [id], onDelete: SetNull)
+  publishedAt       DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1651,6 +1868,7 @@ model OrderSet {
 
   @@unique([branchId, code])
   @@index([branchId, context, status])
+  @@index([branchId, departmentId, status])
 }
 
 model OrderSetItem {
@@ -1668,7 +1886,9 @@ model OrderSetItem {
   diagnosticItem DiagnosticItem? @relation(fields: [diagnosticItemId], references: [id], onDelete: Restrict)
   pkg            ServicePackage? @relation(fields: [packageId], references: [id], onDelete: Restrict)
 
-  quantity Int @default(1)
+  quantity   Int     @default(1)
+  isOptional Boolean @default(false)
+  rules      Json?
 
   sortOrder Int     @default(0)
   isActive  Boolean @default(true)
@@ -1688,6 +1908,9 @@ model OrderSetVersion {
   status  OrderSetStatus
 
   snapshot Json
+
+  createdByUserId String?
+  createdByUser   User?   @relation("OrderSetVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   effectiveFrom DateTime
   effectiveTo   DateTime?
@@ -1886,6 +2109,33 @@ model ExternalDirectoryMapping {
 
 enum FixItTaskType {
   SERVICE_CHARGE_MAPPING_MISSING
+  SERVICE_AVAILABILITY_MISSING
+  TARIFF_RATE_MISSING
+  TAX_CODE_MISSING
+  TAX_CODE_INACTIVE
+  PACKAGE_PRICING_MISSING
+  CHARGE_UNIT_MISMATCH
+  CLONE_MISSING_SERVICE_ITEM
+  CLONE_MISSING_DIAGNOSTIC_ITEM
+  CLONE_MISSING_CHARGE_MASTER_ITEM
+}
+
+enum FixItEntityType {
+  SERVICE_ITEM
+  CHARGE_MASTER_ITEM
+  TAX_CODE
+  TARIFF_PLAN
+  TARIFF_RATE
+  SERVICE_CATALOGUE
+  SERVICE_PACKAGE
+  ORDER_SET
+  DIAGNOSTIC_ITEM
+}
+
+enum FixItSeverity {
+  BLOCKER
+  WARNING
+  INFO
 }
 
 enum FixItStatus {
@@ -1900,8 +2150,12 @@ model FixItTask {
   branchId String
   branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
-  type   FixItTaskType
-  status FixItStatus   @default(OPEN)
+  type     FixItTaskType
+  status   FixItStatus   @default(OPEN)
+  severity FixItSeverity @default(BLOCKER)
+
+  entityType FixItEntityType?
+  entityId   String?
 
   title   String
   details Json?
@@ -1918,6 +2172,8 @@ model FixItTask {
   updatedAt DateTime @updatedAt
 
   @@index([branchId, status])
+  @@index([branchId, severity, status])
+  @@index([branchId, entityType])
 }
 
 // ---------------- Bulk Import Jobs ----------------
@@ -3125,6 +3381,51 @@ enum ServiceChargeUnit {
   PER_SIDE
   PER_LEVEL
   PER_SESSION
+
+  PER_PROCEDURE
+  PER_PACKAGE
+}
+
+enum TaxType {
+  GST
+  TDS
+  OTHER
+}
+
+enum PayerKind {
+  CASH
+  INSURANCE
+  TPA
+  CORPORATE
+  GOVERNMENT
+  OTHER
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  TERMINATED
+}
+
+enum TariffPlanKind {
+  PRICE_LIST
+  PAYER_CONTRACT
+}
+
+enum TariffPlanStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum PackagePricingMode {
+  COMPONENT_SUM
+  FIXED
+  DISCOUNT_PERCENT
+  DISCOUNT_AMOUNT
+  CAP
 }
 
 enum TaxApplicability {

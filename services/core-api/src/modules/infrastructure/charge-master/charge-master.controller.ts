@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { Permissions } from "../../auth/permissions.decorator";
 import { PERM } from "../../iam/iam.constants";
-import { CreateChargeMasterItemDto } from "./dto";
+import { CreateChargeMasterItemDto, UpdateChargeMasterItemDto } from "./dto";
 import { ChargeMasterService } from "./charge-master.service";
 
 @ApiTags("infrastructure/charge-master")
@@ -16,17 +16,25 @@ export class ChargeMasterController {
 
   @Post("charge-master")
   @Permissions(PERM.INFRA_CHARGE_MASTER_CREATE)
-  async createChargeMaster(
-    @Req() req: any,
-    @Body() dto: CreateChargeMasterItemDto,
-    @Query("branchId") branchId?: string,
-  ) {
+  create(@Req() req: any, @Body() dto: CreateChargeMasterItemDto, @Query("branchId") branchId?: string) {
     return this.svc.createChargeMasterItem(this.principal(req), dto, branchId ?? null);
   }
 
   @Get("charge-master")
   @Permissions(PERM.INFRA_CHARGE_MASTER_READ)
-  async listChargeMaster(@Req() req: any, @Query("branchId") branchId?: string, @Query("q") q?: string) {
+  list(@Req() req: any, @Query("branchId") branchId?: string, @Query("q") q?: string) {
     return this.svc.listChargeMasterItems(this.principal(req), { branchId: branchId ?? null, q });
+  }
+
+  @Get("charge-master/:id")
+  @Permissions(PERM.INFRA_CHARGE_MASTER_READ)
+  get(@Req() req: any, @Param("id") id: string) {
+    return this.svc.getChargeMasterItem(this.principal(req), id);
+  }
+
+  @Patch("charge-master/:id")
+  @Permissions(PERM.INFRA_CHARGE_MASTER_UPDATE)
+  update(@Req() req: any, @Param("id") id: string, @Body() dto: UpdateChargeMasterItemDto) {
+    return this.svc.updateChargeMasterItem(this.principal(req), id, dto);
   }
 }

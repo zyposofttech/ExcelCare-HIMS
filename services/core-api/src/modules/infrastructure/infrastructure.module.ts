@@ -49,6 +49,13 @@ import { GoLiveService } from "./golive/golive.service";
 
 import { DiagnosticsModule } from "./diagnostics/diagnostics.module";
 
+import { TaxCodesController } from "./tax-codes/tax-codes.controller";
+import { TaxCodesService } from "./tax-codes/tax-codes.service";
+
+import { ServiceAvailabilityController } from "./service-availability/service-availability.controller";
+import { ServiceAvailabilityService } from "./service-availability/service-availability.service";
+
+
 @Module({
   imports: [
     AuthModule,
@@ -73,6 +80,8 @@ import { DiagnosticsModule } from "./diagnostics/diagnostics.module";
     SchedulingController,
     ImportController,
     GoLiveController,
+    TaxCodesController,
+    ServiceAvailabilityController
   ],
   providers: [
     LocationService,
@@ -88,6 +97,8 @@ import { DiagnosticsModule } from "./diagnostics/diagnostics.module";
     ImportService,
     GoLiveService,
     InfrastructureSeedService,
+    TaxCodesService,
+    ServiceAvailabilityService
   ],
 })
 export class InfrastructureModule {}

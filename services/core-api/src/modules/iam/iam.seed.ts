@@ -5,7 +5,7 @@ import { hashPassword } from "./password.util";
 
 @Injectable()
 export class IamSeedService implements OnModuleInit {
-  constructor(@Inject("PRISMA") private prisma: PrismaClient) {}
+  constructor(@Inject("PRISMA") private prisma: PrismaClient) { }
 
   async onModuleInit() {
     if (process.env.AUTH_DEV_SEED !== "true") return;
@@ -137,9 +137,15 @@ export class IamSeedService implements OnModuleInit {
       { code: PERM.INFRA_SCHED_READ, name: "Read infra bookings", category: "Infrastructure" },
       { code: PERM.INFRA_SCHED_CREATE, name: "Create infra bookings", category: "Infrastructure" },
       { code: PERM.INFRA_SCHED_CANCEL, name: "Cancel infra bookings", category: "Infrastructure" },
-
+      { code: PERM.INFRA_TAX_CODE_READ, name: "Read tax codes", category: "Infrastructure" },
+      { code: PERM.INFRA_TAX_CODE_CREATE, name: "Create tax codes", category: "Infrastructure" },
+      { code: PERM.INFRA_TAX_CODE_UPDATE, name: "Update tax codes", category: "Infrastructure" },
       { code: PERM.INFRA_GOLIVE_READ, name: "Read go-live checks", category: "Infrastructure" },
       { code: PERM.INFRA_GOLIVE_RUN, name: "Run go-live checks", category: "Infrastructure" },
+      { code: PERM.INFRA_SERVICE_AVAILABILITY_READ, name: "Read service availability", category: "Infrastructure" },
+      { code: PERM.INFRA_SERVICE_AVAILABILITY_UPDATE, name: "Update service availability", category: "Infrastructure" },
+
+      // Operation Theatre  
       { code: PERM.OT_SUITE_CREATE, name: "Create OT suites", category: "OT" },
       { code: PERM.OT_SUITE_READ, name: "Read OT suites", category: "OT" },
       { code: PERM.OT_SUITE_UPDATE, name: "Update OT suites", category: "OT" },
@@ -152,13 +158,13 @@ export class IamSeedService implements OnModuleInit {
       { code: PERM.OT_TABLE_DELETE, name: "Delete OT tables", category: "OT" },
       { code: PERM.OT_EQUIPMENT_CREATE, name: "Create OT equipment", category: "OT" },
       { code: PERM.OT_EQUIPMENT_UPDATE, name: "Update OT equipment", category: "OT" },
-      { code: PERM.OT_EQUIPMENT_DELETE, name: "Delete OT equipment", category: "OT" },  
+      { code: PERM.OT_EQUIPMENT_DELETE, name: "Delete OT equipment", category: "OT" },
       { code: PERM.OT_SUITE_READ, name: "Read OT suite readiness", category: "OT" },
       { code: PERM.OT_SUITE_UPDATE, name: "Update OT suite readiness", category: "OT" },
       { code: PERM.OT_SUITE_DELETE, name: "Delete OT suite readiness", category: "OT" },
       { code: PERM.OT_SPACE_UPDATE, name: "Update OT space readiness", category: "OT" },
       { code: PERM.OT_SPACE_DELETE, name: "Delete OT space readiness", category: "OT" },
-  
+
     ];
 
     for (const p of permissions) {
@@ -198,42 +204,42 @@ export class IamSeedService implements OnModuleInit {
           ? permissions.map((x) => x.code)
           : r.code === ROLE.BRANCH_ADMIN
             ? [
-                PERM.BRANCH_READ,
-                PERM.IAM_USER_READ, PERM.IAM_USER_CREATE, PERM.IAM_USER_UPDATE,
-                PERM.IAM_ROLE_READ, PERM.IAM_PERMISSION_READ, PERM.IAM_AUDIT_READ,
+              PERM.BRANCH_READ,
+              PERM.IAM_USER_READ, PERM.IAM_USER_CREATE, PERM.IAM_USER_UPDATE,
+              PERM.IAM_ROLE_READ, PERM.IAM_PERMISSION_READ, PERM.IAM_AUDIT_READ,
 
-                PERM.FACILITY_CATALOG_READ,
-                PERM.BRANCH_FACILITY_READ, PERM.BRANCH_FACILITY_UPDATE,
-                PERM.DEPARTMENT_READ, PERM.DEPARTMENT_CREATE, PERM.DEPARTMENT_UPDATE, PERM.DEPARTMENT_ASSIGN_DOCTORS,
-                PERM.DEPARTMENT_SPECIALTY_READ, PERM.DEPARTMENT_SPECIALTY_UPDATE,
-                PERM.SPECIALTY_READ, PERM.SPECIALTY_CREATE, PERM.SPECIALTY_UPDATE,
-                PERM.STAFF_READ,
+              PERM.FACILITY_CATALOG_READ,
+              PERM.BRANCH_FACILITY_READ, PERM.BRANCH_FACILITY_UPDATE,
+              PERM.DEPARTMENT_READ, PERM.DEPARTMENT_CREATE, PERM.DEPARTMENT_UPDATE, PERM.DEPARTMENT_ASSIGN_DOCTORS,
+              PERM.DEPARTMENT_SPECIALTY_READ, PERM.DEPARTMENT_SPECIALTY_UPDATE,
+              PERM.SPECIALTY_READ, PERM.SPECIALTY_CREATE, PERM.SPECIALTY_UPDATE,
+              PERM.STAFF_READ,
 
-                // infra setup at branch level
-                PERM.INFRA_LOCATION_READ, PERM.INFRA_LOCATION_CREATE, PERM.INFRA_LOCATION_UPDATE, PERM.INFRA_LOCATION_REVISE, PERM.INFRA_LOCATION_RETIRE,
-                PERM.INFRA_UNITTYPE_READ, PERM.INFRA_UNITTYPE_UPDATE,
-                PERM.INFRA_UNIT_READ, PERM.INFRA_UNIT_CREATE, PERM.INFRA_UNIT_UPDATE,
-                PERM.INFRA_ROOM_READ, PERM.INFRA_ROOM_CREATE, PERM.INFRA_ROOM_UPDATE,
-                PERM.INFRA_RESOURCE_READ, PERM.INFRA_RESOURCE_CREATE, PERM.INFRA_RESOURCE_UPDATE, PERM.INFRA_RESOURCE_STATE_UPDATE,
-                PERM.INFRA_GOLIVE_READ, PERM.INFRA_GOLIVE_RUN,
-              ]
+              // infra setup at branch level
+              PERM.INFRA_LOCATION_READ, PERM.INFRA_LOCATION_CREATE, PERM.INFRA_LOCATION_UPDATE, PERM.INFRA_LOCATION_REVISE, PERM.INFRA_LOCATION_RETIRE,
+              PERM.INFRA_UNITTYPE_READ, PERM.INFRA_UNITTYPE_UPDATE,
+              PERM.INFRA_UNIT_READ, PERM.INFRA_UNIT_CREATE, PERM.INFRA_UNIT_UPDATE,
+              PERM.INFRA_ROOM_READ, PERM.INFRA_ROOM_CREATE, PERM.INFRA_ROOM_UPDATE,
+              PERM.INFRA_RESOURCE_READ, PERM.INFRA_RESOURCE_CREATE, PERM.INFRA_RESOURCE_UPDATE, PERM.INFRA_RESOURCE_STATE_UPDATE,
+              PERM.INFRA_GOLIVE_READ, PERM.INFRA_GOLIVE_RUN,
+            ]
             : [
-                PERM.BRANCH_READ,
-                PERM.IAM_USER_READ, PERM.IAM_USER_UPDATE, PERM.IAM_USER_RESET_PASSWORD,
-                PERM.IAM_ROLE_READ, PERM.IAM_PERMISSION_READ, PERM.IAM_AUDIT_READ,
+              PERM.BRANCH_READ,
+              PERM.IAM_USER_READ, PERM.IAM_USER_UPDATE, PERM.IAM_USER_RESET_PASSWORD,
+              PERM.IAM_ROLE_READ, PERM.IAM_PERMISSION_READ, PERM.IAM_AUDIT_READ,
 
-                PERM.FACILITY_CATALOG_READ,
-                PERM.BRANCH_FACILITY_READ,
-                PERM.DEPARTMENT_READ,
-                PERM.DEPARTMENT_SPECIALTY_READ,
-                PERM.SPECIALTY_READ,
-                PERM.STAFF_READ,
+              PERM.FACILITY_CATALOG_READ,
+              PERM.BRANCH_FACILITY_READ,
+              PERM.DEPARTMENT_READ,
+              PERM.DEPARTMENT_SPECIALTY_READ,
+              PERM.SPECIALTY_READ,
+              PERM.STAFF_READ,
 
-                // limited infra ops
-                PERM.INFRA_LOCATION_READ,
-                PERM.INFRA_EQUIPMENT_READ,
-                PERM.INFRA_FIXIT_READ,
-              ];
+              // limited infra ops
+              PERM.INFRA_LOCATION_READ,
+              PERM.INFRA_EQUIPMENT_READ,
+              PERM.INFRA_FIXIT_READ,
+            ];
 
       const perms = await this.prisma.permission.findMany({ where: { code: { in: permCodes } } });
 

@@ -86,16 +86,22 @@ const NAV_WORKSPACES: NavNode[] = [
 
       { label: "Diagnostics Configuration", href: "/superadmin/infrastructure/diagnostics" },
       { label: "Equipment Register", href: "/superadmin/infrastructure/equipment" },
-      
-      { label: "Charge Master", href: "/superadmin/infrastructure/charge-master" },
-      { label: "Service Items", href: "/superadmin/infrastructure/service-items" },
-       { label: "Standard Codes", href: "/superadmin/infrastructure/service-library" },
-      { label: "Service Catalogue", href: "/superadmin/infrastructure/service-catalogue" },
+
+      { label: "Service Library", href: "/superadmin/infrastructure/service-library" },
+      { label: "Service ↔ Charge Mapping", href: "/superadmin/infrastructure/service-mapping" },
+      { label: "Service Catalogue", href: "/superadmin/infrastructure/service-catalogues" },
       { label: "Service Packages", href: "/superadmin/infrastructure/service-packages" },
-      { label: "Clinical Presets", href: "/superadmin/infrastructure/order-sets" },
+      { label: "Order Sets", href: "/superadmin/infrastructure/order-sets" },
+
+      { label: "Tax Codes (GST)", href: "/superadmin/infrastructure/tax-codes" },
+      { label: "Charge Master", href: "/superadmin/infrastructure/charge-master" },
+      { label: "Tariff Plans & Rates", href: "/superadmin/infrastructure/tariff-plans" },
+      
+      
+      { label: "Service Availability", href: "/superadmin/infrastructure/service-availability" },
       { label: "Fix-It Queue", href: "/superadmin/infrastructure/fixit" },
       { label: "Go-Live Validator", href: "/superadmin/infrastructure/go-live" },
-
+      
       { label: "Bulk Import (CSV/XLS)", href: "/superadmin/infrastructure/import" },
       
     ],
@@ -350,6 +356,12 @@ const ALL_NAV_ITEMS = NAV_GROUPS.flatMap((group) =>
 
 function isActivePath(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function isNavNodeActive(pathname: string, node: NavNode) {
+  if (!node.children?.length) return isActivePath(pathname, node.href);
+  if (pathname === node.href) return true;
+  return node.children.some((c) => isActivePath(pathname, c.href));
 }
 
 function readBool(key: string, fallback: boolean) {
@@ -792,7 +804,8 @@ export function AppShell({
           <nav
             className={cn(
               "flex-1 min-h-0 overflow-y-auto overflow-x-hidden",
-              collapsed ? "px-2 pb-4" : "px-3 pb-4"
+              collapsed ? "px-2 pb-4" : "px-3 pb-4",
+              "zc-scroll-no-track"
             )}
           >
             <div className={cn("grid", collapsed ? "gap-4" : "gap-6")}>
@@ -830,8 +843,9 @@ export function AppShell({
                     >
                       {group.items.map((node) => {
                         const Icon = node.icon;
-                        const active = isActivePath(pathname, node.href);
-                        const open = (openMap[node.href] ?? true) && !collapsed;
+                        const active = isNavNodeActive(pathname, node);
+                        const hasActiveChild = !!node.children?.some((c) => isActivePath(pathname, c.href));
+                        const open = !collapsed && ((openMap[node.href] ?? true) || hasActiveChild);
 
                         const linkBase = cn(
                           "group flex min-w-0 items-center gap-3 rounded-lg",
@@ -901,7 +915,7 @@ export function AppShell({
                             {!collapsed && node.children?.length && open ? (
                               <div className="mt-1 grid gap-1 pl-9 animate-in slide-in-from-top-1 duration-200">
                                 {node.children.map((c) => {
-                                  const childActive = isActivePath(pathname, c.href);
+                                  const childActive = c.href === node.href ? pathname === c.href : isActivePath(pathname, c.href);
                                   return (
                                     <Link
                                       key={c.href}
@@ -1044,7 +1058,7 @@ export function AppShell({
             </div>
           </header>
 
-          <main className="min-w-0 flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
+          <main className="min-w-0 flex-1 min-h-0 overflow-y-auto p-4 md:p-6 zc-scroll-no-track">
             <div className="w-full">{children}</div>
           </main>
         </div>

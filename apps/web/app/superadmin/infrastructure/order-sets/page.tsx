@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { AppLink as Link } from "@/components/app-link";
+
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Dialog,
@@ -19,28 +23,71 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/use-toast";
 
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
-import { ClipboardList, Plus, RefreshCw, Search, Settings2, Trash2, Wrench } from "lucide-react";
+import {
+  AlertTriangle,
+  ClipboardList,
+  ExternalLink,
+  Filter,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Search,
+  Wrench,
+  Eye,
+  Trash2,
+  CheckCircle2,
+  Send,
+  UploadCloud,
+  Archive,
+  Layers,
+} from "lucide-react";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Types                                    */
 /* -------------------------------------------------------------------------- */
 
-type BranchRow = { id: string; code: string; name: string; city?: string | null };
+type BranchRow = { id: string; code: string; name: string; city: string };
+type DepartmentRow = { id: string; code: string; name: string };
+
+type OrderSetStatus = "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED" | "RETIRED";
+type CareContext = "OPD" | "IPD" | "ER" | "OT" | "DAYCARE" | "TELECONSULT" | "HOMECARE";
 
 type ServiceItemRow = {
   id: string;
   branchId: string;
   code: string;
   name: string;
-  category?: string | null;
   isActive?: boolean;
-  isOrderable?: boolean;
+  isBillable?: boolean;
+  lifecycleStatus?: string | null; // typically PUBLISHED
+  chargeUnit?: string | null;
+  type?: string | null;
+};
+
+type OrderSetItemRow = {
+  id: string;
+  orderSetId: string;
+  serviceItemId: string;
+  quantity: number;
+  notes?: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  serviceItem?: ServiceItemRow;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 type OrderSetRow = {
@@ -49,26 +96,32 @@ type OrderSetRow = {
   code: string;
   name: string;
   description?: string | null;
-  lifecycleStatus?: string | null;
-  isActive?: boolean;
+
+  departmentId?: string | null;
+  department?: DepartmentRow | null;
+
+  context?: CareContext | null;
+
+  status: OrderSetStatus;
+  version: number;
+
+  effectiveFrom?: string;
+  effectiveTo?: string | null;
+
   createdAt?: string;
   updatedAt?: string;
-};
 
-type OrderSetItemRow = {
-  id: string;
-  orderSetId: string;
-  serviceItemId: string;
-  quantity?: number | null;
-  sortOrder?: number | null;
-  serviceItem?: ServiceItemRow | null;
+  items?: OrderSetItemRow[];
 };
 
 type OrderSetVersionRow = {
   id: string;
   orderSetId: string;
-  versionNo?: number;
-  note?: string | null;
+  version: number;
+  status: OrderSetStatus;
+  snapshot: any;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
   createdAt?: string;
 };
 
@@ -86,11 +139,12 @@ function readLS(key: string) {
     return null;
   }
 }
-
 function writeLS(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
-  } catch {}
+  } catch {
+    // ignore
+  }
 }
 
 function buildQS(params: Record<string, any>) {
@@ -104,15 +158,15 @@ function buildQS(params: Record<string, any>) {
   return usp.toString();
 }
 
-function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("animate-pulse rounded-md bg-zc-panel/30", className)} />;
+function fmtDateTime(v?: string | null) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-function summaryBadgeClass(tone: "sky" | "emerald" | "rose" | "amber") {
-  if (tone === "sky") return "border-sky-200 bg-sky-50/70 text-sky-700 dark:border-sky-900/50 dark:bg-sky-900/10 dark:text-sky-200";
-  if (tone === "emerald") return "border-emerald-200 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-900/10 dark:text-emerald-200";
-  if (tone === "amber") return "border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-900/10 dark:text-amber-200";
-  return "border-rose-200 bg-rose-50/70 text-rose-700 dark:border-rose-900/50 dark:bg-rose-900/10 dark:text-rose-200";
+function Skeleton({ className }: { className?: string }) {
+  return <div className={cn("animate-pulse rounded-md bg-zc-panel/30", className)} />;
 }
 
 function drawerClassName(extra?: string) {
@@ -126,7 +180,31 @@ function drawerClassName(extra?: string) {
   );
 }
 
-function ModalHeader({ title, description }: { title: string; description?: string }) {
+function statusBadge(status: OrderSetStatus) {
+  switch (status) {
+    case "PUBLISHED":
+      return <Badge variant="ok">PUBLISHED</Badge>;
+    case "APPROVED":
+      return <Badge variant="secondary">APPROVED</Badge>;
+    case "IN_REVIEW":
+      return <Badge variant="warning">IN REVIEW</Badge>;
+    case "RETIRED":
+      return <Badge variant="destructive">RETIRED</Badge>;
+    default:
+      return <Badge variant="secondary">DRAFT</Badge>;
+  }
+}
+
+function ModalHeader({
+  title,
+  description,
+  onClose,
+}: {
+  title: string;
+  description?: string;
+  onClose: () => void;
+}) {
+  void onClose;
   return (
     <>
       <DialogHeader>
@@ -138,22 +216,9 @@ function ModalHeader({ title, description }: { title: string; description?: stri
         </DialogTitle>
         {description ? <DialogDescription>{description}</DialogDescription> : null}
       </DialogHeader>
+
       <Separator className="my-4" />
     </>
-  );
-}
-
-function statusPill(status?: string | null, active?: boolean) {
-  const s = (status || "UNKNOWN").toUpperCase();
-  const a = active !== false;
-  const tone =
-    s === "PUBLISHED" ? "emerald" : s === "APPROVED" ? "sky" : s === "RETIRED" ? "rose" : "amber";
-
-  return (
-    <span className={cn("inline-flex items-center gap-2 rounded-full border px-2 py-0.5 text-xs", summaryBadgeClass(tone))}>
-      <span className={cn("h-1.5 w-1.5 rounded-full", a ? "bg-emerald-500" : "bg-zinc-400")} />
-      {s}
-    </span>
   );
 }
 
@@ -161,647 +226,1671 @@ function statusPill(status?: string | null, active?: boolean) {
 /*                                   Page                                     */
 /* -------------------------------------------------------------------------- */
 
-export default function OrderSetsPage() {
+export default function SuperAdminOrderSetsPage() {
   const { toast } = useToast();
 
-  const [busy, setBusy] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState<"orderSets" | "guide">("orderSets");
+  const [showFilters, setShowFilters] = React.useState(false);
+
   const [loading, setLoading] = React.useState(true);
+  const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
-  const [branchId, setBranchId] = React.useState<string | undefined>(undefined);
+  const [branchId, setBranchId] = React.useState<string>("");
 
+  const [departments, setDepartments] = React.useState<DepartmentRow[]>([]);
+  const [rows, setRows] = React.useState<OrderSetRow[]>([]);
+  const [selectedId, setSelectedId] = React.useState<string>("");
+  const [selected, setSelected] = React.useState<OrderSetRow | null>(null);
+
+  // filters
   const [q, setQ] = React.useState("");
+  const [status, setStatus] = React.useState<OrderSetStatus | "all">("all");
+  const [context, setContext] = React.useState<CareContext | "all">("all");
   const [includeInactive, setIncludeInactive] = React.useState(false);
-  const [orderSets, setOrderSets] = React.useState<OrderSetRow[]>([]);
 
-  const [createOpen, setCreateOpen] = React.useState(false);
+  // modals
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [editMode, setEditMode] = React.useState<"create" | "edit">("create");
   const [editing, setEditing] = React.useState<OrderSetRow | null>(null);
-  const [code, setCode] = React.useState("");
-  const [name, setName] = React.useState("");
-  const [desc, setDesc] = React.useState("");
 
-  // Items drawer
   const [itemsOpen, setItemsOpen] = React.useState(false);
-  const [activeSet, setActiveSet] = React.useState<OrderSetRow | null>(null);
-  const [items, setItems] = React.useState<OrderSetItemRow[]>([]);
 
-  const [svcQuery, setSvcQuery] = React.useState("");
-  const [svcOptions, setSvcOptions] = React.useState<ServiceItemRow[]>([]);
-  const [svcPickId, setSvcPickId] = React.useState<string | undefined>(undefined);
-  const [qty, setQty] = React.useState<number>(1);
-  const [sortOrder, setSortOrder] = React.useState<number>(1);
-
-  // Versions
   const [versionsOpen, setVersionsOpen] = React.useState(false);
   const [versions, setVersions] = React.useState<OrderSetVersionRow[]>([]);
+  const [snapshotOpen, setSnapshotOpen] = React.useState(false);
+  const [snapshotPayload, setSnapshotPayload] = React.useState<any>(null);
 
-  async function loadBranches() {
+  const mustSelectBranch = !branchId;
+
+  async function loadBranches(): Promise<string | null> {
     const list = (await apiFetch<BranchRow[]>("/api/branches")) || [];
     setBranches(list);
 
     const stored = readLS(LS_BRANCH);
-    const first = list[0]?.id;
-    const next = (stored && list.some((b) => b.id === stored) ? stored : undefined) || first || undefined;
+    const first = list[0]?.id || null;
+    const next = (stored && list.some((b) => b.id === stored) ? stored : null) || first;
 
-    setBranchId(next);
     if (next) writeLS(LS_BRANCH, next);
+    setBranchId(next || "");
+    return next;
   }
 
-  async function loadOrderSets(bid?: string) {
-    const b = bid || branchId;
-    if (!b) return;
-
-    const qs = buildQS({ branchId: b, q, includeInactive: includeInactive ? "1" : undefined });
-    const data = await apiFetch<OrderSetRow[]>(`/api/infrastructure/order-sets?${qs}`);
-    setOrderSets(data || []);
-  }
-
-  async function loadItems(setId: string) {
+  async function loadDepartments() {
+    if (!branchId) return;
     try {
-      const os = await apiFetch<any>(`/api/infrastructure/order-sets/${setId}`);
-      const list: OrderSetItemRow[] = os?.items || os?.OrderSetItem || [];
-      setItems(Array.isArray(list) ? list : []);
+      const deps =
+        (await apiFetch<DepartmentRow[]>(
+          `/api/infrastructure/departments?${buildQS({ branchId })}`,
+        )) || [];
+      setDepartments(deps);
     } catch {
-      const list = await apiFetch<OrderSetItemRow[]>(`/api/infrastructure/order-sets/${setId}/items`);
-      setItems(list || []);
+      setDepartments([]);
     }
   }
 
-  async function searchServices(bid: string, query: string) {
-    const qs = buildQS({ branchId: bid, q: query || undefined, includeInactive: "1" });
-    const rows = await apiFetch<ServiceItemRow[]>(`/api/infrastructure/services?${qs}`);
-    setSvcOptions(rows || []);
+  async function loadOrderSets(showToast = false) {
+    if (!branchId) return;
+    setErr(null);
+    setLoading(true);
+    try {
+      const res = (await apiFetch<OrderSetRow[]>(
+        `/api/infrastructure/order-sets?${buildQS({
+          branchId,
+          q: q.trim() || undefined,
+          status: status !== "all" ? status : undefined,
+          context: context !== "all" ? context : undefined,
+          includeInactive: includeInactive ? "true" : undefined,
+        })}`,
+      )) as any;
+
+      const list: OrderSetRow[] = Array.isArray(res) ? res : (res?.rows || []);
+      setRows(list);
+
+      const nextSelected =
+        selectedId && list.some((x) => x.id === selectedId) ? selectedId : list[0]?.id || "";
+      setSelectedId(nextSelected);
+      setSelected(nextSelected ? list.find((x) => x.id === nextSelected) || null : null);
+
+      if (showToast) {
+        toast({
+          title: "Order Sets refreshed",
+          description: "Loaded latest order sets for this branch.",
+        });
+      }
+    } catch (e: any) {
+      const msg = e?.message || "Failed to load order sets";
+      setErr(msg);
+      setRows([]);
+      setSelectedId("");
+      setSelected(null);
+      if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
+    } finally {
+      setLoading(false);
+    }
   }
 
-  async function onRefresh() {
+  async function refreshAll(showToast = false) {
+    setLoading(true);
     setErr(null);
-    setBusy(true);
     try {
-      await loadOrderSets();
+      const bid = branchId || (await loadBranches());
+      if (!bid) {
+        setLoading(false);
+        return;
+      }
+      await Promise.all([loadDepartments(), loadOrderSets(false)]);
+      if (showToast) toast({ title: "Ready", description: "Branch scope and order sets are up to date." });
     } catch (e: any) {
-      setErr(e?.message || "Failed to load order sets");
+      const msg = e?.message || "Refresh failed";
+      setErr(msg);
+      if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
   }
 
   React.useEffect(() => {
-    (async () => {
-      setLoading(true);
-      setErr(null);
-      try {
-        await loadBranches();
-      } catch (e: any) {
-        setErr(e?.message || "Failed to load branches");
-      } finally {
-        setLoading(false);
-      }
-    })();
+    void refreshAll(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   React.useEffect(() => {
     if (!branchId) return;
-    writeLS(LS_BRANCH, branchId);
-    onRefresh();
+    void loadDepartments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
 
   React.useEffect(() => {
-    const t = setTimeout(() => {
-      if (!branchId) return;
-      loadOrderSets(branchId).catch(() => {});
-    }, 250);
-    return () => clearTimeout(t);
+    if (!branchId) return;
+    setSelectedId("");
+    setSelected(null);
+    void loadOrderSets(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, includeInactive]);
+  }, [branchId, includeInactive]);
 
   React.useEffect(() => {
-    const t = setTimeout(() => {
-      if (!branchId) return;
-      searchServices(branchId, svcQuery).catch(() => {});
-    }, 250);
+    if (!branchId) return;
+    const t = setTimeout(() => void loadOrderSets(false), 250);
     return () => clearTimeout(t);
-  }, [svcQuery, branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, status, context]);
+
+  React.useEffect(() => {
+    if (!selectedId) {
+      setSelected(null);
+      return;
+    }
+    setSelected(rows.find((x) => x.id === selectedId) || null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, rows]);
+
+  async function onBranchChange(nextId: string) {
+    setBranchId(nextId);
+    writeLS(LS_BRANCH, nextId);
+
+    setQ("");
+    setStatus("all");
+    setContext("all");
+    setIncludeInactive(false);
+    setSelectedId("");
+    setSelected(null);
+
+    setErr(null);
+    setLoading(true);
+    try {
+      await Promise.all([loadDepartments(), loadOrderSets(false)]);
+      toast({ title: "Branch scope changed", description: "Loaded order sets for selected branch." });
+    } catch (e: any) {
+      toast({ title: "Load failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const stats = React.useMemo(() => {
+    const total = rows.length;
+    const byStatus = rows.reduce<Record<string, number>>((acc, r) => {
+      acc[r.status] = (acc[r.status] || 0) + 1;
+      return acc;
+    }, {});
+    const published = byStatus.PUBLISHED || 0;
+    const draft = byStatus.DRAFT || 0;
+    const review = byStatus.IN_REVIEW || 0;
+    const approved = byStatus.APPROVED || 0;
+    const retired = byStatus.RETIRED || 0;
+
+    const totalItems = rows.reduce((n, r) => n + (r.items?.length || 0), 0);
+    return { total, published, draft, review, approved, retired, totalItems };
+  }, [rows]);
 
   function openCreate() {
+    setEditMode("create");
     setEditing(null);
-    setCode("");
-    setName("");
-    setDesc("");
-    setCreateOpen(true);
+    setEditOpen(true);
   }
 
   function openEdit(row: OrderSetRow) {
+    setEditMode("edit");
     setEditing(row);
-    setCode(row.code || "");
-    setName(row.name || "");
-    setDesc(row.description || "");
-    setCreateOpen(true);
-  }
-
-  async function saveOrderSet() {
-    if (!branchId) return;
-    if (!code.trim() || !name.trim()) {
-      toast({ title: "Code and name are required", variant: "destructive" });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      if (editing) {
-        await apiFetch(`/api/infrastructure/order-sets/${editing.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            code: code.trim(),
-            name: name.trim(),
-            description: desc?.trim() ? desc.trim() : null,
-          }),
-        });
-        toast({ title: "Order set updated" });
-      } else {
-        await apiFetch(`/api/infrastructure/order-sets`, {
-          method: "POST",
-          body: JSON.stringify({
-            branchId,
-            code: code.trim(),
-            name: name.trim(),
-            description: desc?.trim() ? desc.trim() : null,
-          }),
-        });
-        toast({ title: "Order set created" });
-      }
-
-      setCreateOpen(false);
-      await loadOrderSets(branchId);
-    } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Unknown error", variant: "destructive" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function toggleActive(row: OrderSetRow, next: boolean) {
-    setBusy(true);
-    try {
-      await apiFetch(`/api/infrastructure/order-sets/${row.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ isActive: next }),
-      });
-      toast({ title: next ? "Activated" : "Deactivated" });
-      await loadOrderSets(branchId);
-    } catch (e: any) {
-      toast({ title: "Update failed", description: e?.message || "Unknown error", variant: "destructive" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function workflow(row: OrderSetRow, action: "submit" | "approve" | "publish" | "retire") {
-    setBusy(true);
-    try {
-      await apiFetch(`/api/infrastructure/order-sets/${row.id}/workflow/${action}`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      toast({ title: `Workflow: ${action} done` });
-      await loadOrderSets(branchId);
-    } catch (e: any) {
-      toast({ title: "Workflow failed", description: e?.message || "Unknown error", variant: "destructive" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function openItems(row: OrderSetRow) {
-    setActiveSet(row);
-    setItemsOpen(true);
-    setItems([]);
-    setSvcQuery("");
-    setSvcPickId(undefined);
-    setQty(1);
-    setSortOrder((items?.length || 0) + 1);
-
-    try {
-      await loadItems(row.id);
-    } catch (e: any) {
-      toast({ title: "Failed to load items", description: e?.message || "Unknown error", variant: "destructive" });
-    }
-  }
-
-  async function upsertItem() {
-    if (!activeSet) return;
-    if (!svcPickId) {
-      toast({ title: "Select a service item", variant: "destructive" });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      await apiFetch(`/api/infrastructure/order-sets/${activeSet.id}/items`, {
-        method: "POST",
-        body: JSON.stringify({
-          serviceItemId: svcPickId,
-          quantity: qty,
-          sortOrder,
-        }),
-      });
-      toast({ title: "Item added/updated" });
-      await loadItems(activeSet.id);
-
-      // reset quick add
-      setSvcPickId(undefined);
-      setQty(1);
-      setSortOrder((items?.length || 0) + 1);
-    } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Unknown error", variant: "destructive" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function removeItem(serviceItemId: string) {
-    if (!activeSet) return;
-    if (!confirm("Remove this item from order set?")) return;
-
-    setBusy(true);
-    try {
-      await apiFetch(`/api/infrastructure/order-sets/${activeSet.id}/items`, {
-        method: "DELETE",
-        body: JSON.stringify({ serviceItemId }),
-      });
-      toast({ title: "Item removed" });
-      await loadItems(activeSet.id);
-    } catch (e: any) {
-      toast({ title: "Remove failed", description: e?.message || "Unknown error", variant: "destructive" });
-    } finally {
-      setBusy(false);
-    }
+    setEditOpen(true);
   }
 
   async function openVersions(row: OrderSetRow) {
     setVersionsOpen(true);
     setVersions([]);
+    if (!row?.id) return;
     try {
-      const v = await apiFetch<OrderSetVersionRow[]>(`/api/infrastructure/order-sets/${row.id}/versions`);
-      setVersions(v || []);
+      const v =
+        (await apiFetch<OrderSetVersionRow[]>(
+          `/api/infrastructure/order-sets/${encodeURIComponent(row.id)}/versions`,
+        )) || [];
+      setVersions(v);
     } catch (e: any) {
-      toast({ title: "Failed to load versions", description: e?.message || "Unknown error", variant: "destructive" });
+      toast({ title: "Failed to load versions", description: e?.message || "Request failed", variant: "destructive" as any });
+      setVersions([]);
     }
   }
 
-  /* --------------------------------- Render -------------------------------- */
+  async function workflow(row: OrderSetRow, action: "submit" | "approve" | "publish" | "retire") {
+    if (!row?.id) return;
+    const note = window.prompt(`Optional note for ${action.toUpperCase()} (leave blank for none):`) || "";
+    setBusy(true);
+    try {
+      await apiFetch(`/api/infrastructure/order-sets/${encodeURIComponent(row.id)}/workflow/${action}`, {
+        method: "POST",
+        body: JSON.stringify({ note: note.trim() ? note.trim() : undefined }),
+      });
+      toast({ title: "Workflow updated", description: `Action ${action.toUpperCase()} applied.` });
+      await loadOrderSets(false);
+    } catch (e: any) {
+      toast({ title: "Workflow failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <AppShell title="Order Sets">
-      <div className="space-y-4">
-        <Card>
-          <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-200/60 bg-indigo-50/60 text-indigo-700 dark:border-indigo-800/50 dark:bg-indigo-900/20 dark:text-indigo-300">
-                <ClipboardList className="h-5 w-5" />
-              </div>
-              <div>
-                <CardTitle className="text-base">Order Sets</CardTitle>
-                <CardDescription className="mt-1">
-                  Configure protocol-driven order bundles and quick picklists.
-                </CardDescription>
+    <AppShell title="Infrastructure • Order Sets">
+      <div className="grid gap-6">
+        {/* Header */}
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-2xl border border-zc-border bg-zc-panel/30">
+              <Layers className="h-5 w-5 text-zc-accent" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-3xl font-semibold tracking-tight">Order Sets</div>
+              <div className="mt-1 text-sm text-zc-muted">
+                Build curated “bundles” of service items for quick ordering (OPD/IPD/ER/OT).
               </div>
             </div>
+          </div>
 
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={onRefresh} disabled={busy || loading}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh
-              </Button>
-              <Button onClick={openCreate} disabled={busy || loading}>
-                <Plus className="mr-2 h-4 w-4" />
-                New Order Set
-              </Button>
-            </div>
+          <div className="flex items-center gap-2 flex-nowrap overflow-x-auto">
+            <Button
+              variant="outline"
+              className="px-5 gap-2 whitespace-nowrap shrink-0"
+              onClick={() => refreshAll(true)}
+              disabled={loading || busy}
+            >
+              <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+              Refresh
+            </Button>
+
+            <Button variant="outline" asChild className="px-5 gap-2 whitespace-nowrap shrink-0">
+              <Link href="/superadmin/infrastructure/fixit">
+                <Wrench className="h-4 w-4" />
+                FixIt Inbox
+              </Link>
+            </Button>
+
+            <Button
+              variant="primary"
+              className="px-5 gap-2 whitespace-nowrap shrink-0"
+              onClick={openCreate}
+              disabled={mustSelectBranch}
+            >
+              <Plus className="h-4 w-4" />
+              New Order Set
+            </Button>
+          </div>
+        </div>
+
+        {err ? (
+          <Card className="border-zc-danger/40">
+            <CardHeader className="py-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 text-zc-danger" />
+                <div>
+                  <CardTitle className="text-base">Could not load order sets</CardTitle>
+                  <CardDescription className="mt-1">{err}</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+          </Card>
+        ) : null}
+
+        {/* Overview */}
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-base">Overview</CardTitle>
+            <CardDescription className="text-sm">
+              Pick a branch → create order set → add service items with quantities → publish.
+              Published order sets should be consumable in ordering screens.
+            </CardDescription>
           </CardHeader>
 
-          <CardContent className="space-y-4">
-            {err ? (
-              <div className="rounded-xl border border-rose-200/60 bg-rose-50/70 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/10 dark:text-rose-200">
-                {err}
+          <CardContent className="grid gap-4">
+            <div className="grid gap-2">
+              <Label>Branch</Label>
+              <Select value={branchId || ""} onValueChange={onBranchChange}>
+                <SelectTrigger className="h-11 w-full rounded-xl border-zc-border bg-zc-card">
+                  <SelectValue placeholder="Select branch..." />
+                </SelectTrigger>
+                <SelectContent className="max-h-[320px] overflow-y-auto">
+                  {branches.filter((b) => b.id).map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.code} - {b.name} ({b.city})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900/50 dark:bg-blue-900/10">
+                <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Order Sets</div>
+                <div className="mt-1 text-lg font-bold text-blue-700 dark:text-blue-300">{stats.total}</div>
+              </div>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900/50 dark:bg-emerald-900/10">
+                <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Published</div>
+                <div className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-300">{stats.published}</div>
+              </div>
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-900/50 dark:bg-indigo-900/10">
+                <div className="text-xs font-medium text-indigo-600 dark:text-indigo-400">Total Items</div>
+                <div className="mt-1 text-lg font-bold text-indigo-700 dark:text-indigo-300">{stats.totalItems}</div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="relative w-full lg:max-w-md">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
+                <Input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search by code/name…"
+                  className="pl-10"
+                  disabled={mustSelectBranch}
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
+                  <Switch checked={includeInactive} onCheckedChange={setIncludeInactive} disabled={mustSelectBranch} />
+                  <div className="text-sm">
+                    <div className="font-semibold text-zc-text">Include inactive</div>
+                    <div className="text-xs text-zc-muted">Usually keep off</div>
+                  </div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => setShowFilters((s) => !s)}
+                  disabled={mustSelectBranch}
+                >
+                  <Filter className="h-4 w-4" />
+                  {showFilters ? "Hide Filters" : "Show Filters"}
+                </Button>
+              </div>
+            </div>
+
+            {showFilters ? (
+              <div className="grid gap-3 rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                  <Filter className="h-4 w-4 text-zc-accent" />
+                  Filters
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-12">
+                  <div className="md:col-span-4">
+                    <Label className="text-xs text-zc-muted">Status</Label>
+                    <Select value={status} onValueChange={(v) => setStatus(v as any)} disabled={mustSelectBranch}>
+                      <SelectTrigger className="h-10">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any</SelectItem>
+                        <SelectItem value="DRAFT">DRAFT</SelectItem>
+                        <SelectItem value="IN_REVIEW">IN_REVIEW</SelectItem>
+                        <SelectItem value="APPROVED">APPROVED</SelectItem>
+                        <SelectItem value="PUBLISHED">PUBLISHED</SelectItem>
+                        <SelectItem value="RETIRED">RETIRED</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="md:col-span-4">
+                    <Label className="text-xs text-zc-muted">Context</Label>
+                    <Select value={context} onValueChange={(v) => setContext(v as any)} disabled={mustSelectBranch}>
+                      <SelectTrigger className="h-10">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any</SelectItem>
+                        <SelectItem value="OPD">OPD</SelectItem>
+                        <SelectItem value="IPD">IPD</SelectItem>
+                        <SelectItem value="ER">ER</SelectItem>
+                        <SelectItem value="OT">OT</SelectItem>
+                        <SelectItem value="DAYCARE">DAYCARE</SelectItem>
+                        <SelectItem value="TELECONSULT">TELECONSULT</SelectItem>
+                        <SelectItem value="HOMECARE">HOMECARE</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </div>
             ) : null}
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
-              <div className="md:col-span-3">
-                <Label>Branch</Label>
-                <Select
-                  value={branchId}
-                  onValueChange={(v) => {
-                    setBranchId(v);
-                    writeLS(LS_BRANCH, v);
-                  }}
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select branch" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {branches.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.code} — {b.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="md:col-span-6">
-                <Label>Search</Label>
-                <div className="mt-1 flex items-center gap-2">
-                  <div className="relative w-full">
-                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-zc-muted" />
-                    <Input className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by code/name…" />
-                  </div>
-                  <Button variant="outline" onClick={() => setQ("")}>
-                    Clear
-                  </Button>
-                </div>
-              </div>
-
-              <div className="md:col-span-3">
-                <Label>Include inactive</Label>
-                <div className="mt-2 flex items-center justify-between rounded-xl border p-3">
-                  <div className="text-sm text-zc-muted">Show inactive</div>
-                  <Switch checked={includeInactive} onCheckedChange={setIncludeInactive} />
-                </div>
-              </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">Branch scoped</Badge>
+              <Badge variant="secondary">Draft: {stats.draft}</Badge>
+              <Badge variant="warning">In review: {stats.review}</Badge>
+              <Badge variant="secondary">Approved: {stats.approved}</Badge>
+              <Badge variant="ok">Published: {stats.published}</Badge>
+              <Badge variant="destructive">Retired: {stats.retired}</Badge>
             </div>
-
-            <Separator />
-
-            {loading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : (
-              <div className="rounded-xl border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[180px]">Code</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead className="w-[160px]">Status</TableHead>
-                      <TableHead className="w-[130px]">Active</TableHead>
-                      <TableHead className="w-[380px] text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {orderSets.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} className="py-10 text-center text-sm text-zc-muted">
-                          No order sets yet. Create one to start.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      orderSets.map((os) => (
-                        <TableRow key={os.id}>
-                          <TableCell className="font-mono text-xs">{os.code}</TableCell>
-                          <TableCell>
-                            <div className="font-medium">{os.name}</div>
-                            {os.description ? (
-                              <div className="mt-0.5 line-clamp-1 text-xs text-zc-muted">{os.description}</div>
-                            ) : null}
-                          </TableCell>
-                          <TableCell>{statusPill(os.lifecycleStatus, os.isActive)}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Switch checked={os.isActive !== false} onCheckedChange={(v) => toggleActive(os, v)} disabled={busy} />
-                              <span className="text-xs text-zc-muted">{os.isActive === false ? "No" : "Yes"}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex flex-wrap justify-end gap-2">
-                              <Button size="sm" variant="outline" onClick={() => openEdit(os)} disabled={busy}>
-                                <Settings2 className="mr-2 h-4 w-4" />
-                                Edit
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => openItems(os)} disabled={busy}>
-                                Manage items
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => openVersions(os)} disabled={busy}>
-                                Versions
-                              </Button>
-
-                              <Button size="sm" variant="outline" onClick={() => workflow(os, "submit")} disabled={busy}>
-                                Submit
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => workflow(os, "approve")} disabled={busy}>
-                                Approve
-                              </Button>
-                              <Button size="sm" onClick={() => workflow(os, "publish")} disabled={busy}>
-                                Publish
-                              </Button>
-                              <Button size="sm" variant="destructive" onClick={() => workflow(os, "retire")} disabled={busy}>
-                                Retire
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
           </CardContent>
         </Card>
 
-        {/* Create / Edit */}
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogContent className="max-w-[720px]">
-            <ModalHeader title={editing ? "Edit Order Set" : "Create Order Set"} description="Order sets provide quick ordering sets for specific contexts (ER, OPD, Protocols)." />
+        {/* Workspace */}
+        <Card>
+          <CardHeader className="py-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="text-base">Order Set Workspace</CardTitle>
+                <CardDescription>Create order sets and curate service items inside each set.</CardDescription>
+              </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <Label>Code</Label>
-                <Input className="mt-1 font-mono" value={code} onChange={(e) => setCode(e.target.value)} placeholder="ER_CHEST_PAIN" />
-              </div>
-              <div>
-                <Label>Name</Label>
-                <Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="ER Chest Pain Protocol" />
-              </div>
-              <div className="md:col-span-2">
-                <Label>Description</Label>
-                <Textarea className="mt-1" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="ECG + Troponin + CXR + IV line…" />
-              </div>
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
+                <TabsList className={cn("h-10 rounded-2xl border border-zc-border bg-zc-panel/20 p-1")}>
+                  <TabsTrigger
+                    value="orderSets"
+                    className={cn(
+                      "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
+                    )}
+                  >
+                    <Layers className="mr-2 h-4 w-4" />
+                    Order Sets
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="guide"
+                    className={cn(
+                      "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
+                    )}
+                  >
+                    <Wrench className="mr-2 h-4 w-4" />
+                    Guide
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
+          </CardHeader>
 
-            <DialogFooter className="mt-4">
-              <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={busy}>
-                Cancel
-              </Button>
-              <Button onClick={saveOrderSet} disabled={busy}>
-                {busy ? "Saving…" : "Save"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Items Drawer */}
-        <Dialog open={itemsOpen} onOpenChange={setItemsOpen}>
-          <DialogContent className={drawerClassName()}>
-            <div className="p-4">
-              <ModalHeader title={`Manage Items — ${activeSet?.code ?? ""}`} description="Add/remove services with quantity and order." />
-
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-                <div className="md:col-span-5">
-                  <div className="rounded-xl border p-3">
-                    <div className="text-sm font-semibold">Add item</div>
-
-                    <div className="mt-4">
-                      <Label>Search service</Label>
-                      <div className="relative mt-1">
-                        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-zc-muted" />
-                        <Input className="pl-8" value={svcQuery} onChange={(e) => setSvcQuery(e.target.value)} placeholder="Search service items…" />
-                      </div>
-                      <Select value={svcPickId} onValueChange={setSvcPickId}>
-                        <SelectTrigger className="mt-2">
-                          <SelectValue placeholder="Pick a service item" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {svcOptions.slice(0, 80).map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
-                              {s.code} — {s.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                      <div>
-                        <Label>Quantity</Label>
-                        <Input className="mt-1" type="number" value={qty} onChange={(e) => setQty(Number(e.target.value || "1"))} />
-                      </div>
-                      <div>
-                        <Label>Sort order</Label>
-                        <Input className="mt-1" type="number" value={sortOrder} onChange={(e) => setSortOrder(Number(e.target.value || "1"))} />
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex justify-end">
-                      <Button onClick={upsertItem} disabled={busy || !svcPickId}>
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add / Update
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="md:col-span-7">
-                  <div className="rounded-xl border">
-                    <div className="flex items-center justify-between p-3">
-                      <div>
-                        <div className="text-sm font-semibold">Items</div>
-                        <div className="text-xs text-zc-muted">Total: {items.length}</div>
-                      </div>
-                      <Badge variant="secondary" className="gap-2">
-                        <ClipboardList className="h-3.5 w-3.5" />
-                        {activeSet?.code}
-                      </Badge>
-                    </div>
-                    <Separator />
-                    <div className="max-h-[70vh] overflow-auto">
+          <CardContent className="pb-6">
+            <Tabs value={activeTab}>
+              <TabsContent value="orderSets" className="mt-0">
+                <div className="grid gap-4 lg:grid-cols-12">
+                  {/* Left list */}
+                  <div className="lg:col-span-5">
+                    <div className="rounded-xl border border-zc-border">
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Service</TableHead>
-                            <TableHead className="w-[90px]">Qty</TableHead>
-                            <TableHead className="w-[90px]">Order</TableHead>
-                            <TableHead className="w-[70px]" />
+                            <TableHead className="w-[160px]">Code</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead className="w-[140px]">Status</TableHead>
+                            <TableHead className="w-[56px]" />
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {items.length === 0 ? (
+                          {loading ? (
+                            Array.from({ length: 10 }).map((_, i) => (
+                              <TableRow key={i}>
+                                <TableCell colSpan={4}>
+                                  <Skeleton className="h-6 w-full" />
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : rows.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={4} className="py-10 text-center text-sm text-zc-muted">
-                                No items yet. Add one from the left.
+                              <TableCell colSpan={4}>
+                                <div className="flex items-center justify-center gap-3 py-10 text-sm text-zc-muted">
+                                  <Layers className="h-4 w-4" />
+                                  No order sets found. Create one to begin.
+                                </div>
                               </TableCell>
                             </TableRow>
                           ) : (
-                            items
-                              .slice()
-                              .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-                              .map((it) => (
-                                <TableRow key={it.id}>
-                                  <TableCell>
-                                    <div className="font-mono text-xs text-zc-muted">{it.serviceItem?.code || it.serviceItemId}</div>
-                                    <div className="font-medium">{it.serviceItem?.name || "Service item"}</div>
-                                  </TableCell>
-                                  <TableCell className="text-sm">{it.quantity ?? 1}</TableCell>
-                                  <TableCell className="text-sm">{it.sortOrder ?? ""}</TableCell>
-                                  <TableCell className="text-right">
-                                    <Button size="icon" variant="ghost" onClick={() => removeItem(it.serviceItemId)} disabled={busy} title="Remove">
-                                      <Trash2 className="h-4 w-4 text-rose-600" />
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                              ))
+                            rows.map((r) => (
+                              <TableRow
+                                key={r.id}
+                                className={cn("cursor-pointer", selectedId === r.id ? "bg-zc-panel/30" : "")}
+                                onClick={() => setSelectedId(r.id)}
+                              >
+                                <TableCell className="font-mono text-xs">
+                                  <div className="flex flex-col gap-1">
+                                    <span className="font-semibold text-zc-text">{r.code}</span>
+                                    <span className="text-[11px] text-zc-muted">v{r.version ?? 1}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex flex-col gap-1">
+                                    <span className="font-semibold text-zc-text">{r.name}</span>
+                                    <span className="text-xs text-zc-muted">
+                                      Items: <span className="font-semibold text-zc-text">{r.items?.length || 0}</span>{" "}
+                                      • Context: <span className="font-semibold text-zc-text">{r.context || "—"}</span>
+                                    </span>
+                                  </div>
+                                </TableCell>
+                                <TableCell>{statusBadge(r.status)}</TableCell>
+                                <TableCell onClick={(e) => e.stopPropagation()}>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-[220px]">
+                                      <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem onClick={() => openEdit(r)}>
+                                        <Wrench className="mr-2 h-4 w-4" />
+                                        Edit order set
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          setSelectedId(r.id);
+                                          setItemsOpen(true);
+                                        }}
+                                      >
+                                        <Plus className="mr-2 h-4 w-4" />
+                                        Manage items
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => openVersions(r)}>
+                                        <Eye className="mr-2 h-4 w-4" />
+                                        View versions
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem onClick={() => workflow(r, "submit")}>
+                                        <Send className="mr-2 h-4 w-4" />
+                                        Submit for review
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => workflow(r, "approve")}>
+                                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                                        Approve
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => workflow(r, "publish")}>
+                                        <UploadCloud className="mr-2 h-4 w-4" />
+                                        Publish
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => workflow(r, "retire")}>
+                                        <Archive className="mr-2 h-4 w-4" />
+                                        Retire
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
+                              </TableRow>
+                            ))
                           )}
                         </TableBody>
                       </Table>
+
+                      <div className="flex flex-col gap-3 border-t border-zc-border p-4 md:flex-row md:items-center md:justify-between">
+                        <div className="text-sm text-zc-muted">
+                          Total: <span className="font-semibold text-zc-text">{rows.length}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button variant="outline" size="sm" className="gap-2" asChild>
+                            <Link href="/superadmin/infrastructure/service-library">
+                              Service Library <ExternalLink className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                          <Button variant="outline" size="sm" className="gap-2" asChild>
+                            <Link href="/superadmin/infrastructure/service-catalogues">
+                              Service Catalogues <ExternalLink className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
                     </div>
                   </div>
+
+                  {/* Right detail */}
+                  <div className="lg:col-span-7">
+                    {!selected ? (
+                      <Card className="border-zc-border">
+                        <CardHeader className="py-4">
+                          <CardTitle className="text-base">Select an order set</CardTitle>
+                          <CardDescription>Pick an order set from the left list to view details and manage items.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 text-sm text-zc-muted">
+                            Tip: create separate order sets for common OPD bundles (CBC+CRP, Fever panel) and IPD admission bundles.
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      <OrderSetDetail
+                        branchId={branchId}
+                        departments={departments}
+                        row={selected}
+                        busy={busy}
+                        onEdit={() => openEdit(selected)}
+                        onManageItems={() => setItemsOpen(true)}
+                        onVersions={() => openVersions(selected)}
+                        onWorkflow={(a) => workflow(selected, a)}
+                        onAfterChange={() => loadOrderSets(false)}
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
+              </TabsContent>
 
-              <DialogFooter className="mt-4">
-                <Button variant="outline" onClick={() => setItemsOpen(false)} disabled={busy}>
-                  Close
-                </Button>
-              </DialogFooter>
-            </div>
-          </DialogContent>
-        </Dialog>
+              <TabsContent value="guide" className="mt-0">
+                <Card className="border-zc-border">
+                  <CardHeader className="py-4">
+                    <CardTitle className="text-base">How to use Order Sets</CardTitle>
+                    <CardDescription>Order sets are “one-click bundles” for doctors and nurses.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                          <Badge variant="ok">1</Badge> Create order set (branch scoped)
+                        </div>
+                        <div className="mt-1 text-sm text-zc-muted">
+                          Use clear codes like <span className="font-mono font-semibold text-zc-text">OPD-FEVER</span>,{" "}
+                          <span className="font-mono font-semibold text-zc-text">IPD-ADMISSION</span>.
+                        </div>
+                      </div>
 
-        {/* Versions */}
-        <Dialog open={versionsOpen} onOpenChange={setVersionsOpen}>
-          <DialogContent className="max-w-[820px]">
-            <ModalHeader title="Order Set Versions" description="Versions are created on publish for auditability." />
-            <div className="rounded-xl border">
+                      <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                          <Badge variant="ok">2</Badge> Add items with quantities
+                        </div>
+                        <div className="mt-1 text-sm text-zc-muted">
+                          Example: <span className="font-semibold">IV fluids</span> quantity 2, <span className="font-semibold">CBC</span> quantity 1.
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                          <Badge variant="ok">3</Badge> Publish (version snapshot)
+                        </div>
+                        <div className="mt-1 text-sm text-zc-muted">
+                          Publishing creates a snapshot for audit. Downstream ordering should use <span className="font-semibold">PUBLISHED</span>.
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                          <Badge variant="ok">4</Badge> Billing readiness
+                        </div>
+                        <div className="mt-1 text-sm text-zc-muted">
+                          Order sets drive ordering speed. Billing still depends on Service ↔ Charge mapping + Tariffs (GoLive).
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                        <AlertTriangle className="h-4 w-4 text-zc-warn" />
+                        Avoid confusion
+                      </div>
+                      <div className="mt-1 text-sm text-zc-muted">
+                        Keep order sets clinical/use-case driven. Don’t overload with hundreds of items; create multiple focused sets.
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Create/Edit modal */}
+      <OrderSetEditModal
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        mode={editMode}
+        branchId={branchId}
+        departments={departments}
+        editing={editing}
+        onSaved={async () => {
+          toast({ title: "Saved", description: "Order set saved successfully." });
+          await loadOrderSets(false);
+        }}
+      />
+
+      {/* Items drawer */}
+      <OrderSetItemsDrawer
+        open={itemsOpen}
+        onOpenChange={setItemsOpen}
+        branchId={branchId}
+        orderSet={selected}
+        onSaved={async () => {
+          toast({ title: "Updated", description: "Order set items updated." });
+          await loadOrderSets(false);
+        }}
+      />
+
+      {/* Versions modal */}
+      <Dialog open={versionsOpen} onOpenChange={setVersionsOpen}>
+        <DialogContent className="sm:max-w-[860px]">
+          <ModalHeader
+            title="Order Set Versions"
+            description="Each publish creates a snapshot. Use this for audit and rollback planning."
+            onClose={() => setVersionsOpen(false)}
+          />
+
+          <div className="grid gap-4">
+            <div className="rounded-xl border border-zc-border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[140px]">Version</TableHead>
-                    <TableHead>Created at</TableHead>
-                    <TableHead>Note</TableHead>
+                    <TableHead className="w-[90px]">Version</TableHead>
+                    <TableHead className="w-[140px]">Status</TableHead>
+                    <TableHead className="w-[200px]">Effective From</TableHead>
+                    <TableHead className="w-[200px]">Effective To</TableHead>
+                    <TableHead className="w-[110px]" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {versions.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={3} className="py-10 text-center text-sm text-zc-muted">
-                        No versions found.
+                      <TableCell colSpan={5}>
+                        <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
+                          <Eye className="h-4 w-4" />
+                          No versions found (publish creates versions).
+                        </div>
                       </TableCell>
                     </TableRow>
                   ) : (
                     versions.map((v) => (
                       <TableRow key={v.id}>
-                        <TableCell className="font-mono text-xs">{v.versionNo ?? "-"}</TableCell>
-                        <TableCell className="text-sm">{v.createdAt ? new Date(v.createdAt).toLocaleString() : "-"}</TableCell>
-                        <TableCell className="text-sm">{v.note ?? "-"}</TableCell>
+                        <TableCell className="font-mono text-xs font-semibold">v{v.version}</TableCell>
+                        <TableCell>{statusBadge(v.status)}</TableCell>
+                        <TableCell className="text-sm text-zc-muted">{fmtDateTime(v.effectiveFrom)}</TableCell>
+                        <TableCell className="text-sm text-zc-muted">{fmtDateTime(v.effectiveTo || null)}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-2"
+                            onClick={() => {
+                              setSnapshotPayload(v.snapshot);
+                              setSnapshotOpen(true);
+                            }}
+                          >
+                            <Eye className="h-4 w-4" />
+                            Snapshot
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))
                   )}
                 </TableBody>
               </Table>
             </div>
-            <DialogFooter className="mt-4">
+
+            <DialogFooter>
               <Button variant="outline" onClick={() => setVersionsOpen(false)}>
                 Close
               </Button>
             </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Snapshot modal */}
+      <Dialog open={snapshotOpen} onOpenChange={setSnapshotOpen}>
+        <DialogContent className="sm:max-w-[980px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-4 w-4 text-zc-accent" />
+              Version Snapshot
+            </DialogTitle>
+            <DialogDescription>Read-only JSON snapshot stored at publish time.</DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+            <pre className="max-h-[60vh] overflow-auto text-xs leading-relaxed text-zc-text">
+              {JSON.stringify(snapshotPayload ?? {}, null, 2)}
+            </pre>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSnapshotOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            Detail Right Panel                               */
+/* -------------------------------------------------------------------------- */
+
+function OrderSetDetail({
+  branchId,
+  departments,
+  row,
+  busy,
+  onEdit,
+  onManageItems,
+  onVersions,
+  onWorkflow,
+}: {
+  branchId: string;
+  departments: DepartmentRow[];
+  row: OrderSetRow;
+  busy: boolean;
+  onEdit: () => void;
+  onManageItems: () => void;
+  onVersions: () => void;
+  onWorkflow: (a: "submit" | "approve" | "publish" | "retire") => void;
+  onAfterChange: () => void;
+}) {
+  void branchId;
+  const dep = row.departmentId ? departments.find((d) => d.id === row.departmentId) : null;
+
+  return (
+    <div className="grid gap-4">
+      <Card className="border-zc-border">
+        <CardHeader className="py-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <CardTitle className="text-base">
+                <span className="font-mono">{row.code}</span> • {row.name}
+              </CardTitle>
+              <CardDescription>
+                {statusBadge(row.status)} <span className="mx-2 text-zc-muted">•</span>
+                Context: <span className="font-semibold text-zc-text">{row.context || "—"}</span>{" "}
+                <span className="mx-2 text-zc-muted">•</span>
+                Version: <span className="font-semibold text-zc-text">v{row.version ?? 1}</span>
+              </CardDescription>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" className="gap-2" onClick={onEdit} disabled={busy}>
+                <Wrench className="h-4 w-4" />
+                Edit
+              </Button>
+              <Button variant="primary" className="gap-2" onClick={onManageItems} disabled={busy}>
+                <Plus className="h-4 w-4" />
+                Manage Items
+              </Button>
+              <Button variant="outline" className="gap-2" onClick={onVersions} disabled={busy}>
+                <Eye className="h-4 w-4" />
+                Versions
+              </Button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="gap-2" disabled={busy}>
+                    Workflow <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-[220px]">
+                  <DropdownMenuLabel>Workflow actions</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onWorkflow("submit")}>
+                    <Send className="mr-2 h-4 w-4" />
+                    Submit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onWorkflow("approve")}>
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    Approve
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onWorkflow("publish")}>
+                    <UploadCloud className="mr-2 h-4 w-4" />
+                    Publish
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onWorkflow("retire")}>
+                    <Archive className="mr-2 h-4 w-4" />
+                    Retire
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="grid gap-4">
+          {row.description ? (
+            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 text-sm text-zc-muted">
+              {row.description}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-zc-border bg-zc-panel/5 p-4 text-sm text-zc-muted">
+              No description. Add one to help admins understand the purpose of this order set.
+            </div>
+          )}
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+              <div className="text-xs font-semibold text-zc-muted">Department</div>
+              <div className="mt-1 text-sm font-semibold text-zc-text">{dep ? `${dep.code} • ${dep.name}` : "—"}</div>
+              <div className="mt-2 text-xs text-zc-muted">Context: {row.context || "—"}</div>
+            </div>
+
+            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+              <div className="text-xs font-semibold text-zc-muted">Effective</div>
+              <div className="mt-1 text-sm font-semibold text-zc-text">
+                {fmtDateTime(row.effectiveFrom)} → {fmtDateTime(row.effectiveTo || null)}
+              </div>
+              <div className="mt-2 text-xs text-zc-muted">Created: {fmtDateTime(row.createdAt || null)}</div>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-zc-text">Items</div>
+              <div className="text-sm text-zc-muted">{row.items?.length || 0} services in this order set.</div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" className="gap-2" asChild>
+                <Link href="/superadmin/infrastructure/service-library">
+                  Service Library <ExternalLink className="h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-zc-border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[180px]">Service</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="w-[110px]">Qty</TableHead>
+                  <TableHead className="w-[120px]">Active</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(row.items || []).length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4}>
+                      <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
+                        <AlertTriangle className="h-4 w-4 text-zc-warn" />
+                        No items yet. Use “Manage Items”.
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  (row.items || []).slice(0, 12).map((it) => (
+                    <TableRow key={it.id}>
+                      <TableCell className="font-mono text-xs font-semibold">
+                        {it.serviceItem?.code || it.serviceItemId}
+                      </TableCell>
+                      <TableCell className="text-sm text-zc-muted">{it.serviceItem?.name || "—"}</TableCell>
+                      <TableCell className="text-sm text-zc-muted">{it.quantity ?? 1}</TableCell>
+                      <TableCell>
+                        {it.isActive ? <Badge variant="ok">YES</Badge> : <Badge variant="secondary">NO</Badge>}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {(row.items || []).length > 12 ? (
+            <div className="text-xs text-zc-muted">
+              Showing 12 of {row.items?.length}. Open “Manage Items” to view all and edit.
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Create/Edit Modal                              */
+/* -------------------------------------------------------------------------- */
+
+function OrderSetEditModal({
+  open,
+  onOpenChange,
+  mode,
+  branchId,
+  departments,
+  editing,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  mode: "create" | "edit";
+  branchId: string;
+  departments: DepartmentRow[];
+  editing: OrderSetRow | null;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = React.useState(false);
+
+  const [form, setForm] = React.useState<any>({
+    code: "",
+    name: "",
+    description: "",
+    departmentId: "",
+    context: "",
+  });
+
+  React.useEffect(() => {
+    if (!open) return;
+    if (mode === "edit" && editing) {
+      setForm({
+        code: editing.code || "",
+        name: editing.name || "",
+        description: editing.description || "",
+        departmentId: editing.departmentId || "",
+        context: editing.context || "",
+      });
+    } else {
+      setForm({
+        code: "",
+        name: "",
+        description: "",
+        departmentId: "",
+        context: "",
+      });
+    }
+  }, [open, mode, editing]);
+
+  function patch(p: Partial<any>) {
+    setForm((prev: any) => ({ ...prev, ...p }));
+  }
+
+  async function save() {
+    if (!branchId) return;
+
+    const payload: any = {
+      code: String(form.code || "").trim(),
+      name: String(form.name || "").trim(),
+      description: form.description?.trim() ? String(form.description).trim() : null,
+      departmentId: form.departmentId ? form.departmentId : null,
+      context: form.context ? form.context : null,
+    };
+
+    if (!payload.code || !payload.name) {
+      toast({ title: "Missing fields", description: "Code and Name are required." });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      if (mode === "create") {
+        await apiFetch(`/api/infrastructure/order-sets?${buildQS({ branchId })}`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        if (!editing?.id) throw new Error("Invalid editing row");
+        await apiFetch(`/api/infrastructure/order-sets/${encodeURIComponent(editing.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+      }
+
+      onOpenChange(false);
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={drawerClassName()}>
+        <ModalHeader
+          title={mode === "create" ? "New Order Set" : "Edit Order Set"}
+          description="Order sets are branch-scoped. Keep them clinically focused (one use-case per set)."
+          onClose={() => onOpenChange(false)}
+        />
+
+        <div className="px-6 pb-6 grid gap-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Code</Label>
+              <Input value={form.code || ""} onChange={(e) => patch({ code: e.target.value })} placeholder="e.g., OPD-FEVER" />
+            </div>
+            <div className="grid gap-2">
+              <Label>Name</Label>
+              <Input value={form.name || ""} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g., OPD Fever Panel" />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Department (optional)</Label>
+              <Select value={form.departmentId || ""} onValueChange={(v) => patch({ departmentId: v === "none" ? "" : v })}>
+                <SelectTrigger className="h-10">
+                  <SelectValue placeholder="Select department (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {departments.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.code} • {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Context (optional)</Label>
+              <Select value={form.context || ""} onValueChange={(v) => patch({ context: v === "none" ? "" : v })}>
+                <SelectTrigger className="h-10">
+                  <SelectValue placeholder="Select context (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="OPD">OPD</SelectItem>
+                  <SelectItem value="IPD">IPD</SelectItem>
+                  <SelectItem value="ER">ER</SelectItem>
+                  <SelectItem value="OT">OT</SelectItem>
+                  <SelectItem value="DAYCARE">DAYCARE</SelectItem>
+                  <SelectItem value="TELECONSULT">TELECONSULT</SelectItem>
+                  <SelectItem value="HOMECARE">HOMECARE</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2 md:col-span-2">
+              <Label>Description (optional)</Label>
+              <Textarea
+                value={form.description || ""}
+                onChange={(e) => patch({ description: e.target.value })}
+                placeholder="Explain when and why this order set is used…"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button onClick={save} disabled={saving}>
+              {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               Items Drawer                                  */
+/* -------------------------------------------------------------------------- */
+
+function OrderSetItemsDrawer({
+  open,
+  onOpenChange,
+  branchId,
+  orderSet,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  orderSet: OrderSetRow | null;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+
+  const [loading, setLoading] = React.useState(false);
+  const [detail, setDetail] = React.useState<OrderSetRow | null>(null);
+
+  // add/search
+  const [svcQ, setSvcQ] = React.useState("");
+  const [svcLoading, setSvcLoading] = React.useState(false);
+  const [svcRows, setSvcRows] = React.useState<ServiceItemRow[]>([]);
+  const [pickedSvc, setPickedSvc] = React.useState<ServiceItemRow | null>(null);
+
+  const [quantity, setQuantity] = React.useState<string>("1");
+  const [sortOrder, setSortOrder] = React.useState<string>("0");
+  const [isActive, setIsActive] = React.useState<boolean>(true);
+  const [notes, setNotes] = React.useState<string>("");
+
+  React.useEffect(() => {
+    if (!open) return;
+    setDetail(null);
+    setSvcQ("");
+    setSvcRows([]);
+    setPickedSvc(null);
+    setQuantity("1");
+    setSortOrder("0");
+    setIsActive(true);
+    setNotes("");
+    void loadDetail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, orderSet?.id]);
+
+  async function loadDetail() {
+    if (!orderSet?.id) return;
+    setLoading(true);
+    try {
+      const d = await apiFetch<OrderSetRow>(`/api/infrastructure/order-sets/${encodeURIComponent(orderSet.id)}`);
+      setDetail(d || null);
+    } catch (e: any) {
+      toast({ title: "Failed to load order set", description: e?.message || "Request failed", variant: "destructive" as any });
+      setDetail(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function searchServices(query: string) {
+    if (!branchId) return;
+    setSvcLoading(true);
+    try {
+      const list =
+        (await apiFetch<ServiceItemRow[]>(
+          `/api/infrastructure/services?${buildQS({
+            branchId,
+            q: query.trim() || undefined,
+            includeInactive: "false",
+          })}`,
+        )) || [];
+
+      // keep list clean: billable + published services are best candidates for order sets
+      const filtered = list.filter((r) => {
+        const billableOk = r.isBillable === undefined ? true : Boolean(r.isBillable);
+        const publishedOk = r.lifecycleStatus ? String(r.lifecycleStatus).toUpperCase() === "PUBLISHED" : true;
+        return billableOk && publishedOk;
+      });
+
+      setSvcRows(filtered.slice(0, 80));
+    } catch (e: any) {
+      toast({ title: "Service search failed", description: e?.message || "Request failed", variant: "destructive" as any });
+      setSvcRows([]);
+    } finally {
+      setSvcLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => void searchServices(svcQ), 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [svcQ, open]);
+
+  async function upsertItem() {
+    if (!orderSet?.id || !pickedSvc?.id) return;
+
+    const qty = Number(quantity);
+    const sort = Number(sortOrder);
+
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast({ title: "Invalid quantity", description: "Quantity must be a positive number." });
+      return;
+    }
+
+    const payload: any = {
+      serviceItemId: pickedSvc.id,
+      quantity: qty,
+      sortOrder: Number.isFinite(sort) ? sort : 0,
+      isActive: Boolean(isActive),
+      notes: notes.trim() ? notes.trim() : null,
+    };
+
+    setLoading(true);
+    try {
+      await apiFetch(`/api/infrastructure/order-sets/${encodeURIComponent(orderSet.id)}/items`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      toast({ title: "Item saved", description: "Service item added/updated in order set." });
+
+      setPickedSvc(null);
+      setQuantity("1");
+      setSortOrder("0");
+      setIsActive(true);
+      setNotes("");
+
+      await loadDetail();
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function removeItem(serviceItemId: string) {
+    if (!orderSet?.id) return;
+    const ok = window.confirm("Remove this service from the order set?");
+    if (!ok) return;
+
+    setLoading(true);
+    try {
+      await apiFetch(
+        `/api/infrastructure/order-sets/${encodeURIComponent(orderSet.id)}/items/${encodeURIComponent(serviceItemId)}`,
+        { method: "DELETE" },
+      );
+      toast({ title: "Removed", description: "Service removed from order set." });
+      await loadDetail();
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Remove failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function quickToggle(it: OrderSetItemRow, nextActive: boolean) {
+    if (!orderSet?.id) return;
+    setLoading(true);
+    try {
+      await apiFetch(`/api/infrastructure/order-sets/${encodeURIComponent(orderSet.id)}/items`, {
+        method: "POST",
+        body: JSON.stringify({
+          serviceItemId: it.serviceItemId,
+          quantity: it.quantity ?? 1,
+          sortOrder: it.sortOrder ?? 0,
+          isActive: nextActive,
+          notes: it.notes ?? null,
+        }),
+      });
+      await loadDetail();
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Update failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function quickQty(it: OrderSetItemRow, nextQty: number) {
+    if (!orderSet?.id) return;
+    setLoading(true);
+    try {
+      await apiFetch(`/api/infrastructure/order-sets/${encodeURIComponent(orderSet.id)}/items`, {
+        method: "POST",
+        body: JSON.stringify({
+          serviceItemId: it.serviceItemId,
+          quantity: nextQty,
+          sortOrder: it.sortOrder ?? 0,
+          isActive: it.isActive,
+          notes: it.notes ?? null,
+        }),
+      });
+      await loadDetail();
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Update failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function quickSort(it: OrderSetItemRow, nextSort: number) {
+    if (!orderSet?.id) return;
+    setLoading(true);
+    try {
+      await apiFetch(`/api/infrastructure/order-sets/${encodeURIComponent(orderSet.id)}/items`, {
+        method: "POST",
+        body: JSON.stringify({
+          serviceItemId: it.serviceItemId,
+          quantity: it.quantity ?? 1,
+          sortOrder: nextSort,
+          isActive: it.isActive,
+          notes: it.notes ?? null,
+        }),
+      });
+      await loadDetail();
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Update failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const items = detail?.items || [];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={drawerClassName()}>
+        <ModalHeader
+          title={`Manage Items • ${orderSet?.code || ""}`}
+          description="Add services with quantity. Keep the bundle focused and workflow-approved."
+          onClose={() => onOpenChange(false)}
+        />
+
+        <div className="px-6 pb-6 grid gap-6">
+          {/* Add section */}
+          <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 grid gap-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-zc-text">Add / Update Item</div>
+                <div className="text-xs text-zc-muted">Search billable published services and add them with quantities.</div>
+              </div>
+              <Button variant="outline" size="sm" className="gap-2" asChild>
+                <Link href="/superadmin/infrastructure/service-library">
+                  Service Library <ExternalLink className="h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Find Service</Label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
+                <Input
+                  value={svcQ}
+                  onChange={(e) => setSvcQ(e.target.value)}
+                  placeholder="Search by code/name…"
+                  className="pl-10"
+                />
+              </div>
+
+              <div className="rounded-xl border border-zc-border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[180px]">Code</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead className="w-[140px]">Charge Unit</TableHead>
+                      <TableHead className="w-[120px]">Pick</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {svcLoading ? (
+                      Array.from({ length: 8 }).map((_, i) => (
+                        <TableRow key={i}>
+                          <TableCell colSpan={4}>
+                            <Skeleton className="h-6 w-full" />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : svcRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4}>
+                          <div className="flex items-center justify-center gap-2 py-8 text-sm text-zc-muted">
+                            <AlertTriangle className="h-4 w-4 text-zc-warn" />
+                            No services found.
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      svcRows.map((s) => {
+                        const picked = pickedSvc?.id === s.id;
+                        return (
+                          <TableRow key={s.id} className={picked ? "bg-zc-panel/30" : ""}>
+                            <TableCell className="font-mono text-xs">
+                              <div className="flex flex-col gap-1">
+                                <span className="font-semibold text-zc-text">{s.code}</span>
+                                <span className="text-[11px] text-zc-muted">{String(s.id).slice(0, 8)}…</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col gap-1">
+                                <span className="font-semibold text-zc-text">{s.name}</span>
+                                <span className="text-xs text-zc-muted">{s.type || "—"}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="secondary">{s.chargeUnit || "—"}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Button variant={picked ? "primary" : "outline"} size="sm" onClick={() => setPickedSvc(s)}>
+                                {picked ? "Picked" : "Pick"}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="grid gap-2">
+                <Label>Quantity</Label>
+                <Input value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="1" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Sort Order</Label>
+                <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} placeholder="0" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Active</Label>
+                <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
+                  <Switch checked={isActive} onCheckedChange={setIsActive} />
+                  <div className="text-sm">
+                    <div className="font-semibold text-zc-text">{isActive ? "Active" : "Inactive"}</div>
+                    <div className="text-xs text-zc-muted">Controls usage</div>
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-2 md:col-span-1">
+                <Label>Notes (optional)</Label>
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g., fasting required / repeat x2 / clinician note"
+                  className="min-h-[42px]"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-zc-muted">
+                Selected:{" "}
+                <span className="font-mono font-semibold text-zc-text">{pickedSvc ? pickedSvc.code : "—"}</span>
+              </div>
+              <Button onClick={upsertItem} disabled={loading || !pickedSvc}>
+                {loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+                Save Item
+              </Button>
+            </div>
+          </div>
+
+          {/* Items list */}
+          <div className="grid gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-zc-text">Order Set Items</div>
+                <div className="text-xs text-zc-muted">
+                  Total: <span className="font-semibold text-zc-text">{items.length}</span>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" className="gap-2" onClick={loadDetail} disabled={loading}>
+                <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+                Reload
+              </Button>
+            </div>
+
+            <div className="rounded-xl border border-zc-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[180px]">Service</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="w-[120px]">Qty</TableHead>
+                    <TableHead className="w-[160px]">Sort</TableHead>
+                    <TableHead className="w-[120px]">Active</TableHead>
+                    <TableHead className="w-[120px]" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    Array.from({ length: 10 }).map((_, i) => (
+                      <TableRow key={i}>
+                        <TableCell colSpan={6}>
+                          <Skeleton className="h-6 w-full" />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : items.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6}>
+                        <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
+                          <AlertTriangle className="h-4 w-4 text-zc-warn" />
+                          No items yet.
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    items.map((it) => (
+                      <TableRow key={it.id}>
+                        <TableCell className="font-mono text-xs">
+                          <div className="flex flex-col gap-1">
+                            <span className="font-semibold text-zc-text">{it.serviceItem?.code || it.serviceItemId}</span>
+                            <span className="text-[11px] text-zc-muted">{String(it.serviceItemId).slice(0, 8)}…</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-zc-muted">{it.serviceItem?.name || "—"}</TableCell>
+                        <TableCell>
+                          <Input
+                            className="h-9 w-[90px]"
+                            defaultValue={String(it.quantity ?? 1)}
+                            onBlur={(e) => {
+                              const next = Number(e.target.value);
+                              if (Number.isFinite(next) && next > 0 && next !== it.quantity) quickQty(it, next);
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              className="h-9 w-[90px]"
+                              defaultValue={String(it.sortOrder ?? 0)}
+                              onBlur={(e) => {
+                                const next = Number(e.target.value);
+                                if (Number.isFinite(next) && next !== it.sortOrder) quickSort(it, next);
+                              }}
+                            />
+                            <span className="text-xs text-zc-muted">(blur)</span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-2"
+                            onClick={() => quickToggle(it, !it.isActive)}
+                          >
+                            {it.isActive ? <Badge variant="ok">YES</Badge> : <Badge variant="secondary">NO</Badge>}
+                          </Button>
+                        </TableCell>
+                        <TableCell>
+                          <Button variant="outline" size="sm" className="gap-2" onClick={() => removeItem(it.serviceItemId)}>
+                            <Trash2 className="h-4 w-4" />
+                            Remove
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="text-xs text-zc-muted">
+              Note: quantities will be sent to ordering (later) as default counts. Clinicians can adjust at order-time.
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

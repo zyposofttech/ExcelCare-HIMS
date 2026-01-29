@@ -318,13 +318,58 @@ exports.Prisma.AssetScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
-exports.Prisma.TariffPlanScalarFieldEnum = {
+exports.Prisma.TaxCodeScalarFieldEnum = {
   id: 'id',
   branchId: 'branchId',
   code: 'code',
   name: 'name',
+  taxType: 'taxType',
+  ratePercent: 'ratePercent',
+  components: 'components',
+  hsnSac: 'hsnSac',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.PayerScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  code: 'code',
+  name: 'name',
+  kind: 'kind',
+  isActive: 'isActive',
+  meta: 'meta',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.PayerContractScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  payerId: 'payerId',
+  code: 'code',
+  name: 'name',
   status: 'status',
-  payerType: 'payerType',
+  startAt: 'startAt',
+  endAt: 'endAt',
+  terms: 'terms',
+  meta: 'meta',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.TariffPlanScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  kind: 'kind',
+  status: 'status',
+  code: 'code',
+  name: 'name',
+  payerId: 'payerId',
+  contractId: 'contractId',
+  currency: 'currency',
+  isTaxInclusive: 'isTaxInclusive',
   effectiveFrom: 'effectiveFrom',
   effectiveTo: 'effectiveTo',
   createdAt: 'createdAt',
@@ -344,8 +389,15 @@ exports.Prisma.ServiceCatalogItemScalarFieldEnum = {
 exports.Prisma.TariffRateScalarFieldEnum = {
   id: 'id',
   tariffPlanId: 'tariffPlanId',
-  serviceCode: 'serviceCode',
+  chargeMasterItemId: 'chargeMasterItemId',
   amount: 'amount',
+  taxCodeId: 'taxCodeId',
+  isTaxInclusive: 'isTaxInclusive',
+  rules: 'rules',
+  effectiveFrom: 'effectiveFrom',
+  effectiveTo: 'effectiveTo',
+  version: 'version',
+  createdByUserId: 'createdByUserId',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 };
@@ -628,6 +680,11 @@ exports.Prisma.ChargeMasterItemScalarFieldEnum = {
   name: 'name',
   category: 'category',
   unit: 'unit',
+  chargeUnit: 'chargeUnit',
+  taxCodeId: 'taxCodeId',
+  isTaxInclusive: 'isTaxInclusive',
+  hsnSac: 'hsnSac',
+  billingPolicy: 'billingPolicy',
   isActive: 'isActive',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
@@ -643,6 +700,8 @@ exports.Prisma.ServiceItemScalarFieldEnum = {
   type: 'type',
   departmentId: 'departmentId',
   externalId: 'externalId',
+  procedureKind: 'procedureKind',
+  anesthesiaClass: 'anesthesiaClass',
   isOrderable: 'isOrderable',
   isActive: 'isActive',
   isBillable: 'isBillable',
@@ -671,6 +730,7 @@ exports.Prisma.ServiceItemScalarFieldEnum = {
   tatMinsStat: 'tatMinsStat',
   chargeUnit: 'chargeUnit',
   taxApplicability: 'taxApplicability',
+  taxCodeId: 'taxCodeId',
   billingPolicy: 'billingPolicy',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
@@ -811,8 +871,23 @@ exports.Prisma.ServicePackageScalarFieldEnum = {
   description: 'description',
   status: 'status',
   version: 'version',
+  pricingMode: 'pricingMode',
+  pricingValue: 'pricingValue',
+  pricingPolicy: 'pricingPolicy',
+  billingChargeMasterItemId: 'billingChargeMasterItemId',
+  chargeUnit: 'chargeUnit',
+  taxCodeId: 'taxCodeId',
+  isTaxInclusive: 'isTaxInclusive',
   effectiveFrom: 'effectiveFrom',
   effectiveTo: 'effectiveTo',
+  createdByUserId: 'createdByUserId',
+  updatedByUserId: 'updatedByUserId',
+  submittedByUserId: 'submittedByUserId',
+  submittedAt: 'submittedAt',
+  approvedByUserId: 'approvedByUserId',
+  approvedAt: 'approvedAt',
+  publishedByUserId: 'publishedByUserId',
+  publishedAt: 'publishedAt',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 };
@@ -839,6 +914,7 @@ exports.Prisma.ServicePackageVersionScalarFieldEnum = {
   version: 'version',
   status: 'status',
   snapshot: 'snapshot',
+  createdByUserId: 'createdByUserId',
   effectiveFrom: 'effectiveFrom',
   effectiveTo: 'effectiveTo',
   createdAt: 'createdAt',
@@ -851,12 +927,21 @@ exports.Prisma.OrderSetScalarFieldEnum = {
   code: 'code',
   name: 'name',
   description: 'description',
+  departmentId: 'departmentId',
   context: 'context',
   channel: 'channel',
   status: 'status',
   version: 'version',
   effectiveFrom: 'effectiveFrom',
   effectiveTo: 'effectiveTo',
+  createdByUserId: 'createdByUserId',
+  updatedByUserId: 'updatedByUserId',
+  submittedByUserId: 'submittedByUserId',
+  submittedAt: 'submittedAt',
+  approvedByUserId: 'approvedByUserId',
+  approvedAt: 'approvedAt',
+  publishedByUserId: 'publishedByUserId',
+  publishedAt: 'publishedAt',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 };
@@ -869,6 +954,8 @@ exports.Prisma.OrderSetItemScalarFieldEnum = {
   diagnosticItemId: 'diagnosticItemId',
   packageId: 'packageId',
   quantity: 'quantity',
+  isOptional: 'isOptional',
+  rules: 'rules',
   sortOrder: 'sortOrder',
   isActive: 'isActive',
   createdAt: 'createdAt',
@@ -881,6 +968,7 @@ exports.Prisma.OrderSetVersionScalarFieldEnum = {
   version: 'version',
   status: 'status',
   snapshot: 'snapshot',
+  createdByUserId: 'createdByUserId',
   effectiveFrom: 'effectiveFrom',
   effectiveTo: 'effectiveTo',
   createdAt: 'createdAt',
@@ -992,6 +1080,9 @@ exports.Prisma.FixItTaskScalarFieldEnum = {
   branchId: 'branchId',
   type: 'type',
   status: 'status',
+  severity: 'severity',
+  entityType: 'entityType',
+  entityId: 'entityId',
   title: 'title',
   details: 'details',
   serviceItemId: 'serviceItemId',
@@ -1573,6 +1664,40 @@ exports.BedState = exports.$Enums.BedState = {
   MAINTENANCE: 'MAINTENANCE'
 };
 
+exports.TaxType = exports.$Enums.TaxType = {
+  GST: 'GST',
+  TDS: 'TDS',
+  OTHER: 'OTHER'
+};
+
+exports.PayerKind = exports.$Enums.PayerKind = {
+  CASH: 'CASH',
+  INSURANCE: 'INSURANCE',
+  TPA: 'TPA',
+  CORPORATE: 'CORPORATE',
+  GOVERNMENT: 'GOVERNMENT',
+  OTHER: 'OTHER'
+};
+
+exports.ContractStatus = exports.$Enums.ContractStatus = {
+  DRAFT: 'DRAFT',
+  ACTIVE: 'ACTIVE',
+  SUSPENDED: 'SUSPENDED',
+  EXPIRED: 'EXPIRED',
+  TERMINATED: 'TERMINATED'
+};
+
+exports.TariffPlanKind = exports.$Enums.TariffPlanKind = {
+  PRICE_LIST: 'PRICE_LIST',
+  PAYER_CONTRACT: 'PAYER_CONTRACT'
+};
+
+exports.TariffPlanStatus = exports.$Enums.TariffPlanStatus = {
+  DRAFT: 'DRAFT',
+  ACTIVE: 'ACTIVE',
+  RETIRED: 'RETIRED'
+};
+
 exports.ConsentScope = exports.$Enums.ConsentScope = {
   VIEW: 'VIEW',
   STORE: 'STORE',
@@ -1668,6 +1793,19 @@ exports.DowntimeStatus = exports.$Enums.DowntimeStatus = {
   CLOSED: 'CLOSED'
 };
 
+exports.ServiceChargeUnit = exports.$Enums.ServiceChargeUnit = {
+  PER_UNIT: 'PER_UNIT',
+  PER_VISIT: 'PER_VISIT',
+  PER_TEST: 'PER_TEST',
+  PER_HOUR: 'PER_HOUR',
+  PER_DAY: 'PER_DAY',
+  PER_SIDE: 'PER_SIDE',
+  PER_LEVEL: 'PER_LEVEL',
+  PER_SESSION: 'PER_SESSION',
+  PER_PROCEDURE: 'PER_PROCEDURE',
+  PER_PACKAGE: 'PER_PACKAGE'
+};
+
 exports.ServiceItemType = exports.$Enums.ServiceItemType = {
   DIAGNOSTIC_LAB: 'DIAGNOSTIC_LAB',
   DIAGNOSTIC_IMAGING: 'DIAGNOSTIC_IMAGING',
@@ -1686,17 +1824,6 @@ exports.ServiceLifecycleStatus = exports.$Enums.ServiceLifecycleStatus = {
   APPROVED: 'APPROVED',
   PUBLISHED: 'PUBLISHED',
   DEPRECATED: 'DEPRECATED'
-};
-
-exports.ServiceChargeUnit = exports.$Enums.ServiceChargeUnit = {
-  PER_UNIT: 'PER_UNIT',
-  PER_VISIT: 'PER_VISIT',
-  PER_TEST: 'PER_TEST',
-  PER_HOUR: 'PER_HOUR',
-  PER_DAY: 'PER_DAY',
-  PER_SIDE: 'PER_SIDE',
-  PER_LEVEL: 'PER_LEVEL',
-  PER_SESSION: 'PER_SESSION'
 };
 
 exports.TaxApplicability = exports.$Enums.TaxApplicability = {
@@ -1744,6 +1871,14 @@ exports.PackageStatus = exports.$Enums.PackageStatus = {
   RETIRED: 'RETIRED'
 };
 
+exports.PackagePricingMode = exports.$Enums.PackagePricingMode = {
+  COMPONENT_SUM: 'COMPONENT_SUM',
+  FIXED: 'FIXED',
+  DISCOUNT_PERCENT: 'DISCOUNT_PERCENT',
+  DISCOUNT_AMOUNT: 'DISCOUNT_AMOUNT',
+  CAP: 'CAP'
+};
+
 exports.PackageComponentType = exports.$Enums.PackageComponentType = {
   SERVICE_ITEM: 'SERVICE_ITEM',
   DIAGNOSTIC_ITEM: 'DIAGNOSTIC_ITEM',
@@ -1782,7 +1917,16 @@ exports.ExternalSystemType = exports.$Enums.ExternalSystemType = {
 };
 
 exports.FixItTaskType = exports.$Enums.FixItTaskType = {
-  SERVICE_CHARGE_MAPPING_MISSING: 'SERVICE_CHARGE_MAPPING_MISSING'
+  SERVICE_CHARGE_MAPPING_MISSING: 'SERVICE_CHARGE_MAPPING_MISSING',
+  SERVICE_AVAILABILITY_MISSING: 'SERVICE_AVAILABILITY_MISSING',
+  TARIFF_RATE_MISSING: 'TARIFF_RATE_MISSING',
+  TAX_CODE_MISSING: 'TAX_CODE_MISSING',
+  TAX_CODE_INACTIVE: 'TAX_CODE_INACTIVE',
+  PACKAGE_PRICING_MISSING: 'PACKAGE_PRICING_MISSING',
+  CHARGE_UNIT_MISMATCH: 'CHARGE_UNIT_MISMATCH',
+  CLONE_MISSING_SERVICE_ITEM: 'CLONE_MISSING_SERVICE_ITEM',
+  CLONE_MISSING_DIAGNOSTIC_ITEM: 'CLONE_MISSING_DIAGNOSTIC_ITEM',
+  CLONE_MISSING_CHARGE_MASTER_ITEM: 'CLONE_MISSING_CHARGE_MASTER_ITEM'
 };
 
 exports.FixItStatus = exports.$Enums.FixItStatus = {
@@ -1790,6 +1934,24 @@ exports.FixItStatus = exports.$Enums.FixItStatus = {
   IN_PROGRESS: 'IN_PROGRESS',
   RESOLVED: 'RESOLVED',
   DISMISSED: 'DISMISSED'
+};
+
+exports.FixItSeverity = exports.$Enums.FixItSeverity = {
+  BLOCKER: 'BLOCKER',
+  WARNING: 'WARNING',
+  INFO: 'INFO'
+};
+
+exports.FixItEntityType = exports.$Enums.FixItEntityType = {
+  SERVICE_ITEM: 'SERVICE_ITEM',
+  CHARGE_MASTER_ITEM: 'CHARGE_MASTER_ITEM',
+  TAX_CODE: 'TAX_CODE',
+  TARIFF_PLAN: 'TARIFF_PLAN',
+  TARIFF_RATE: 'TARIFF_RATE',
+  SERVICE_CATALOGUE: 'SERVICE_CATALOGUE',
+  SERVICE_PACKAGE: 'SERVICE_PACKAGE',
+  ORDER_SET: 'ORDER_SET',
+  DIAGNOSTIC_ITEM: 'DIAGNOSTIC_ITEM'
 };
 
 exports.BulkImportEntityType = exports.$Enums.BulkImportEntityType = {
@@ -2021,6 +2183,9 @@ exports.Prisma.ModelName = {
   Bed: 'Bed',
   Admission: 'Admission',
   Asset: 'Asset',
+  TaxCode: 'TaxCode',
+  Payer: 'Payer',
+  PayerContract: 'PayerContract',
   TariffPlan: 'TariffPlan',
   ServiceCatalogItem: 'ServiceCatalogItem',
   TariffRate: 'TariffRate',

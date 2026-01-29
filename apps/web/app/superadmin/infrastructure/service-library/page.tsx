@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { AppLink as Link } from "@/components/app-link";
 
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Dialog,
@@ -20,61 +23,66 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/use-toast";
 
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
-import { BookOpen, Link2, Plus, RefreshCw, Search, Trash2, Wrench } from "lucide-react";
+import {
+  AlertTriangle,
+  ClipboardList,
+  ExternalLink,
+  Filter,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Wrench,
+} from "lucide-react";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Types                                    */
 /* -------------------------------------------------------------------------- */
 
-type BranchRow = { id: string; code: string; name: string; city?: string | null };
+type BranchRow = { id: string; code: string; name: string; city: string };
+
+type ChargeMasterItemRow = {
+  id: string;
+  code: string;
+  name: string;
+  isActive?: boolean;
+};
+
+type ServiceChargeMappingRow = {
+  id: string;
+  serviceItemId: string;
+  chargeMasterItemId: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  chargeMasterItem?: ChargeMasterItemRow | null;
+};
 
 type ServiceItemRow = {
   id: string;
   branchId: string;
   code: string;
   name: string;
-  category?: string | null;
-  isActive?: boolean;
-};
-
-type CodeSetRow = {
-  id: string;
-  branchId: string;
-  code: string;
-  name: string;
-  description?: string | null;
-  kind?: string | null;
-  isActive?: boolean;
+  category: string;
+  unit?: string | null;
+  isOrderable: boolean;
+  isActive: boolean;
   createdAt?: string;
   updatedAt?: string;
-};
-
-type CodeEntryRow = {
-  id: string;
-  codeSetId: string;
-  code: string;
-  display: string;
-  description?: string | null;
-  status?: string | null;
-  meta?: any;
-};
-
-type MappingRow = {
-  id: string;
-  branchId: string;
-  serviceItemId: string;
-  codeEntryId: string;
-  isPrimary?: boolean;
-  meta?: any;
-  codeEntry?: CodeEntryRow | null;
-  serviceItem?: ServiceItemRow | null;
+  mappings?: ServiceChargeMappingRow[];
 };
 
 /* -------------------------------------------------------------------------- */
@@ -91,7 +99,6 @@ function readLS(key: string) {
     return null;
   }
 }
-
 function writeLS(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
@@ -111,6 +118,13 @@ function buildQS(params: Record<string, any>) {
   return usp.toString();
 }
 
+function fmtDateTime(v?: string | null) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
 function Skeleton({ className }: { className?: string }) {
   return <div className={cn("animate-pulse rounded-md bg-zc-panel/30", className)} />;
 }
@@ -126,6 +140,13 @@ function drawerClassName(extra?: string) {
   );
 }
 
+function modalClassName(extra?: string) {
+  return cn(
+    "rounded-2xl border border-indigo-200/50 dark:border-indigo-800/50 bg-zc-card shadow-2xl shadow-indigo-500/10",
+    extra,
+  );
+}
+
 function ModalHeader({
   title,
   description,
@@ -133,14 +154,14 @@ function ModalHeader({
 }: {
   title: string;
   description?: string;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
 }) {
   return (
     <>
       <DialogHeader>
         <DialogTitle className="flex items-center gap-3 text-indigo-700 dark:text-indigo-400">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/30">
-            {icon}
+            {icon ?? <Wrench className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
           </div>
           {title}
         </DialogTitle>
@@ -151,140 +172,126 @@ function ModalHeader({
   );
 }
 
+type MappingStatusFilter = "all" | "mapped" | "missing";
+type OrderableFilter = "all" | "yes" | "no";
+
 /* -------------------------------------------------------------------------- */
 /*                                   Page                                     */
 /* -------------------------------------------------------------------------- */
 
-export default function ServiceLibraryPage() {
+export default function SuperAdminServiceLibraryPage() {
   const { toast } = useToast();
 
-  const [busy, setBusy] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState<"services" | "guide">("services");
+  const [showFilters, setShowFilters] = React.useState(false);
+
   const [loading, setLoading] = React.useState(true);
+  const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
-  const [branchId, setBranchId] = React.useState<string | undefined>(undefined);
+  const [branchId, setBranchId] = React.useState<string>("");
 
-  const [activeTab, setActiveTab] = React.useState<"sets" | "entries" | "mappings">("sets");
+  const [allRows, setAllRows] = React.useState<ServiceItemRow[]>([]);
 
-  // Code sets
-  const [qSets, setQSets] = React.useState("");
-  const [includeInactiveSets, setIncludeInactiveSets] = React.useState(false);
-  const [codeSets, setCodeSets] = React.useState<CodeSetRow[]>([]);
+  // filters
+  const [q, setQ] = React.useState("");
+  const [includeInactive, setIncludeInactive] = React.useState(false);
+  const [category, setCategory] = React.useState<string | "all">("all");
+  const [mappingStatus, setMappingStatus] = React.useState<MappingStatusFilter>("all");
+  const [orderable, setOrderable] = React.useState<OrderableFilter>("all");
 
-  // Entries
-  const [codeSetId, setCodeSetId] = React.useState<string | undefined>(undefined);
-  const [qEntries, setQEntries] = React.useState("");
-  const [entries, setEntries] = React.useState<CodeEntryRow[]>([]);
+  // pagination (client-side)
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(50);
 
-  // Mappings
-  const [qMappings, setQMappings] = React.useState("");
-  const [mappings, setMappings] = React.useState<MappingRow[]>([]);
+  // dialogs
+  const [svcDialogOpen, setSvcDialogOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<ServiceItemRow | null>(null);
 
-  // Dialogs
-  const [setOpen, setSetOpen] = React.useState(false);
-  const [editingSet, setEditingSet] = React.useState<CodeSetRow | null>(null);
-  const [setCode, setSetCode] = React.useState("");
-  const [setName, setSetName] = React.useState("");
-  const [setKind, setSetKind] = React.useState("");
-  const [setDesc, setSetDesc] = React.useState("");
+  const mustSelectBranch = !branchId;
 
-  const [entryOpen, setEntryOpen] = React.useState(false);
-  const [editingEntry, setEditingEntry] = React.useState<CodeEntryRow | null>(null);
-  const [entryCode, setEntryCode] = React.useState("");
-  const [entryDisplay, setEntryDisplay] = React.useState("");
-  const [entryDesc, setEntryDesc] = React.useState("");
-  const [entryStatus, setEntryStatus] = React.useState("");
-  const [entryMeta, setEntryMeta] = React.useState("");
+  const categoryOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    (allRows || []).forEach((r) => {
+      const c = (r.category || "").trim();
+      if (c) set.add(c);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [allRows]);
 
-  const [mapOpen, setMapOpen] = React.useState(false);
-  const [mapSetId, setMapSetId] = React.useState<string | undefined>(undefined);
-  const [mapEntryId, setMapEntryId] = React.useState<string | undefined>(undefined);
-  const [mapIsPrimary, setMapIsPrimary] = React.useState(true);
-  const [svcQuery, setSvcQuery] = React.useState("");
-  const [svcOptions, setSvcOptions] = React.useState<ServiceItemRow[]>([]);
-  const [mapSvcId, setMapSvcId] = React.useState<string | undefined>(undefined);
-  const [mapMeta, setMapMeta] = React.useState("");
+  function currentMapping(r: ServiceItemRow): ServiceChargeMappingRow | null {
+    const ms = r.mappings || [];
+    // Prefer open mapping (effectiveTo null); else latest (already sorted desc effectiveFrom by backend)
+    const open = ms.find((m) => m && (m.effectiveTo === null || m.effectiveTo === undefined));
+    return open || ms[0] || null;
+  }
 
-  async function loadBranches() {
+  function isMapped(r: ServiceItemRow) {
+    const m = currentMapping(r);
+    return Boolean(m?.chargeMasterItemId && (m.effectiveTo === null || m.effectiveTo === undefined));
+  }
+
+  function mappingBadge(r: ServiceItemRow) {
+    const m = currentMapping(r);
+    if (!m || !m.chargeMasterItemId) return <Badge variant="destructive">MAPPING MISSING</Badge>;
+    if (m.effectiveTo) return <Badge variant="secondary">MAPPING CLOSED</Badge>;
+    const cmCode = m.chargeMasterItem?.code || "CHARGE";
+    return <Badge variant="ok">MAPPED • {cmCode}</Badge>;
+  }
+
+  async function loadBranches(): Promise<string | null> {
     const list = (await apiFetch<BranchRow[]>("/api/branches")) || [];
     setBranches(list);
 
     const stored = readLS(LS_BRANCH);
-    const first = list[0]?.id;
-    const next = (stored && list.some((b) => b.id === stored) ? stored : undefined) || first || undefined;
-
-    setBranchId(next);
+    const first = list[0]?.id || null;
+    const next = (stored && list.some((b) => b.id === stored) ? stored : null) || first;
     if (next) writeLS(LS_BRANCH, next);
+    setBranchId(next || "");
+    return next;
   }
 
-  async function loadCodeSets() {
-    if (!branchId) {
-      setCodeSets([]);
-      return;
+  async function loadServices(showToast = false) {
+    if (!branchId) return;
+    setErr(null);
+    setLoading(true);
+    try {
+      const resp = await apiFetch<ServiceItemRow[]>(
+        `/api/infrastructure/services?${buildQS({
+          branchId,
+          q: q.trim() || undefined,
+          includeInactive: includeInactive ? "true" : undefined,
+        })}`,
+      );
+      setAllRows(resp || []);
+      if (showToast) toast({ title: "Service library refreshed", description: "Loaded latest service items." });
+    } catch (e: any) {
+      const msg = e?.message || "Failed to load service items";
+      setErr(msg);
+      setAllRows([]);
+      if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
+    } finally {
+      setLoading(false);
     }
-    const qs = buildQS({ branchId, q: qSets.trim() || undefined, includeInactive: includeInactiveSets ? "true" : undefined });
-    const list = await apiFetch<CodeSetRow[]>(`/api/infrastructure/service-library/code-sets?${qs}`);
-    setCodeSets(list || []);
-
-    // keep selected code set sane
-    if (!codeSetId) {
-      const first = list?.[0]?.id;
-      if (first) setCodeSetId(first);
-    } else if (list && !list.some((s) => s.id === codeSetId)) {
-      setCodeSetId(list[0]?.id);
-    }
-
-    if (!mapSetId) {
-      const first = list?.[0]?.id;
-      if (first) setMapSetId(first);
-    } else if (list && !list.some((s) => s.id === mapSetId)) {
-      setMapSetId(list[0]?.id);
-    }
-  }
-
-  async function loadEntries() {
-    if (!codeSetId) {
-      setEntries([]);
-      return;
-    }
-    const qs = buildQS({ q: qEntries.trim() || undefined });
-    const list = await apiFetch<CodeEntryRow[]>(`/api/infrastructure/service-library/code-sets/${encodeURIComponent(codeSetId)}/entries?${qs}`);
-    setEntries(list || []);
-
-    if (!mapEntryId) {
-      const first = list?.[0]?.id;
-      if (first) setMapEntryId(first);
-    } else if (list && !list.some((e) => e.id === mapEntryId)) {
-      setMapEntryId(list[0]?.id);
-    }
-  }
-
-  async function loadMappings() {
-    if (!branchId) {
-      setMappings([]);
-      return;
-    }
-    const qs = buildQS({ branchId, q: qMappings.trim() || undefined, codeSetId: mapSetId || undefined });
-    const list = await apiFetch<MappingRow[]>(`/api/infrastructure/service-library/mappings?${qs}`);
-    setMappings(list || []);
   }
 
   async function refreshAll(showToast = false) {
-    setBusy(true);
     setErr(null);
+    setLoading(true);
     try {
-      await loadBranches();
-      await loadCodeSets();
-      await loadEntries();
-      await loadMappings();
-      if (showToast) toast({ title: "Refreshed", description: "Service library loaded successfully." });
+      const bid = branchId || (await loadBranches());
+      if (!bid) {
+        setLoading(false);
+        return;
+      }
+      await loadServices(false);
+      if (showToast) toast({ title: "Service Library ready", description: "Branch scope and service items are up to date." });
     } catch (e: any) {
-      const msg = e?.message || "Refresh failed.";
+      const msg = e?.message || "Refresh failed";
       setErr(msg);
       if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
     } finally {
-      setBusy(false);
       setLoading(false);
     }
   }
@@ -296,836 +303,938 @@ export default function ServiceLibraryPage() {
 
   React.useEffect(() => {
     if (!branchId) return;
-    writeLS(LS_BRANCH, branchId);
-    void loadCodeSets().catch(() => {});
+    setPage(1);
+    void loadServices(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId]);
-
-  React.useEffect(() => {
-    const t = setTimeout(() => void loadCodeSets().catch(() => {}), 250);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qSets, includeInactiveSets]);
-
-  React.useEffect(() => {
-    if (!codeSetId) return;
-    const t = setTimeout(() => void loadEntries().catch(() => {}), 250);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [codeSetId, qEntries]);
+  }, [branchId, includeInactive]);
 
   React.useEffect(() => {
     if (!branchId) return;
-    const t = setTimeout(() => void loadMappings().catch(() => {}), 250);
+    setPage(1);
+    const t = setTimeout(() => void loadServices(false), 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId, qMappings, mapSetId]);
+  }, [q]);
 
-  React.useEffect(() => {
-    if (!branchId) return;
-    if (!svcQuery.trim()) {
-      setSvcOptions([]);
-      return;
-    }
-    const t = setTimeout(async () => {
-      try {
-        const qs = buildQS({ branchId, q: svcQuery.trim() || undefined, includeInactive: "true" });
-        const list = await apiFetch<ServiceItemRow[]>(`/api/infrastructure/services?${qs}`);
-        setSvcOptions(list || []);
-      } catch {
-        setSvcOptions([]);
-      }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [svcQuery, branchId]);
+  async function onBranchChange(nextId: string) {
+    setBranchId(nextId);
+    writeLS(LS_BRANCH, nextId);
 
-  function resetSetForm(row?: CodeSetRow | null) {
-    setEditingSet(row || null);
-    setSetCode(row?.code || "");
-    setSetName(row?.name || "");
-    setSetKind(row?.kind || "");
-    setSetDesc(row?.description || "");
-  }
+    // reset filters
+    setQ("");
+    setIncludeInactive(false);
+    setCategory("all");
+    setMappingStatus("all");
+    setOrderable("all");
+    setPage(1);
 
-  function resetEntryForm(row?: CodeEntryRow | null) {
-    setEditingEntry(row || null);
-    setEntryCode(row?.code || "");
-    setEntryDisplay(row?.display || "");
-    setEntryDesc(row?.description || "");
-    setEntryStatus(row?.status || "");
-    setEntryMeta(row?.meta ? JSON.stringify(row.meta, null, 2) : "");
-  }
-
-  function resetMapForm() {
-    setMapEntryId(undefined);
-    setMapSvcId(undefined);
-    setSvcQuery("");
-    setSvcOptions([]);
-    setMapIsPrimary(true);
-    setMapMeta("");
-  }
-
-  async function saveCodeSet() {
-    if (!branchId) return;
-    const payload: any = {
-      code: setCode.trim(),
-      name: setName.trim(),
-      description: setDesc.trim() ? setDesc.trim() : null,
-      kind: setKind.trim() ? setKind.trim() : null,
-    };
-
+    setErr(null);
+    setLoading(true);
     try {
-      if (editingSet?.id) {
-        await apiFetch(`/api/infrastructure/service-library/code-sets/${encodeURIComponent(editingSet.id)}`, {
-          method: "PATCH",
-          body: JSON.stringify(payload),
-        });
-      } else {
-        await apiFetch(`/api/infrastructure/service-library/code-sets?branchId=${encodeURIComponent(branchId)}`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-      }
-
-      toast({ title: "Saved", description: "Code set saved successfully." });
-      setSetOpen(false);
-      await loadCodeSets();
+      await loadServices(false);
+      toast({ title: "Branch scope changed", description: "Loaded service items for selected branch." });
     } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Could not save code set.", variant: "destructive" as any });
+      const msg = e?.message || "Failed to load branch scope";
+      setErr(msg);
+      toast({ variant: "destructive", title: "Load failed", description: msg });
+    } finally {
+      setLoading(false);
     }
   }
 
-  async function saveEntry() {
-    if (!codeSetId) return;
-
-    let meta: any = undefined;
-    if (entryMeta.trim()) {
-      try {
-        meta = JSON.parse(entryMeta);
-      } catch {
-        toast({ title: "Invalid JSON", description: "Entry meta must be valid JSON.", variant: "destructive" as any });
-        return;
-      }
-    }
-
-    const payload: any = {
-      code: entryCode.trim(),
-      display: entryDisplay.trim(),
-      description: entryDesc.trim() ? entryDesc.trim() : null,
-      status: entryStatus.trim() ? entryStatus.trim() : null,
-      meta,
-    };
-
-    try {
-      await apiFetch(`/api/infrastructure/service-library/code-sets/${encodeURIComponent(codeSetId)}/entries`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-
-      toast({ title: "Saved", description: "Entry saved successfully." });
-      setEntryOpen(false);
-      await loadEntries();
-    } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Could not save entry.", variant: "destructive" as any });
-    }
+  function openCreate() {
+    setEditing(null);
+    setSvcDialogOpen(true);
   }
 
-  async function deleteEntry(code: string) {
-    if (!codeSetId) return;
-    const ok = window.confirm(`Remove entry '${code}'?`);
-    if (!ok) return;
-
-    try {
-      await apiFetch(`/api/infrastructure/service-library/code-sets/${encodeURIComponent(codeSetId)}/entries/${encodeURIComponent(code)}`, {
-        method: "DELETE",
-      });
-      toast({ title: "Deleted", description: "Entry removed." });
-      await loadEntries();
-    } catch (e: any) {
-      toast({ title: "Delete failed", description: e?.message || "Could not delete entry.", variant: "destructive" as any });
-    }
+  function openEdit(r: ServiceItemRow) {
+    setEditing(r);
+    setSvcDialogOpen(true);
   }
 
-  async function createMapping() {
-    if (!branchId) return;
-    if (!mapEntryId || !mapSvcId) {
-      toast({ title: "Missing fields", description: "Select a code entry and service item.", variant: "destructive" as any });
-      return;
+  const filtered = React.useMemo(() => {
+    let rows = [...(allRows || [])];
+
+    if (category !== "all") {
+      rows = rows.filter((r) => (r.category || "").trim() === category);
+    }
+    if (mappingStatus === "mapped") {
+      rows = rows.filter((r) => isMapped(r));
+    }
+    if (mappingStatus === "missing") {
+      rows = rows.filter((r) => !isMapped(r));
+    }
+    if (orderable === "yes") {
+      rows = rows.filter((r) => Boolean(r.isOrderable));
+    }
+    if (orderable === "no") {
+      rows = rows.filter((r) => !r.isOrderable);
     }
 
-    let meta: any = undefined;
-    if (mapMeta.trim()) {
-      try {
-        meta = JSON.parse(mapMeta);
-      } catch {
-        toast({ title: "Invalid JSON", description: "Mapping meta must be valid JSON.", variant: "destructive" as any });
-        return;
-      }
-    }
+    return rows;
+  }, [allRows, category, mappingStatus, orderable]);
 
-    try {
-      await apiFetch(`/api/infrastructure/service-library/mappings?branchId=${encodeURIComponent(branchId)}`, {
-        method: "POST",
-        body: JSON.stringify({ serviceItemId: mapSvcId, codeEntryId: mapEntryId, isPrimary: mapIsPrimary, meta }),
-      });
-      toast({ title: "Mapped", description: "Mapping created successfully." });
-      setMapOpen(false);
-      resetMapForm();
-      await loadMappings();
-    } catch (e: any) {
-      toast({ title: "Mapping failed", description: e?.message || "Could not create mapping.", variant: "destructive" as any });
-    }
-  }
+  const totals = React.useMemo(() => {
+    const total = allRows.length;
+    const inactive = allRows.filter((r) => !r.isActive).length;
+    const notOrderable = allRows.filter((r) => !r.isOrderable).length;
+    const missingMap = allRows.filter((r) => !isMapped(r)).length;
+    return { total, inactive, notOrderable, missingMap };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRows]);
 
-  async function deleteMapping(id: string) {
-    if (!branchId) return;
-    const ok = window.confirm("Remove this mapping?");
-    if (!ok) return;
+  const totalPages = React.useMemo(() => {
+    return Math.max(1, Math.ceil(filtered.length / pageSize));
+  }, [filtered.length, pageSize]);
 
-    try {
-      await apiFetch(`/api/infrastructure/service-library/mappings/${encodeURIComponent(id)}?branchId=${encodeURIComponent(branchId)}`, {
-        method: "DELETE",
-      });
-      toast({ title: "Deleted", description: "Mapping removed." });
-      await loadMappings();
-    } catch (e: any) {
-      toast({ title: "Delete failed", description: e?.message || "Could not delete mapping.", variant: "destructive" as any });
-    }
-  }
-
-  const mustSelectBranch = !branchId;
+  const pageRows = React.useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, page, pageSize]);
 
   return (
-    <AppShell title="Infrastructure - Service Library">
+    <AppShell title="Infrastructure • Service Library">
       <div className="grid gap-6">
+        {/* Header */}
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-2xl border border-zc-border bg-zc-panel/30">
-              <BookOpen className="h-5 w-5 text-zc-accent" />
+              <ShieldCheck className="h-5 w-5 text-zc-accent" />
             </span>
             <div className="min-w-0">
               <div className="text-3xl font-semibold tracking-tight">Service Library</div>
               <div className="mt-1 text-sm text-zc-muted">
-                Maintain standard code sets, entries, and map them to your Service Items.
+                Define the hospital’s orderable services (Lab/Radiology/Procedure/etc.) for the selected branch.
               </div>
             </div>
           </div>
+
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" className="px-5 gap-2" onClick={() => void refreshAll(true)} disabled={busy || loading}>
-              <RefreshCw className={busy ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+            <Button variant="outline" className="px-5 gap-2" onClick={() => refreshAll(true)} disabled={loading || busy}>
+              <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
               Refresh
             </Button>
-            <Button
-              variant="primary"
-              className="px-5 gap-2"
-              onClick={() => {
-                resetSetForm(null);
-                setSetOpen(true);
-              }}
-              disabled={mustSelectBranch || busy || loading}
-            >
+
+            <Button variant="primary" className="px-5 gap-2" onClick={openCreate} disabled={mustSelectBranch || busy}>
               <Plus className="h-4 w-4" />
-              New code set
-            </Button>
-            <Button
-              variant="outline"
-              className="px-5 gap-2"
-              onClick={() => {
-                resetMapForm();
-                setMapOpen(true);
-              }}
-              disabled={mustSelectBranch || !codeSets.length || busy || loading}
-            >
-              <Link2 className="h-4 w-4" />
-              Map service to code
+              New Service
             </Button>
           </div>
         </div>
+
+        {err ? (
+          <Card className="border-zc-danger/40">
+            <CardHeader className="py-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 text-zc-danger" />
+                <div>
+                  <CardTitle className="text-base">Could not load services</CardTitle>
+                  <CardDescription className="mt-1">{err}</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+          </Card>
+        ) : null}
+
+        {/* Overview */}
         <Card className="overflow-hidden">
           <CardHeader className="pb-4">
             <CardTitle className="text-base">Overview</CardTitle>
             <CardDescription className="text-sm">
-              Select a branch, review library coverage, and manage code sets, entries, and mappings.
+              Pick a branch, search services, and fix missing charge mappings as you go.
             </CardDescription>
           </CardHeader>
+
           <CardContent className="grid gap-4">
             <div className="grid gap-2">
               <Label>Branch</Label>
-              <Select value={branchId} onValueChange={(v) => setBranchId(v)}>
+              <Select value={branchId || ""} onValueChange={onBranchChange}>
                 <SelectTrigger className="h-11 w-full rounded-xl border-zc-border bg-zc-card">
                   <SelectValue placeholder="Select branch..." />
                 </SelectTrigger>
                 <SelectContent className="max-h-[320px] overflow-y-auto">
-                  {branches.map((b) => (
+                  {branches.filter((b) => b.id).map((b) => (
                     <SelectItem key={b.id} value={b.id}>
-                      {b.name} ({b.code}){b.city ? ` - ${b.city}` : ""}
+                      {b.code} - {b.name} ({b.city})
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-4">
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900/50 dark:bg-blue-900/10">
-                <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Code sets</div>
-                <div className="mt-1 text-lg font-bold text-blue-700 dark:text-blue-300">{codeSets.length}</div>
+                <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Total Services</div>
+                <div className="mt-1 text-lg font-bold text-blue-700 dark:text-blue-300">{totals.total}</div>
               </div>
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900/50 dark:bg-emerald-900/10">
-                <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Entries</div>
-                <div className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-300">{entries.length}</div>
+              <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3 dark:border-rose-900/50 dark:bg-rose-900/10">
+                <div className="text-xs font-medium text-rose-600 dark:text-rose-400">Missing Charge Mapping</div>
+                <div className="mt-1 text-lg font-bold text-rose-700 dark:text-rose-300">{totals.missingMap}</div>
               </div>
-              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/50 dark:bg-amber-900/10">
-                <div className="text-xs font-medium text-amber-700 dark:text-amber-300">Mappings</div>
-                <div className="mt-1 text-lg font-bold text-amber-800 dark:text-amber-200">{mappings.length}</div>
+              <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3 dark:border-violet-900/50 dark:bg-violet-900/10">
+                <div className="text-xs font-medium text-violet-600 dark:text-violet-400">Inactive</div>
+                <div className="mt-1 text-lg font-bold text-violet-700 dark:text-violet-300">{totals.inactive}</div>
+              </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/50 dark:bg-amber-900/10">
+                <div className="text-xs font-medium text-amber-600 dark:text-amber-400">Not Orderable</div>
+                <div className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-300">{totals.notOrderable}</div>
               </div>
             </div>
 
-            {err ? (
-              <div className="rounded-xl border border-rose-200/60 bg-rose-50/60 p-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-200">
-                {err}
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="relative w-full lg:max-w-md">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
+                <Input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search by code, name, or category..."
+                  className="pl-10"
+                  disabled={mustSelectBranch}
+                />
               </div>
-            ) : null}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
+                  <Switch checked={includeInactive} onCheckedChange={setIncludeInactive} disabled={mustSelectBranch} />
+                  <div className="text-sm">
+                    <div className="font-semibold text-zc-text">Include inactive</div>
+                    <div className="text-xs text-zc-muted">Show inactive service items too</div>
+                  </div>
+                </div>
+
+                {activeTab === "services" ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => setShowFilters((s) => !s)}
+                    disabled={mustSelectBranch}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {showFilters ? "Hide Filters" : "Show Filters"}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">Branch scoped</Badge>
+              <Badge variant={totals.missingMap > 0 ? "destructive" : "ok"}>
+                Missing mapping: {totals.missingMap}
+              </Badge>
+              <Badge variant={totals.inactive > 0 ? "warning" : "secondary"}>Inactive: {totals.inactive}</Badge>
+              <Badge variant={totals.notOrderable > 0 ? "accent" : "secondary"}>Not orderable: {totals.notOrderable}</Badge>
+            </div>
           </CardContent>
         </Card>
 
+        {/* Main tabs */}
         <Card>
           <CardHeader className="py-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <CardTitle className="text-base">Manage Service Library</CardTitle>
-                <CardDescription>Create code sets, maintain entries, and link them to orderable services.</CardDescription>
+                <CardTitle className="text-base">Manage Services</CardTitle>
+                <CardDescription>Create services, keep them orderable, and maintain charge mappings.</CardDescription>
               </div>
+
               <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
                 <TabsList className={cn("h-10 rounded-2xl border border-zc-border bg-zc-panel/20 p-1")}>
-                  <TabsTrigger value="sets" className={cn("rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm")}>
-                    <BookOpen className="mr-2 h-4 w-4" />
-                    Code sets
+                  <TabsTrigger
+                    value="services"
+                    className={cn(
+                      "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
+                    )}
+                  >
+                    <ClipboardList className="mr-2 h-4 w-4" />
+                    Services
                   </TabsTrigger>
-                  <TabsTrigger value="entries" className={cn("rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm")}>
+                  <TabsTrigger
+                    value="guide"
+                    className={cn(
+                      "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
+                    )}
+                  >
                     <Wrench className="mr-2 h-4 w-4" />
-                    Entries
-                  </TabsTrigger>
-                  <TabsTrigger value="mappings" className={cn("rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm")}>
-                    <Link2 className="mr-2 h-4 w-4" />
-                    Mappings
+                    Quick Guide
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
           </CardHeader>
+
           <CardContent className="pb-6">
-            {loading ? (
-              <div className="grid gap-3">
-                <Skeleton className="h-10" />
-                <Skeleton className="h-52" />
-              </div>
-            ) : null}
-
             <Tabs value={activeTab}>
-              {/* Code sets */}
-              <TabsContent value="sets" className="mt-0">
-                <div className="grid gap-3">
-                  <div className="grid gap-3 rounded-xl border border-zc-border bg-zc-panel/20 p-4 md:grid-cols-12">
-                    <div className="md:col-span-6">
-                      <Label className="text-xs text-zc-muted">Search</Label>
-                      <div className="relative">
-                        <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zc-muted" />
-                        <Input
-                          className="pl-9 rounded-xl"
-                          value={qSets}
-                          onChange={(e) => setQSets(e.target.value)}
-                          placeholder="Search by code or name…"
-                          disabled={mustSelectBranch}
-                        />
+              <TabsContent value="services" className="mt-0">
+                <div className="grid gap-4">
+                  {/* Filters */}
+                  {showFilters ? (
+                    <div className="grid gap-3 rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                        <Filter className="h-4 w-4 text-zc-accent" />
+                        Filters
                       </div>
-                    </div>
-                    <div className="md:col-span-3">
-                      <Label className="text-xs text-zc-muted">Include inactive</Label>
-                      <div className="mt-2 flex items-center gap-2">
-                        <Switch checked={includeInactiveSets} onCheckedChange={setIncludeInactiveSets} disabled={mustSelectBranch} />
-                        <span className="text-sm text-zc-muted">Show inactive sets</span>
-                      </div>
-                    </div>
-                    <div className="md:col-span-3 flex items-end justify-end">
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          resetSetForm(null);
-                          setSetOpen(true);
-                        }}
-                        disabled={mustSelectBranch}
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add
-                      </Button>
-                    </div>
-                  </div>
 
-                  <div className="rounded-xl border border-zc-border overflow-hidden">
+                      <div className="grid gap-3 md:grid-cols-12">
+                        <div className="md:col-span-4">
+                          <Label className="text-xs text-zc-muted">Category</Label>
+                          <Select
+                            value={category}
+                            onValueChange={(v) => {
+                              setPage(1);
+                              setCategory(v as any);
+                            }}
+                            disabled={mustSelectBranch}
+                          >
+                            <SelectTrigger className="h-10">
+                              <SelectValue placeholder="Category" />
+                            </SelectTrigger>
+                            <SelectContent className="max-h-[320px] overflow-y-auto">
+                              <SelectItem value="all">All</SelectItem>
+                              {categoryOptions.length === 0 ? (
+                                <SelectItem value="__none" disabled>
+                                  No categories
+                                </SelectItem>
+                              ) : (
+                                categoryOptions.map((c) => (
+                                  <SelectItem key={c} value={c}>
+                                    {c}
+                                  </SelectItem>
+                                ))
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="md:col-span-4">
+                          <Label className="text-xs text-zc-muted">Charge Mapping</Label>
+                          <Select
+                            value={mappingStatus}
+                            onValueChange={(v) => {
+                              setPage(1);
+                              setMappingStatus(v as any);
+                            }}
+                            disabled={mustSelectBranch}
+                          >
+                            <SelectTrigger className="h-10">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All</SelectItem>
+                              <SelectItem value="mapped">Mapped</SelectItem>
+                              <SelectItem value="missing">Missing mapping</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="md:col-span-4">
+                          <Label className="text-xs text-zc-muted">Orderable</Label>
+                          <Select
+                            value={orderable}
+                            onValueChange={(v) => {
+                              setPage(1);
+                              setOrderable(v as any);
+                            }}
+                            disabled={mustSelectBranch}
+                          >
+                            <SelectTrigger className="h-10">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All</SelectItem>
+                              <SelectItem value="yes">Orderable</SelectItem>
+                              <SelectItem value="no">Not orderable</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Table */}
+                  <div className="rounded-xl border border-zc-border">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-[170px]">Code</TableHead>
                           <TableHead>Name</TableHead>
-                          <TableHead className="w-[140px]">Kind</TableHead>
-                          <TableHead className="w-[120px]">Status</TableHead>
-                          <TableHead className="w-[160px]"></TableHead>
+                          <TableHead className="w-[190px]">Category</TableHead>
+                          <TableHead className="w-[120px]">Unit</TableHead>
+                          <TableHead className="w-[120px]">Orderable</TableHead>
+                          <TableHead className="w-[120px]">Active</TableHead>
+                          <TableHead className="w-[240px]">Charge Mapping</TableHead>
+                          <TableHead className="w-[180px]">Updated</TableHead>
+                          <TableHead className="w-[70px]"></TableHead>
                         </TableRow>
                       </TableHeader>
+
                       <TableBody>
-                        {codeSets.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={5} className="py-10 text-center text-sm text-zc-muted">
-                              {mustSelectBranch ? "Select a branch to manage library." : "No code sets yet."}
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          codeSets.map((cs) => (
-                            <TableRow
-                              key={cs.id}
-                              className={cn(codeSetId === cs.id ? "bg-zc-accent/10" : "")}
-                              onClick={() => {
-                                setCodeSetId(cs.id);
-                                setActiveTab("entries");
-                              }}
-                            >
-                              <TableCell className="font-mono text-xs">{cs.code}</TableCell>
-                              <TableCell>
-                                <div className="font-medium text-zc-text">{cs.name}</div>
-                                {cs.description ? <div className="text-xs text-zc-muted line-clamp-1">{cs.description}</div> : null}
-                              </TableCell>
-                              <TableCell>{cs.kind || <span className="text-zc-muted">—</span>}</TableCell>
-                              <TableCell>{cs.isActive === false ? <Badge variant="secondary">Inactive</Badge> : <Badge variant="success">Active</Badge>}</TableCell>
-                              <TableCell className="text-right">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    resetSetForm(cs);
-                                    setSetOpen(true);
-                                  }}
-                                >
-                                  Edit
-                                </Button>
+                        {loading ? (
+                          Array.from({ length: 8 }).map((_, i) => (
+                            <TableRow key={i}>
+                              <TableCell colSpan={9}>
+                                <Skeleton className="h-6 w-full" />
                               </TableCell>
                             </TableRow>
                           ))
+                        ) : pageRows.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={9}>
+                              <div className="flex items-center justify-center gap-3 py-10 text-sm text-zc-muted">
+                                <ClipboardList className="h-4 w-4" />
+                                No services found for the current filters.
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          pageRows.map((r) => {
+                            const m = currentMapping(r);
+                            const cm = m?.chargeMasterItem;
+                            return (
+                              <TableRow key={r.id}>
+                                <TableCell className="font-mono text-xs">
+                                  <div className="flex flex-col gap-1">
+                                    <span className="font-semibold text-zc-text">{r.code}</span>
+                                    <span className="text-[11px] text-zc-muted">{String(r.id).slice(0, 8)}…</span>
+                                  </div>
+                                </TableCell>
+
+                                <TableCell>
+                                  <div className="flex flex-col gap-1">
+                                    <span className="font-semibold text-zc-text">{r.name}</span>
+                                    <span className="text-xs text-zc-muted">
+                                      {r.isOrderable ? "Orderable in clinical screens" : "Hidden from ordering"}
+                                    </span>
+                                  </div>
+                                </TableCell>
+
+                                <TableCell>
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-sm text-zc-text">{r.category}</span>
+                                  </div>
+                                </TableCell>
+
+                                <TableCell>
+                                  <Badge variant="secondary">{r.unit || "—"}</Badge>
+                                </TableCell>
+
+                                <TableCell>
+                                  {r.isOrderable ? <Badge variant="ok">Yes</Badge> : <Badge variant="secondary">No</Badge>}
+                                </TableCell>
+
+                                <TableCell>
+                                  {r.isActive ? <Badge variant="success">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
+                                </TableCell>
+
+                                <TableCell>
+                                  <div className="flex flex-col gap-1">
+                                    <div>{mappingBadge(r)}</div>
+                                    {cm?.code || cm?.name ? (
+                                      <div className="text-xs text-zc-muted">
+                                        {cm?.code ? <span className="font-mono">{cm.code}</span> : null}
+                                        {cm?.name ? <span>{cm?.code ? ` • ${cm.name}` : cm.name}</span> : null}
+                                      </div>
+                                    ) : !isMapped(r) ? (
+                                      <div className="text-xs text-zc-muted">
+                                        <Link
+                                          href={`/superadmin/infrastructure/service-mapping?serviceItemId=${encodeURIComponent(r.id)}`}
+                                          className="inline-flex items-center gap-1 text-zc-accent hover:underline"
+                                        >
+                                          Fix mapping <ExternalLink className="h-3 w-3" />
+                                        </Link>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </TableCell>
+
+                                <TableCell className="text-sm text-zc-muted">
+                                  {fmtDateTime(r.updatedAt || r.createdAt || null)}
+                                </TableCell>
+
+                                <TableCell className="text-right">
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="icon" className="h-8 w-8" disabled={busy}>
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-[240px]">
+                                      <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                      <DropdownMenuItem onClick={() => openEdit(r)}>
+                                        <Wrench className="mr-2 h-4 w-4" />
+                                        Edit
+                                      </DropdownMenuItem>
+
+                                      <DropdownMenuItem asChild>
+                                        <Link href={`/superadmin/infrastructure/service-mapping?serviceItemId=${encodeURIComponent(r.id)}`}>
+                                          <ExternalLink className="mr-2 h-4 w-4" />
+                                          Open mapping
+                                        </Link>
+                                      </DropdownMenuItem>
+
+                                      <DropdownMenuSeparator />
+
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          const text = `${r.code} • ${r.name}\nCategory: ${r.category}\nOrderable: ${
+                                            r.isOrderable ? "Yes" : "No"
+                                          }\nActive: ${r.isActive ? "Yes" : "No"}\nMapped: ${isMapped(r) ? "Yes" : "No"}`;
+                                          navigator.clipboard?.writeText(text).then(
+                                            () => toast({ title: "Copied", description: "Service summary copied to clipboard." }),
+                                            () => toast({ title: "Copy failed", description: "Could not access clipboard." }),
+                                          );
+                                        }}
+                                      >
+                                        Copy summary
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
                         )}
                       </TableBody>
                     </Table>
+
+                    <div className="flex flex-col gap-3 border-t border-zc-border p-4 md:flex-row md:items-center md:justify-between">
+                      <div className="text-sm text-zc-muted">
+                        Showing <span className="font-semibold text-zc-text">{pageRows.length}</span> of{" "}
+                        <span className="font-semibold text-zc-text">{filtered.length}</span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Select
+                          value={String(pageSize)}
+                          onValueChange={(v) => {
+                            setPage(1);
+                            setPageSize(Number(v));
+                          }}
+                          disabled={mustSelectBranch}
+                        >
+                          <SelectTrigger className="h-9 w-[140px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {[25, 50, 100, 200].map((n) => (
+                              <SelectItem key={n} value={String(n)}>
+                                Page size: {n}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        <Button
+                          variant="outline"
+                          className="h-9"
+                          disabled={mustSelectBranch || page <= 1}
+                          onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        >
+                          Prev
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="h-9"
+                          disabled={mustSelectBranch || page >= totalPages}
+                          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        >
+                          Next
+                        </Button>
+
+                        <Badge variant="secondary">
+                          Page {page} / {totalPages}
+                        </Badge>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </TabsContent>
 
-              {/* Entries */}
-              <TabsContent value="entries" className="mt-0">
-                <div className="grid gap-3">
-                  <div className="grid gap-3 rounded-xl border border-zc-border bg-zc-panel/20 p-4 md:grid-cols-12">
-                    <div className="md:col-span-4">
-                      <Label className="text-xs text-zc-muted">Code set</Label>
-                      <Select value={codeSetId} onValueChange={(v) => setCodeSetId(v)} disabled={!codeSets.length}>
-                        <SelectTrigger className="rounded-xl">
-                          <SelectValue placeholder="Select code set" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {codeSets.map((cs) => (
-                            <SelectItem key={cs.id} value={cs.id}>
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono text-xs text-zc-muted">{cs.code}</span>
-                                <span>{cs.name}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+              <TabsContent value="guide" className="mt-0">
+                <div className="grid gap-4">
+                  <Card className="border-zc-border">
+                    <CardHeader className="py-4">
+                      <CardTitle className="text-base">How to configure (recommended order)</CardTitle>
+                      <CardDescription>
+                        Follow this sequence to avoid getting lost during infra setup.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-4">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                            <Badge variant="ok">1</Badge> Create Service Items
+                          </div>
+                          <div className="mt-1 text-sm text-zc-muted">
+                            Define services with correct category and whether they are orderable/active.
+                          </div>
+                        </div>
 
-                    <div className="md:col-span-5">
-                      <Label className="text-xs text-zc-muted">Search entries</Label>
-                      <div className="relative">
-                        <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zc-muted" />
-                        <Input
-                          className="pl-9 rounded-xl"
-                          value={qEntries}
-                          onChange={(e) => setQEntries(e.target.value)}
-                          placeholder="Search by code/display…"
-                          disabled={!codeSetId}
-                        />
+                        <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                            <Badge variant="ok">2</Badge> Map to Charge Master
+                          </div>
+                          <div className="mt-1 text-sm text-zc-muted">
+                            Each billable service should map to a ChargeMasterItem (FixIt opens if missing).
+                          </div>
+                          <div className="mt-3">
+                            <Button variant="outline" asChild className="gap-2">
+                              <Link href="/superadmin/infrastructure/service-mapping">
+                                Open Service Mapping <ExternalLink className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                            <Badge variant="ok">3</Badge> Tariff Rates (Branch Price List)
+                          </div>
+                          <div className="mt-1 text-sm text-zc-muted">
+                            Add rates per ChargeMasterItem in the active Tariff Plan for this branch.
+                          </div>
+                          <div className="mt-3">
+                            <Button variant="outline" asChild className="gap-2">
+                              <Link href="/superadmin/infrastructure/tariff-plans">
+                                Open Tariff Plans <ExternalLink className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                            <Badge variant="ok">4</Badge> Scheduling (if appointment-based)
+                          </div>
+                          <div className="mt-1 text-sm text-zc-muted">
+                            For services that need scheduling, define availability rules so GoLive passes.
+                          </div>
+                          <div className="mt-3">
+                            <Button variant="outline" asChild className="gap-2">
+                              <Link href="/superadmin/infrastructure/service-availability">
+                                Open Availability <ExternalLink className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                          </div>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="md:col-span-3 flex items-end justify-end">
-                      <Button
-                        onClick={() => {
-                          resetEntryForm(null);
-                          setEntryOpen(true);
-                        }}
-                        disabled={!codeSetId}
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add entry
-                      </Button>
-                    </div>
-                  </div>
+                      <Separator />
 
-                  <div className="rounded-xl border border-zc-border overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-[170px]">Code</TableHead>
-                          <TableHead>Display</TableHead>
-                          <TableHead className="w-[140px]">Status</TableHead>
-                          <TableHead className="w-[200px]"></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {entries.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={4} className="py-10 text-center text-sm text-zc-muted">
-                              {codeSetId ? "No entries." : "Select a code set."}
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          entries.map((e) => (
-                            <TableRow key={e.id}>
-                              <TableCell className="font-mono text-xs">{e.code}</TableCell>
-                              <TableCell>
-                                <div className="font-medium text-zc-text">{e.display}</div>
-                                {e.description ? <div className="text-xs text-zc-muted line-clamp-1">{e.description}</div> : null}
-                              </TableCell>
-                              <TableCell>{e.status ? <Badge variant="secondary">{e.status}</Badge> : <span className="text-zc-muted">—</span>}</TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex justify-end gap-2">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                      resetEntryForm(e);
-                                      setEntryOpen(true);
-                                    }}
-                                  >
-                                    Edit
-                                  </Button>
-                                  <Button size="sm" variant="destructive" onClick={() => void deleteEntry(e.code)}>
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              </TabsContent>
-
-              {/* Mappings */}
-              <TabsContent value="mappings" className="mt-0">
-                <div className="grid gap-3">
-                  <div className="grid gap-3 rounded-xl border border-zc-border bg-zc-panel/20 p-4 md:grid-cols-12">
-                    <div className="md:col-span-4">
-                      <Label className="text-xs text-zc-muted">Filter by code set</Label>
-                      <Select value={mapSetId} onValueChange={(v) => setMapSetId(v)} disabled={!codeSets.length}>
-                        <SelectTrigger className="rounded-xl">
-                          <SelectValue placeholder="All sets" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {codeSets.map((cs) => (
-                            <SelectItem key={cs.id} value={cs.id}>
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono text-xs text-zc-muted">{cs.code}</span>
-                                <span>{cs.name}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="md:col-span-5">
-                      <Label className="text-xs text-zc-muted">Search mappings</Label>
-                      <div className="relative">
-                        <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zc-muted" />
-                        <Input className="pl-9 rounded-xl" value={qMappings} onChange={(e) => setQMappings(e.target.value)} placeholder="Search by service / code / display…" disabled={mustSelectBranch} />
+                      <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                          <AlertTriangle className="h-4 w-4 text-zc-warn" />
+                          Tip: Fix missing mappings immediately
+                        </div>
+                        <div className="mt-1 text-sm text-zc-muted">
+                          If you create a service without a charge mapping, the backend opens a FixIt. In this page,
+                          you’ll also see a <span className="font-semibold">MAPPING MISSING</span> badge so you can jump to mapping.
+                        </div>
                       </div>
-                    </div>
-
-                    <div className="md:col-span-3 flex items-end justify-end">
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          resetMapForm();
-                          setMapOpen(true);
-                        }}
-                        disabled={mustSelectBranch || !codeSets.length}
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        New mapping
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-zc-border overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Service Item</TableHead>
-                          <TableHead>Code Entry</TableHead>
-                          <TableHead className="w-[120px]">Primary</TableHead>
-                          <TableHead className="w-[120px]"></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {mappings.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={4} className="py-10 text-center text-sm text-zc-muted">
-                              {mustSelectBranch ? "Select a branch." : "No mappings."}
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          mappings.map((m) => (
-                            <TableRow key={m.id}>
-                              <TableCell>
-                                {m.serviceItem ? (
-                                  <div>
-                                    <div className="font-medium text-zc-text">{m.serviceItem.name}</div>
-                                    <div className="text-xs text-zc-muted">
-                                      <span className="font-mono">{m.serviceItem.code}</span>
-                                      {m.serviceItem.category ? <span className="mx-1 text-zc-muted/60">•</span> : null}
-                                      {m.serviceItem.category ? <span>{m.serviceItem.category}</span> : null}
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <span className="text-zc-muted">{m.serviceItemId}</span>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                {m.codeEntry ? (
-                                  <div>
-                                    <div className="font-medium text-zc-text">{m.codeEntry.display}</div>
-                                    <div className="text-xs text-zc-muted">
-                                      <span className="font-mono">{m.codeEntry.code}</span>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <span className="text-zc-muted">{m.codeEntryId}</span>
-                                )}
-                              </TableCell>
-                              <TableCell>{m.isPrimary ? <Badge variant="success">Yes</Badge> : <Badge variant="secondary">No</Badge>}</TableCell>
-                              <TableCell className="text-right">
-                                <Button size="sm" variant="destructive" onClick={() => void deleteMapping(m.id)}>
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
+                    </CardContent>
+                  </Card>
                 </div>
               </TabsContent>
             </Tabs>
           </CardContent>
         </Card>
-
-        {/* Code set dialog */}
-        <Dialog open={setOpen} onOpenChange={setSetOpen}>
-          <DialogContent className={drawerClassName("max-w-[720px]")}>
-            <ModalHeader
-              title={editingSet ? "Edit code set" : "New code set"}
-              description="Define a standard code system (e.g., CPT-like, LOINC-like internal sets)."
-              icon={<BookOpen className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
-            />
-
-            <div className="grid gap-3 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <Label className="text-xs text-zc-muted">Code</Label>
-                <Input className="rounded-xl" value={setCode} onChange={(e) => setSetCode(e.target.value)} placeholder="LAB_TESTS" />
-              </div>
-              <div className="md:col-span-8">
-                <Label className="text-xs text-zc-muted">Name</Label>
-                <Input className="rounded-xl" value={setName} onChange={(e) => setSetName(e.target.value)} placeholder="Laboratory test codes" />
-              </div>
-              <div className="md:col-span-4">
-                <Label className="text-xs text-zc-muted">Kind (optional)</Label>
-                <Input className="rounded-xl" value={setKind} onChange={(e) => setSetKind(e.target.value)} placeholder="LAB" />
-              </div>
-              <div className="md:col-span-8">
-                <Label className="text-xs text-zc-muted">Description</Label>
-                <Input className="rounded-xl" value={setDesc} onChange={(e) => setSetDesc(e.target.value)} placeholder="Optional notes" />
-              </div>
-            </div>
-
-            <DialogFooter className="mt-4">
-              <Button variant="outline" onClick={() => setSetOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={() => void saveCodeSet()} disabled={!setCode.trim() || !setName.trim()}>
-                Save
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Entry dialog */}
-        <Dialog open={entryOpen} onOpenChange={setEntryOpen}>
-          <DialogContent className={drawerClassName("p-0")}>
-            <div className="p-6">
-              <ModalHeader
-                title={editingEntry ? "Edit entry" : "New entry"}
-                description="Upsert an entry by code. Use meta JSON for advanced payloads."
-                icon={<Wrench className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
-              />
-
-              <div className="grid gap-3 md:grid-cols-12">
-                <div className="md:col-span-4">
-                  <Label className="text-xs text-zc-muted">Code</Label>
-                  <Input className="rounded-xl" value={entryCode} onChange={(e) => setEntryCode(e.target.value)} placeholder="HB" disabled={!!editingEntry} />
-                </div>
-                <div className="md:col-span-8">
-                  <Label className="text-xs text-zc-muted">Display</Label>
-                  <Input className="rounded-xl" value={entryDisplay} onChange={(e) => setEntryDisplay(e.target.value)} placeholder="Hemoglobin" />
-                </div>
-
-                <div className="md:col-span-12">
-                  <Label className="text-xs text-zc-muted">Description</Label>
-                  <Input className="rounded-xl" value={entryDesc} onChange={(e) => setEntryDesc(e.target.value)} placeholder="Optional" />
-                </div>
-
-                <div className="md:col-span-4">
-                  <Label className="text-xs text-zc-muted">Status (optional)</Label>
-                  <Input className="rounded-xl" value={entryStatus} onChange={(e) => setEntryStatus(e.target.value)} placeholder="ACTIVE" />
-                </div>
-
-                <div className="md:col-span-8">
-                  <Label className="text-xs text-zc-muted">Meta JSON (optional)</Label>
-                  <Textarea className="min-h-[120px] rounded-xl font-mono text-xs" value={entryMeta} onChange={(e) => setEntryMeta(e.target.value)} placeholder='{\n  "loinc": "718-7"\n}' />
-                </div>
-              </div>
-
-              <div className="mt-6 flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setEntryOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={() => void saveEntry()} disabled={!entryCode.trim() || !entryDisplay.trim()}>
-                  Save
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* Mapping dialog */}
-        <Dialog open={mapOpen} onOpenChange={setMapOpen}>
-          <DialogContent className={drawerClassName("max-w-[860px]")}>
-            <ModalHeader
-              title="Map service to code"
-              description="Create a mapping between a Service Item and a Code Entry."
-              icon={<Link2 className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
-            />
-
-            <div className="grid gap-3 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <Label className="text-xs text-zc-muted">Code set</Label>
-                <Select value={mapSetId} onValueChange={(v) => setMapSetId(v)}>
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder="Select set" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {codeSets.map((cs) => (
-                      <SelectItem key={cs.id} value={cs.id}>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs text-zc-muted">{cs.code}</span>
-                          <span>{cs.name}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="md:col-span-8">
-                <Label className="text-xs text-zc-muted">Code entry</Label>
-                <Select value={mapEntryId} onValueChange={(v) => setMapEntryId(v)} disabled={!entries.length}>
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder={mapSetId ? "Select entry" : "Select set first"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {entries.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs text-zc-muted">{e.code}</span>
-                          <span>{e.display}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="md:col-span-6">
-                <Label className="text-xs text-zc-muted">Find Service Item</Label>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zc-muted" />
-                  <Input className="pl-9 rounded-xl" value={svcQuery} onChange={(e) => setSvcQuery(e.target.value)} placeholder="Type code/name…" />
-                </div>
-                {svcOptions.length ? (
-                  <div className="mt-2 max-h-[200px] overflow-auto rounded-xl border border-zc-border">
-                    <Table>
-                      <TableBody>
-                        {svcOptions.slice(0, 20).map((s) => (
-                          <TableRow
-                            key={s.id}
-                            className={cn(mapSvcId === s.id ? "bg-zc-accent/10" : "cursor-pointer")}
-                            onClick={() => setMapSvcId(s.id)}
-                          >
-                            <TableCell>
-                              <div className="font-medium text-zc-text">{s.name}</div>
-                              <div className="text-xs text-zc-muted">
-                                <span className="font-mono">{s.code}</span>
-                                {s.category ? <span className="mx-1 text-zc-muted/60">•</span> : null}
-                                {s.category ? <span>{s.category}</span> : null}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                ) : (
-                  <div className="mt-2 text-xs text-zc-muted">Search for a service item to map.</div>
-                )}
-              </div>
-
-              <div className="md:col-span-6">
-                <Label className="text-xs text-zc-muted">Options</Label>
-                <div className="mt-2 flex items-center gap-2">
-                  <Switch checked={mapIsPrimary} onCheckedChange={setMapIsPrimary} />
-                  <span className="text-sm text-zc-muted">Primary mapping</span>
-                </div>
-
-                <div className="mt-3">
-                  <Label className="text-xs text-zc-muted">Meta JSON (optional)</Label>
-                  <Textarea className="min-h-[160px] rounded-xl font-mono text-xs" value={mapMeta} onChange={(e) => setMapMeta(e.target.value)} placeholder='{\n  "source": "legacy"\n}' />
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter className="mt-4">
-              <Button variant="outline" onClick={() => setMapOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={() => void createMapping()} disabled={!mapEntryId || !mapSvcId}>
-                Save mapping
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
+
+      {/* Create/Edit dialog */}
+      <ServiceItemDialog
+        open={svcDialogOpen}
+        onOpenChange={setSvcDialogOpen}
+        branchId={branchId}
+        editing={editing}
+        onSaved={async () => {
+          toast({ title: editing ? "Service updated" : "Service created", description: "Saved successfully." });
+          await loadServices(false);
+        }}
+      />
     </AppShell>
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/*                             Create/Edit Dialog                              */
+/* -------------------------------------------------------------------------- */
+
+function ServiceItemDialog({
+  open,
+  onOpenChange,
+  branchId,
+  editing,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  editing: ServiceItemRow | null;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = React.useState(false);
+
+  const [form, setForm] = React.useState<{
+    code: string;
+    name: string;
+    category: string;
+    unit: string;
+    isOrderable: boolean;
+    isActive: boolean;
+    chargeMasterCode: string;
+    notes: string;
+  }>({
+    code: "",
+    name: "",
+    category: "",
+    unit: "",
+    isOrderable: true,
+    isActive: true,
+    chargeMasterCode: "",
+    notes: "",
+  });
+
+  React.useEffect(() => {
+    if (!open) return;
+    setForm({
+      code: editing?.code || "",
+      name: editing?.name || "",
+      category: editing?.category || "",
+      unit: editing?.unit || "",
+      isOrderable: Boolean(editing?.isOrderable ?? true),
+      isActive: Boolean(editing?.isActive ?? true),
+      chargeMasterCode: "", // create-only convenience; backend ignores on update
+      notes: "",
+    });
+  }, [open, editing]);
+
+  function patch(p: Partial<typeof form>) {
+    setForm((prev) => ({ ...prev, ...p }));
+  }
+
+  function normalizePayload() {
+    const payload: any = {
+      code: String(form.code || "").trim(),
+      name: String(form.name || "").trim(),
+      category: String(form.category || "").trim(),
+      unit: form.unit?.trim() ? String(form.unit).trim() : null,
+      isOrderable: Boolean(form.isOrderable),
+      isActive: Boolean(form.isActive),
+    };
+
+    // Only send chargeMasterCode on create; update ignores it in current backend.
+    if (!editing && form.chargeMasterCode.trim()) payload.chargeMasterCode = form.chargeMasterCode.trim();
+    return payload;
+  }
+
+  async function save() {
+    if (!branchId) return;
+    const payload = normalizePayload();
+    if (!payload.code || !payload.name || !payload.category) {
+      toast({ title: "Missing fields", description: "Code, Name and Category are required." });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      if (editing) {
+        await apiFetch(`/api/infrastructure/services/${encodeURIComponent(editing.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await apiFetch(`/api/infrastructure/services?branchId=${encodeURIComponent(branchId)}`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+
+      onOpenChange(false);
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const mappings = editing?.mappings || [];
+  const latest = mappings[0] || null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={drawerClassName()}>
+        <ModalHeader
+          title={editing ? "Edit Service Item" : "New Service Item"}
+          description="Define an orderable service. Optionally map it to a ChargeMaster code during create."
+          icon={<ClipboardList className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
+        />
+
+        <div className="grid gap-6">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Code</Label>
+              <Input
+                value={form.code}
+                onChange={(e) => patch({ code: e.target.value })}
+                placeholder="e.g., CBC, XRAY-CHEST, CONSULT-GEN"
+              />
+              <div className="text-xs text-zc-muted min-h-[16px]">
+                Keep code stable. Used in audits and integrations.
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Name</Label>
+              <Input value={form.name} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g., Complete Blood Count" />
+              <div className="text-xs text-zc-muted min-h-[16px] invisible" aria-hidden="true">
+                Placeholder helper
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Category</Label>
+              <Input value={form.category} onChange={(e) => patch({ category: e.target.value })} placeholder="e.g., LAB, RADIOLOGY, PROCEDURE" />
+              <div className="text-xs text-zc-muted min-h-[16px]">
+                Category drives grouping in catalogues and ordering UI.
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Unit (optional)</Label>
+              <Input value={form.unit} onChange={(e) => patch({ unit: e.target.value })} placeholder="e.g., Test, Scan, Session" />
+              <div className="text-xs text-zc-muted min-h-[16px] invisible" aria-hidden="true">
+                Placeholder helper
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex items-start gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+              <Switch checked={form.isOrderable} onCheckedChange={(v) => patch({ isOrderable: v })} />
+              <div>
+                <div className="text-sm font-semibold text-zc-text">Orderable</div>
+                <div className="text-sm text-zc-muted">
+                  If disabled, this item won’t appear in ordering screens (kept for history).
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+              <Switch checked={form.isActive} onCheckedChange={(v) => patch({ isActive: v })} />
+              <div>
+                <div className="text-sm font-semibold text-zc-text">Active</div>
+                <div className="text-sm text-zc-muted">
+                  Use inactive for retired services. You can still keep them non-orderable.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {!editing ? (
+            <div className="grid gap-2">
+              <Label>ChargeMaster Code (optional)</Label>
+              <Input
+                value={form.chargeMasterCode}
+                onChange={(e) => patch({ chargeMasterCode: e.target.value })}
+                placeholder="e.g., CM-CBC (if provided, mapping will be created)"
+              />
+              <div className="text-xs text-zc-muted">
+                If blank, backend opens a FixIt for missing mapping. You can also map later from the Mapping screen.
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-zc-text">Charge Mapping</div>
+                  <div className="text-sm text-zc-muted">
+                    Mapping is managed in <span className="font-semibold">Service ↔ Charge Mapping</span>.
+                  </div>
+                </div>
+                <Button variant="outline" asChild className="gap-2">
+                  <Link href={`/superadmin/infrastructure/service-mapping?serviceItemId=${encodeURIComponent(editing.id)}`}>
+                    Open mapping <ExternalLink className="h-4 w-4" />
+                  </Link>
+                </Button>
+              </div>
+
+              <Separator className="my-4" />
+
+              <div className="rounded-xl border border-zc-border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[220px]">Charge Master</TableHead>
+                      <TableHead className="w-[200px]">Effective From</TableHead>
+                      <TableHead className="w-[200px]">Effective To</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {mappings.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4}>
+                          <div className="flex items-center justify-center gap-2 py-8 text-sm text-zc-muted">
+                            <AlertTriangle className="h-4 w-4 text-zc-warn" /> No mapping history found.
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      mappings.slice(0, 5).map((m) => (
+                        <TableRow key={m.id}>
+                          <TableCell className="font-mono text-xs">
+                            <div className="flex flex-col gap-1">
+                              <span className="font-semibold text-zc-text">{m.chargeMasterItem?.code || "—"}</span>
+                              <span className="text-[11px] text-zc-muted">{m.chargeMasterItem?.name || ""}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-sm text-zc-muted">{fmtDateTime(m.effectiveFrom)}</TableCell>
+                          <TableCell className="text-sm text-zc-muted">{fmtDateTime(m.effectiveTo || null)}</TableCell>
+                          <TableCell>
+                            {m.effectiveTo ? <Badge variant="secondary">CLOSED</Badge> : <Badge variant="ok">ACTIVE</Badge>}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {latest && !latest.effectiveTo ? (
+                <div className="mt-3 text-xs text-zc-muted">
+                  Current mapping:{" "}
+                  <span className="font-mono font-semibold text-zc-text">{latest.chargeMasterItem?.code || "—"}</span>
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          <div className="grid gap-2">
+            <Label>Notes (optional)</Label>
+            <Textarea
+              value={form.notes}
+              onChange={(e) => patch({ notes: e.target.value })}
+              placeholder="Internal notes about this service item..."
+              className="min-h-[90px]"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
