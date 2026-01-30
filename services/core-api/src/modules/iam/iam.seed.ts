@@ -265,7 +265,7 @@ export class IamSeedService implements OnModuleInit {
       });
 
       // dev seed identity (optional)
-      const email = "superadmin@zypocare.local";
+      const email = "superadmin@zypocare.com";
       const temp = "ChangeMe@123";
       const hash = hashPassword(temp);
 

@@ -682,11 +682,22 @@ model TariffPlan {
   branchId String
   branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
-  kind   TariffPlanKind   @default(PRICE_LIST)
-  status TariffPlanStatus @default(DRAFT)
+  // Option B+ (payer/contract linked price lists)
+  kind       TariffPlanKind   @default(PRICE_LIST)
+  planStatus TariffPlanStatus @default(DRAFT)
 
   code String @db.VarChar(48)
   name String @db.VarChar(160)
+
+  description String?
+
+  // Operational flags
+  isActive  Boolean @default(true)
+  isDefault Boolean @default(false)
+
+  // Legacy fields kept for backward compatibility
+  status    String @default("ACTIVE")
+  payerType String @default("SELF")
 
   // Optional linkage: cash price list (no payer/contract) OR contract-based plan
   payerId String?
@@ -701,13 +712,17 @@ model TariffPlan {
   effectiveFrom DateTime  @default(now())
   effectiveTo   DateTime?
 
+  // plan-level versioning
+  version Int @default(1)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   rates TariffRate[]
 
   @@unique([branchId, code])
-  @@index([branchId, kind, status])
+  @@index([branchId, kind, planStatus])
+  @@index([branchId, isDefault])
   @@index([branchId, effectiveFrom])
   @@index([branchId, payerId])
   @@index([branchId, contractId])
@@ -728,21 +743,27 @@ model TariffRate {
   tariffPlanId String
   tariffPlan   TariffPlan @relation(fields: [tariffPlanId], references: [id], onDelete: Cascade)
 
-  // ✅ Primary rate anchor (no legacy service-code). ChargeMaster-first billing.
-  chargeMasterItemId String
-  chargeMasterItem   ChargeMasterItem @relation(fields: [chargeMasterItemId], references: [id], onDelete: Restrict)
+  // ✅ Primary rate anchor (Option B)
+  chargeMasterItemId String?
+  chargeMasterItem   ChargeMasterItem? @relation(fields: [chargeMasterItemId], references: [id], onDelete: SetNull)
 
-  amount Decimal @db.Decimal(12, 2)
+  // Legacy anchor (kept for old /billing/tariffs/rates)
+  serviceCode String? @db.VarChar(48)
+
+  // Amount & currency
+  rateAmount Decimal @db.Decimal(12, 2)
+  currency   String  @default("INR") @db.VarChar(8)
 
   // Optional per-rate overrides
-  taxCodeId String?
-  taxCode   TaxCode? @relation(fields: [taxCodeId], references: [id], onDelete: SetNull)
-
-  // Overrides plan-level tax inclusion if set
-  isTaxInclusive Boolean?
+  taxCodeId      String?
+  taxCode        TaxCode? @relation(fields: [taxCodeId], references: [id], onDelete: SetNull)
+  isTaxInclusive Boolean  @default(false)
 
   rules Json?
+  notes String?
 
+  // Lifecycle & history
+  isActive      Boolean   @default(true)
   effectiveFrom DateTime  @default(now())
   effectiveTo   DateTime?
   version       Int       @default(1)
@@ -754,8 +775,10 @@ model TariffRate {
   updatedAt DateTime @updatedAt
 
   @@unique([tariffPlanId, chargeMasterItemId, version])
-  @@index([tariffPlanId, chargeMasterItemId, effectiveFrom])
+  @@unique([tariffPlanId, serviceCode, version])
   @@index([tariffPlanId])
+  @@index([tariffPlanId, chargeMasterItemId])
+  @@index([tariffPlanId, serviceCode])
 }
 
 model ConsentRecord {

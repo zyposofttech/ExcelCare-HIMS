@@ -8,61 +8,21 @@ import { canonicalizeCode } from "../../../common/naming.util";
 export class ChargeMasterService {
   constructor(private readonly ctx: InfraContextService) {}
 
-  private async openFixItOnce(branchId: string, input: {
-    type: any;
-    entityType?: any;
-    entityId?: string | null;
-    serviceItemId?: string | null;
-    title: string;
-    details?: any;
-    severity?: any;
-  }) {
-    const exists = await this.ctx.prisma.fixItTask.findFirst({
-      where: {
-        branchId,
-        type: input.type,
-        status: { in: ["OPEN", "IN_PROGRESS"] as any },
-        entityType: input.entityType ?? null,
-        entityId: input.entityId ?? null,
-      },
+  private async assertTaxCode(branchId: string, taxCodeId?: string | null) {
+    if (!taxCodeId) return null;
+    const exists = await this.ctx.prisma.taxCode.findFirst({
+      where: { id: taxCodeId, branchId, isActive: true },
       select: { id: true },
     });
-    if (exists) return;
-
-    await this.ctx.prisma.fixItTask.create({
-      data: {
-        branchId,
-        type: input.type,
-        status: "OPEN" as any,
-        severity: (input.severity ?? "BLOCKER") as any,
-        entityType: (input.entityType ?? null) as any,
-        entityId: input.entityId ?? null,
-        serviceItemId: input.serviceItemId ?? null,
-        title: input.title,
-        details: input.details ?? undefined,
-      },
-    });
-  }
-
-  private async resolveFixIts(branchId: string, where: any) {
-    await this.ctx.prisma.fixItTask.updateMany({
-      where: { branchId, status: { in: ["OPEN", "IN_PROGRESS"] as any }, ...where },
-      data: { status: "RESOLVED" as any, resolvedAt: new Date() },
-    });
+    if (!exists) throw new BadRequestException("Invalid taxCodeId for this branch");
+    return taxCodeId;
   }
 
   async createChargeMasterItem(principal: Principal, dto: CreateChargeMasterItemDto, branchIdParam?: string | null) {
     const branchId = this.ctx.resolveBranchId(principal, branchIdParam ?? null);
     const code = canonicalizeCode(dto.code);
 
-    // enforce: taxCode must be ACTIVE if provided
-    if (dto.taxCodeId) {
-      const tc = await this.ctx.prisma.taxCode.findFirst({
-        where: { id: dto.taxCodeId, branchId, isActive: true },
-        select: { id: true },
-      });
-      if (!tc) throw new BadRequestException("Invalid taxCodeId (must belong to branch and be ACTIVE)");
-    }
+    const taxCodeId = await this.assertTaxCode(branchId, dto.taxCodeId ?? null);
 
     const created = await this.ctx.prisma.chargeMasterItem.create({
       data: {
@@ -71,28 +31,17 @@ export class ChargeMasterService {
         name: dto.name.trim(),
         category: dto.category ?? null,
         unit: dto.unit ?? null,
-        chargeUnit: (dto.chargeUnit ?? "PER_UNIT") as any,
-        taxCodeId: dto.taxCodeId ?? null,
+
+        // ✅ Option-B fields
+        chargeUnit: (dto.chargeUnit as any) ?? undefined,
+        taxCodeId,
         isTaxInclusive: dto.isTaxInclusive ?? false,
         hsnSac: dto.hsnSac ?? null,
-        billingPolicy: dto.billingPolicy ?? undefined,
+        billingPolicy: dto.billingPolicy !== undefined ? (dto.billingPolicy as any) : undefined,
+
         isActive: dto.isActive ?? true,
       },
     });
-
-    // if tax code present => resolve missing/inactive fixits
-    if (created.taxCodeId) {
-      await this.resolveFixIts(branchId, {
-        type: "TAX_CODE_MISSING" as any,
-        entityType: "CHARGE_MASTER_ITEM" as any,
-        entityId: created.id,
-      });
-      await this.resolveFixIts(branchId, {
-        type: "TAX_CODE_INACTIVE" as any,
-        entityType: "TAX_CODE" as any,
-        entityId: created.taxCodeId,
-      });
-    }
 
     await this.ctx.audit.log({
       branchId,
@@ -106,64 +55,86 @@ export class ChargeMasterService {
     return created;
   }
 
-  async listChargeMasterItems(principal: Principal, q: { branchId?: string | null; q?: string }) {
+  async listChargeMasterItems(
+    principal: Principal,
+    q: { branchId?: string | null; q?: string; includeInactive?: boolean; take?: number },
+  ) {
     const branchId = this.ctx.resolveBranchId(principal, q.branchId ?? null);
-
     const where: any = { branchId };
+
+    if (!q.includeInactive) where.isActive = true;
     if (q.q) {
       where.OR = [
-        { code: { contains: q.q, mode: "insensitive" } },
         { name: { contains: q.q, mode: "insensitive" } },
+        { code: { contains: q.q, mode: "insensitive" } },
+        { category: { contains: q.q, mode: "insensitive" } },
       ];
     }
 
     return this.ctx.prisma.chargeMasterItem.findMany({
       where,
-      orderBy: [{ isActive: "desc" }, { code: "asc" }],
+      orderBy: [{ name: "asc" }],
+      take: q.take && Number.isFinite(q.take) ? Math.min(Math.max(q.take, 1), 500) : 200,
       include: { taxCode: true },
     });
   }
 
   async getChargeMasterItem(principal: Principal, id: string) {
-    const item = await this.ctx.prisma.chargeMasterItem.findUnique({
+    const row = await this.ctx.prisma.chargeMasterItem.findUnique({
       where: { id },
       include: { taxCode: true },
     });
-    if (!item) throw new NotFoundException("ChargeMasterItem not found");
-    this.ctx.resolveBranchId(principal, item.branchId);
-    return item;
+    if (!row) throw new NotFoundException("Charge master item not found");
+
+    // access check
+    this.ctx.resolveBranchId(principal, row.branchId);
+    return row;
   }
 
   async updateChargeMasterItem(principal: Principal, id: string, dto: UpdateChargeMasterItemDto) {
     const existing = await this.ctx.prisma.chargeMasterItem.findUnique({
       where: { id },
-      select: { id: true, branchId: true, chargeUnit: true, taxCodeId: true },
+      select: { id: true, branchId: true },
     });
-    if (!existing) throw new NotFoundException("ChargeMasterItem not found");
+    if (!existing) throw new NotFoundException("Charge master item not found");
+
     const branchId = this.ctx.resolveBranchId(principal, existing.branchId);
 
-    // enforce: taxCode must be ACTIVE if provided (non-null)
-    if (dto.taxCodeId !== undefined && dto.taxCodeId !== null) {
-      const tc = await this.ctx.prisma.taxCode.findFirst({
-        where: { id: dto.taxCodeId, branchId, isActive: true },
-        select: { id: true },
-      });
-      if (!tc) throw new BadRequestException("Invalid taxCodeId (must belong to branch and be ACTIVE)");
-    }
+    const taxCodeIdNormalized =
+      dto.taxCodeId === undefined
+        ? undefined
+        : dto.taxCodeId === null || String(dto.taxCodeId).trim() === ""
+          ? null
+          : String(dto.taxCodeId).trim();
+
+    const hsnNormalized =
+      dto.hsnSac === undefined
+        ? undefined
+        : dto.hsnSac === null || String(dto.hsnSac).trim() === ""
+          ? null
+          : String(dto.hsnSac).trim();
+
+    const taxCodeId =
+      taxCodeIdNormalized === undefined ? undefined : await this.assertTaxCode(branchId, taxCodeIdNormalized);
 
     const updated = await this.ctx.prisma.chargeMasterItem.update({
       where: { id },
       data: {
+        code: dto.code ? canonicalizeCode(dto.code) : undefined,
         name: dto.name?.trim(),
-        category: dto.category !== undefined ? (dto.category ?? null) : undefined,
-        unit: dto.unit !== undefined ? (dto.unit ?? null) : undefined,
-        chargeUnit: dto.chargeUnit ? (dto.chargeUnit as any) : undefined,
-        taxCodeId: dto.taxCodeId !== undefined ? (dto.taxCodeId ?? null) : undefined,
-        isTaxInclusive: dto.isTaxInclusive !== undefined ? dto.isTaxInclusive : undefined,
-        hsnSac: dto.hsnSac !== undefined ? (dto.hsnSac ?? null) : undefined,
-        billingPolicy: dto.billingPolicy !== undefined ? dto.billingPolicy : undefined,
-        isActive: dto.isActive !== undefined ? dto.isActive : undefined,
+        category: dto.category === undefined ? undefined : (dto.category ?? null),
+        unit: dto.unit === undefined ? undefined : (dto.unit ?? null),
+
+        // ✅ Option-B fields
+        chargeUnit: dto.chargeUnit === undefined ? undefined : (dto.chargeUnit as any),
+        taxCodeId,
+        isTaxInclusive: dto.isTaxInclusive ?? undefined,
+        hsnSac: hsnNormalized,
+        billingPolicy: dto.billingPolicy !== undefined ? (dto.billingPolicy as any) : undefined,
+
+        isActive: dto.isActive ?? undefined,
       },
+      include: { taxCode: true },
     });
 
     await this.ctx.audit.log({
@@ -174,68 +145,6 @@ export class ChargeMasterService {
       entityId: id,
       meta: dto,
     });
-
-    // ---------- Auto-resolve tax fixits if now has tax
-    if (updated.taxCodeId) {
-      await this.resolveFixIts(branchId, {
-        type: "TAX_CODE_MISSING" as any,
-        entityType: "CHARGE_MASTER_ITEM" as any,
-        entityId: id,
-      });
-      await this.resolveFixIts(branchId, {
-        type: "TAX_CODE_INACTIVE" as any,
-        entityType: "TAX_CODE" as any,
-        entityId: updated.taxCodeId,
-      });
-    } else {
-      // If tax removed -> open TAX_CODE_MISSING for this CM (GoLive will also open, but we open immediately)
-      await this.openFixItOnce(branchId, {
-        type: "TAX_CODE_MISSING" as any,
-        entityType: "CHARGE_MASTER_ITEM" as any,
-        entityId: id,
-        title: `Tax code missing for charge item`,
-        details: { chargeMasterItemId: id },
-        severity: "BLOCKER",
-      });
-    }
-
-    // ---------- Charge Unit mismatch: if chargeUnit changed, re-check all active service mappings
-    if (dto.chargeUnit && dto.chargeUnit !== (existing.chargeUnit as any)) {
-      const mappings = await this.ctx.prisma.serviceChargeMapping.findMany({
-        where: { branchId, chargeMasterItemId: id, effectiveTo: null },
-        select: { serviceItemId: true, serviceItem: { select: { id: true, code: true, name: true, chargeUnit: true } } },
-      });
-
-      for (const m of mappings) {
-        const svc = m.serviceItem;
-        if (!svc) continue;
-
-        const mismatch = (svc.chargeUnit as any) !== (updated.chargeUnit as any);
-
-        if (mismatch) {
-          await this.openFixItOnce(branchId, {
-            type: "CHARGE_UNIT_MISMATCH" as any,
-            entityType: "SERVICE_ITEM" as any,
-            entityId: svc.id,
-            serviceItemId: svc.id,
-            title: `Charge unit mismatch for ${svc.code}`,
-            details: {
-              serviceItemId: svc.id,
-              serviceChargeUnit: svc.chargeUnit,
-              chargeMasterItemId: updated.id,
-              chargeMasterChargeUnit: updated.chargeUnit,
-            },
-            severity: "BLOCKER",
-          });
-        } else {
-          await this.resolveFixIts(branchId, {
-            type: "CHARGE_UNIT_MISMATCH" as any,
-            entityType: "SERVICE_ITEM" as any,
-            entityId: svc.id,
-          });
-        }
-      }
-    }
 
     return updated;
   }

@@ -1,10 +1,13 @@
-import { Type } from "class-transformer";
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, MaxLength, Min } from "class-validator";
+import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 
 const TAX_TYPES = ["GST", "TDS", "OTHER"] as const;
-type TaxType = (typeof TAX_TYPES)[number];
 
 export class UpdateTaxCodeDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  code?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(160)
@@ -12,17 +15,20 @@ export class UpdateTaxCodeDto {
 
   @IsOptional()
   @IsIn(TAX_TYPES as any)
-  taxType?: TaxType;
+  taxType?: (typeof TAX_TYPES)[number];
 
   @IsOptional()
-  @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @Max(100)
   ratePercent?: number;
 
   @IsOptional()
   components?: any;
 
+  /**
+   * To CLEAR: send "" or null
+   */
   @IsOptional()
   @IsString()
   @MaxLength(16)

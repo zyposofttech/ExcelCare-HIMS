@@ -41,7 +41,7 @@ export class AuthController {
   async forceSeed() {
     const prisma = (this.authService as any).prisma;
 
-    const email = "superadmin@zypocare.local";
+    const email = "superadmin@zypocare.com";
     const password = "ChangeMe@123";
     const hash = await hashPassword(password);
 

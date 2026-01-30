@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { Permissions } from "../../auth/permissions.decorator";
 import { PERM } from "../../iam/iam.constants";
@@ -15,35 +15,43 @@ export class TaxCodesController {
   }
 
   @Get("tax-codes")
-  @Permissions(PERM.INFRA_TAX_CODE_READ)
-  list(
+  @Permissions(PERM.INFRA_CHARGE_MASTER_READ)
+  async list(
     @Req() req: any,
     @Query("branchId") branchId?: string,
-    @Query("includeInactive") includeInactive?: string,
     @Query("q") q?: string,
+    @Query("includeInactive") includeInactive?: string,
+    @Query("take") take?: string,
   ) {
     return this.svc.list(this.principal(req), {
       branchId: branchId ?? null,
+      q,
       includeInactive: includeInactive === "true",
-      search: q ?? "",
+      take: take ? Number(take) : undefined,
     });
   }
 
-  @Get("tax-codes/:id")
-  @Permissions(PERM.INFRA_TAX_CODE_READ)
-  get(@Req() req: any, @Param("id") id: string) {
-    return this.svc.get(this.principal(req), id);
-  }
-
   @Post("tax-codes")
-  @Permissions(PERM.INFRA_TAX_CODE_CREATE)
-  create(@Req() req: any, @Body() dto: CreateTaxCodeDto, @Query("branchId") branchId?: string) {
+  @Permissions(PERM.INFRA_CHARGE_MASTER_UPDATE)
+  async create(@Req() req: any, @Body() dto: CreateTaxCodeDto, @Query("branchId") branchId?: string) {
     return this.svc.create(this.principal(req), dto, branchId ?? null);
   }
 
+  @Get("tax-codes/:id")
+  @Permissions(PERM.INFRA_CHARGE_MASTER_READ)
+  async get(@Req() req: any, @Param("id") id: string) {
+    return this.svc.get(this.principal(req), id);
+  }
+
   @Patch("tax-codes/:id")
-  @Permissions(PERM.INFRA_TAX_CODE_UPDATE)
-  update(@Req() req: any, @Param("id") id: string, @Body() dto: UpdateTaxCodeDto) {
+  @Permissions(PERM.INFRA_CHARGE_MASTER_UPDATE)
+  async update(@Req() req: any, @Param("id") id: string, @Body() dto: UpdateTaxCodeDto) {
     return this.svc.update(this.principal(req), id, dto);
+  }
+
+  @Delete("tax-codes/:id")
+  @Permissions(PERM.INFRA_CHARGE_MASTER_UPDATE)
+  async deactivate(@Req() req: any, @Param("id") id: string) {
+    return this.svc.deactivate(this.principal(req), id);
   }
 }

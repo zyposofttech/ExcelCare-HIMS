@@ -254,25 +254,23 @@ export default function SuperAdminServiceMappingPage() {
     return next;
   }
 
-  async function loadServices(showToast = false) {
-    if (!branchId) return;
+  async function loadServices(forBranchId?: string, showToast = false) {
+    const bid = forBranchId || branchId;
+    if (!bid) return;
+
     setErr(null);
     setLoading(true);
     try {
-      // We fetch services list and rely on backend to include mappings if available.
       const rows =
         (await apiFetch<ServiceItemRow[]>(
           `/api/infrastructure/services?${buildQS({
-            branchId,
+            branchId: bid,
             q: q.trim() || undefined,
             includeInactive: includeInactive ? "true" : undefined,
-            // Optional hint flags; backend may ignore safely
-            includeMappings: "true",
+            includeMappings: "true", // backend may ignore safely
           })}`,
         )) || [];
 
-      // Optional client-side guardrails (in case backend doesn't filter):
-      // billable + published is what you want in mapping screen.
       const filtered = rows.filter((r) => {
         const billableOk = r.isBillable === undefined ? true : Boolean(r.isBillable);
         const publishedOk =
@@ -293,17 +291,17 @@ export default function SuperAdminServiceMappingPage() {
     }
   }
 
-  async function loadServiceDetail(id: string) {
-    if (!branchId || !id) return;
+  async function loadServiceDetail(id: string, forBranchId?: string) {
+    const bid = forBranchId || branchId;
+    if (!bid || !id) return;
+
     setBusy(true);
     try {
-      // If you have a detail endpoint, this gives mapping history reliably.
       const detail = await apiFetch<ServiceItemRow>(
-        `/api/infrastructure/services/${encodeURIComponent(id)}?${buildQS({ branchId, includeMappings: "true" })}`,
+        `/api/infrastructure/services/${encodeURIComponent(id)}?${buildQS({ branchId: bid, includeMappings: "true" })}`,
       );
       setSelected(detail || null);
     } catch {
-      // fallback: use list row
       const row = allServices.find((x) => x.id === id) || null;
       setSelected(row);
     } finally {
@@ -316,18 +314,16 @@ export default function SuperAdminServiceMappingPage() {
     setLoading(true);
     try {
       const bid = branchId || (await loadBranches());
-      if (!bid) {
-        setLoading(false);
-        return;
-      }
-      await loadServices(false);
+      if (!bid) return;
 
-      // pick selection from URL if present
+      // ✅ ensure first-load fetch happens even before state finishes updating
+      await loadServices(bid, false);
+
       const urlId = sp?.get("serviceItemId") || "";
       const nextId = urlId || selectedId || "";
       if (nextId) {
         setSelectedId(nextId);
-        await loadServiceDetail(nextId);
+        await loadServiceDetail(nextId, bid);
       }
 
       if (showToast) toast({ title: "Service mapping ready", description: "Branch scope and services are up to date." });
@@ -339,6 +335,7 @@ export default function SuperAdminServiceMappingPage() {
       setLoading(false);
     }
   }
+
 
   React.useEffect(() => {
     void refreshAll(false);
@@ -356,14 +353,14 @@ export default function SuperAdminServiceMappingPage() {
   React.useEffect(() => {
     if (!branchId) return;
     setPage(1);
-    void loadServices(false);
+    void loadServices(branchId, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId, includeInactive]);
 
   React.useEffect(() => {
     if (!branchId) return;
     setPage(1);
-    const t = setTimeout(() => void loadServices(false), 250);
+    const t = setTimeout(() => void loadServices(branchId, false), 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
@@ -374,15 +371,13 @@ export default function SuperAdminServiceMappingPage() {
       setSelected(null);
       return;
     }
-    void loadServiceDetail(selectedId);
+    void loadServiceDetail(selectedId, branchId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, branchId]);
-
   async function onBranchChange(nextId: string) {
     setBranchId(nextId);
     writeLS(LS_BRANCH, nextId);
 
-    // reset filters + selection
     setQ("");
     setIncludeInactive(false);
     setMappingFilter("all");
@@ -394,7 +389,8 @@ export default function SuperAdminServiceMappingPage() {
     setErr(null);
     setLoading(true);
     try {
-      await loadServices(false);
+      // ✅ do not rely on state update timing
+      await loadServices(nextId, false);
       toast({ title: "Branch scope changed", description: "Loaded billable published services for selected branch." });
     } catch (e: any) {
       const msg = e?.message || "Failed to load branch scope";
@@ -404,6 +400,7 @@ export default function SuperAdminServiceMappingPage() {
       setLoading(false);
     }
   }
+
 
   const filteredServices = React.useMemo(() => {
     let rows = [...(allServices || [])];
@@ -754,7 +751,9 @@ export default function SuperAdminServiceMappingPage() {
                           busy={busy}
                           onMap={() => setMapOpen(true)}
                           onAfterChange={async () => {
-                            await loadServices(false);
+                            await loadServices(branchId, false);
+                            if (selectedId) await loadServiceDetail(selectedId, branchId);
+
                             await loadServiceDetail(selectedId);
                           }}
                         />
@@ -857,8 +856,9 @@ export default function SuperAdminServiceMappingPage() {
         service={selected}
         onSaved={async () => {
           toast({ title: "Mapping saved", description: "Service is now mapped to Charge Master." });
-          await loadServices(false);
-          if (selectedId) await loadServiceDetail(selectedId);
+          await loadServices(branchId, false);
+          if (selectedId) await loadServiceDetail(selectedId, branchId);
+
         }}
       />
     </AppShell>
@@ -1153,10 +1153,9 @@ function MapServiceModal({
 
     const ok = isMismatch
       ? window.confirm(
-          `Charge unit mismatch detected:\nService = ${service.chargeUnit || "—"}\nChargeMaster = ${
-            pickedCm.chargeUnit || "—"
-          }\n\nProceed? (This will open a FixIt blocker until corrected.)`,
-        )
+        `Charge unit mismatch detected:\nService = ${service.chargeUnit || "—"}\nChargeMaster = ${pickedCm.chargeUnit || "—"
+        }\n\nProceed? (This will open a FixIt blocker until corrected.)`,
+      )
       : true;
 
     if (!ok) return;

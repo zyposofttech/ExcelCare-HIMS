@@ -62,7 +62,7 @@ A modern Next.js 15 application utilizing React 19, Tailwind CSS, and Radix UI. 
 | Domain | Technologies |
 | :--- | :--- |
 | **Monorepo** | TurboRepo, pnpm |
-| **Frontend** | Next.js 15, React 19, Tailwind CSS, Radix UI |
+| **Frontend** | Next.js 16, React 19, Tailwind CSS, Radix UI |
 | **Backend** | NestJS, Express, Prisma ORM (PostgreSQL 16) |
 | **AI / ML** | Python 3.10+, FastAPI, Pydantic |
 | **Messaging** | NATS (JetStream) |

@@ -16,25 +16,40 @@ export class ChargeMasterController {
 
   @Post("charge-master")
   @Permissions(PERM.INFRA_CHARGE_MASTER_CREATE)
-  create(@Req() req: any, @Body() dto: CreateChargeMasterItemDto, @Query("branchId") branchId?: string) {
+  async createChargeMaster(
+    @Req() req: any,
+    @Body() dto: CreateChargeMasterItemDto,
+    @Query("branchId") branchId?: string,
+  ) {
     return this.svc.createChargeMasterItem(this.principal(req), dto, branchId ?? null);
   }
 
   @Get("charge-master")
   @Permissions(PERM.INFRA_CHARGE_MASTER_READ)
-  list(@Req() req: any, @Query("branchId") branchId?: string, @Query("q") q?: string) {
-    return this.svc.listChargeMasterItems(this.principal(req), { branchId: branchId ?? null, q });
+  async listChargeMaster(
+    @Req() req: any,
+    @Query("branchId") branchId?: string,
+    @Query("q") q?: string,
+    @Query("includeInactive") includeInactive?: string,
+    @Query("take") take?: string,
+  ) {
+    return this.svc.listChargeMasterItems(this.principal(req), {
+      branchId: branchId ?? null,
+      q,
+      includeInactive: includeInactive === "true",
+      take: take ? Number(take) : undefined,
+    });
   }
 
   @Get("charge-master/:id")
   @Permissions(PERM.INFRA_CHARGE_MASTER_READ)
-  get(@Req() req: any, @Param("id") id: string) {
+  async getChargeMaster(@Req() req: any, @Param("id") id: string) {
     return this.svc.getChargeMasterItem(this.principal(req), id);
   }
 
   @Patch("charge-master/:id")
   @Permissions(PERM.INFRA_CHARGE_MASTER_UPDATE)
-  update(@Req() req: any, @Param("id") id: string, @Body() dto: UpdateChargeMasterItemDto) {
+  async updateChargeMaster(@Req() req: any, @Param("id") id: string, @Body() dto: UpdateChargeMasterItemDto) {
     return this.svc.updateChargeMasterItem(this.principal(req), id, dto);
   }
 }

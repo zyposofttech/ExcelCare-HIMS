@@ -1,15 +1,22 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { Roles } from "../auth/roles.decorator";
 import type { Principal } from "../auth/access-policy.service";
 import { BillingService } from "./billing.service";
-import { ActivateTariffPlanDto, CreateTariffPlanDto, UpdateTariffPlanDto, UpsertTariffRateDto } from "./dto";
+import {
+  ActivateTariffPlanDto,
+  CreateTariffPlanDto,
+  UpdateTariffPlanDto,
+  UpsertTariffRateDto,
+  CreateTaxCodeDto,
+  UpdateTaxCodeDto,
+} from "./dto";
 
 @ApiTags("billing")
 @Controller("billing")
-@Roles("SUPER_ADMIN", "BRANCH_ADMIN")
+@Roles("SUPER_ADMIN", "BRANCH_ADMIN", "BILLING")
 export class BillingController {
-  constructor(private readonly svc: BillingService) {}
+  constructor(private readonly svc: BillingService) { }
 
   private principal(req: any): Principal {
     return req.principal;
@@ -97,4 +104,43 @@ export class BillingController {
   upsertRateAlias(@Req() req: any, @Body() dto: UpsertTariffRateDto) {
     return this.svc.upsertTariffRate(this.principal(req), dto);
   }
+  // -------- Tax Codes (Option-B)
+
+  @Get("tax-codes")
+  listTaxCodes(
+    @Req() req: any,
+    @Query("branchId") branchId?: string,
+    @Query("q") q?: string,
+    @Query("includeInactive") includeInactive?: string,
+    @Query("take") take?: string,
+  ) {
+    return this.svc.listTaxCodes(this.principal(req), {
+      branchId: branchId ?? null,
+      q,
+      includeInactive: includeInactive === "true",
+      take: take ? Number(take) : undefined,
+    });
+  }
+
+  @Post("tax-codes")
+  createTaxCode(
+    @Req() req: any,
+    @Body() dto: CreateTaxCodeDto,
+    @Query("branchId") branchId?: string,
+  ) {
+    // UI sometimes sends branchId in body; allow both
+    return this.svc.createTaxCode(this.principal(req), dto, branchId ?? null);
+  }
+
+
+  @Patch("tax-codes/:id")
+  updateTaxCode(@Req() req: any, @Param("id") id: string, @Body() dto: UpdateTaxCodeDto) {
+    return this.svc.updateTaxCode(this.principal(req), id, dto);
+  }
+
+  @Delete("tax-codes/:id")
+  deactivateTaxCode(@Req() req: any, @Param("id") id: string) {
+    return this.svc.deactivateTaxCode(this.principal(req), id);
+  }
+
 }

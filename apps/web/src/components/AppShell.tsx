@@ -38,12 +38,29 @@ import {
 
 // --- Types & Data ---
 
+type NavBadgeDef = { label: string; tone?: "neutral" | "info" | "new" | "soon" };
+
+type NavChildLink = {
+  type?: "link";
+  label: string;
+  href: string;
+  badge?: NavBadgeDef;
+};
+
+type NavChildGroup = {
+  type: "group";
+  label: string;
+  children: NavChildLink[];
+};
+
+type NavChild = NavChildLink | NavChildGroup;
+
 type NavNode = {
   label: string;
   href: string;
   icon: React.ComponentType<IconProps>;
-  badge?: { label: string; tone?: "neutral" | "info" | "new" | "soon" };
-  children?: Array<{ label: string; href: string; badge?: NavNode["badge"] }>;
+  badge?: NavBadgeDef;
+  children?: NavChild[];
 };
 
 type NavGroup = {
@@ -72,37 +89,61 @@ const NAV_WORKSPACES: NavNode[] = [
     href: "/superadmin/infrastructure",
     icon: IconBuilding,
     children: [
+
       { label: "Overview", href: "/superadmin/infrastructure" },
-
-      { label: "Locations (Building)", href: "/superadmin/infrastructure/locations" },
-      { label: "Unit Types", href: "/superadmin/infrastructure/unit-types" },
-
-      { label: "Units", href: "/superadmin/infrastructure/units" },
-      { label: "Rooms / Bays", href: "/superadmin/infrastructure/rooms" },
-      { label: "Resources", href: "/superadmin/infrastructure/resources" },
-
-      { label: "Housekeeping Gate", href: "/superadmin/infrastructure/bed-policy" },
-      { label: "OT Setup", href: "/superadmin/infrastructure/ot" },
-
-      { label: "Diagnostics Configuration", href: "/superadmin/infrastructure/diagnostics" },
-      { label: "Equipment Register", href: "/superadmin/infrastructure/equipment" },
-
-      { label: "Service Library", href: "/superadmin/infrastructure/service-library" },
-      { label: "Service ↔ Charge Mapping", href: "/superadmin/infrastructure/service-mapping" },
-      { label: "Service Catalogue", href: "/superadmin/infrastructure/service-catalogues" },
-      { label: "Service Packages", href: "/superadmin/infrastructure/service-packages" },
-      { label: "Order Sets", href: "/superadmin/infrastructure/order-sets" },
-
-      { label: "Tax Codes (GST)", href: "/superadmin/infrastructure/tax-codes" },
-      { label: "Charge Master", href: "/superadmin/infrastructure/charge-master" },
-      { label: "Tariff Plans & Rates", href: "/superadmin/infrastructure/tariff-plans" },
-      
-      
-      { label: "Service Availability", href: "/superadmin/infrastructure/service-availability" },
-      { label: "Fix-It Queue", href: "/superadmin/infrastructure/fixit" },
-      { label: "Go-Live Validator", href: "/superadmin/infrastructure/go-live" },
-      
-      { label: "Bulk Import (CSV/XLS)", href: "/superadmin/infrastructure/import" },
+      {
+        type: "group",
+        label: "Infra Core",
+        children: [
+          { label: "Locations (Building)", href: "/superadmin/infrastructure/locations" },
+          { label: "Unit Types", href: "/superadmin/infrastructure/unit-types" },
+          { label: "Units", href: "/superadmin/infrastructure/units" },
+          { label: "Rooms / Bays", href: "/superadmin/infrastructure/rooms" },
+          { label: "Resources", href: "/superadmin/infrastructure/resources" },
+          { label: "Housekeeping Gate", href: "/superadmin/infrastructure/bed-policy" },
+        ],
+      },
+      {
+        type: "group",
+        label: "Clinical Facilities",
+        children: [
+          { label: "OT Setup", href: "/superadmin/infrastructure/ot" },
+          { label: "Diagnostics Configuration", href: "/superadmin/infrastructure/diagnostics" },
+          { label: "Equipment Register", href: "/superadmin/infrastructure/equipment" },
+        ],
+      },
+       {
+        type: "group",
+        label: "Billing Setup",
+        children: [
+          { label: "Tax Codes (GST)", href: "/superadmin/infrastructure/tax-codes" },
+          { label: "Charge Master", href: "/superadmin/infrastructure/charge-master" },
+          { label: "Tariff Plans & Rates", href: "/superadmin/infrastructure/tariff-plans" },
+        ],
+      },
+      {
+        type: "group",
+        label: "Service Catalogue",
+        children: [
+          { label: "Service Items", href: "/superadmin/infrastructure/service-items" },
+          { label: "Service Library", href: "/superadmin/infrastructure/service-library" },
+          { label: "Service <-> Charge Mapping", href: "/superadmin/infrastructure/service-mapping" },
+          { label: "Service Catalogue", href: "/superadmin/infrastructure/service-catalogues" },
+          { label: "Service Packages", href: "/superadmin/infrastructure/service-packages" },
+          { label: "Order Sets", href: "/superadmin/infrastructure/order-sets" },
+          { label: "Service Availability", href: "/superadmin/infrastructure/service-availability" },
+        ],
+      },
+     
+      {
+        type: "group",
+        label: "Readiness & Ops",
+        children: [
+          { label: "Fix-It Queue", href: "/superadmin/infrastructure/fixit" },
+          { label: "Go-Live Validator", href: "/superadmin/infrastructure/golive" },
+          { label: "Bulk Import (CSV/XLS)", href: "/superadmin/infrastructure/import" },
+        ],
+      },
       
     ],
   },
@@ -316,10 +357,26 @@ const COMMAND_ACTIONS: CommandItem[] = [
 
 // --- Command Center Helpers ---
 
+function isChildGroup(child: NavChild): child is NavChildGroup {
+  return (child as NavChildGroup).type === "group";
+}
+
+function flattenChildLinks(children?: NavChild[]) {
+  const links: Array<{ link: NavChildLink; groupLabel?: string }> = [];
+  if (!children?.length) return links;
+  for (const child of children) {
+    if (isChildGroup(child)) {
+      child.children.forEach((link) => links.push({ link, groupLabel: child.label }));
+    } else {
+      links.push({ link: child });
+    }
+  }
+  return links;
+}
+
 // Flatten the navigation tree for searching
 const ALL_NAV_ITEMS = NAV_GROUPS.flatMap((group) =>
   group.items.flatMap((item) => {
-    // ✅ FIX: Explicitly type the results array to include optional parent
     const results: {
       label: string;
       href: string;
@@ -336,15 +393,17 @@ const ALL_NAV_ITEMS = NAV_GROUPS.flatMap((group) =>
         type: "Parent",
       },
     ];
-    if (item.children) {
+
+    const childLinks = flattenChildLinks(item.children);
+    if (childLinks.length) {
       results.push(
-        ...item.children.map((child) => ({
-          label: child.label,
-          href: child.href,
-          icon: item.icon, // Inherit icon from parent module
+        ...childLinks.map(({ link, groupLabel }) => ({
+          label: link.label,
+          href: link.href,
+          icon: item.icon,
           group: group.title,
           type: "Child" as const,
-          parent: item.label,
+          parent: groupLabel ? `${item.label} - ${groupLabel}` : item.label,
         }))
       );
     }
@@ -361,7 +420,7 @@ function isActivePath(pathname: string, href: string) {
 function isNavNodeActive(pathname: string, node: NavNode) {
   if (!node.children?.length) return isActivePath(pathname, node.href);
   if (pathname === node.href) return true;
-  return node.children.some((c) => isActivePath(pathname, c.href));
+  return flattenChildLinks(node.children).some(({ link }) => isActivePath(pathname, link.href));
 }
 
 function readBool(key: string, fallback: boolean) {
@@ -402,7 +461,7 @@ function writeBool(key: string, value: boolean) {
   }
 }
 
-function NavBadge({ badge }: { badge?: NavNode["badge"] }) {
+function NavBadge({ badge }: { badge?: NavBadgeDef }) {
   if (!badge) return null;
   const tone = badge.tone ?? "neutral";
   const cls =
@@ -607,11 +666,25 @@ export function AppShell({
       const items: NavNode[] = [];
       for (const n of g.items) {
         const selfMatch = n.label.toLowerCase().includes(q) || n.href.toLowerCase().includes(q);
-        const children = (n.children ?? []).filter((c) =>
-          (c.label + " " + c.href).toLowerCase().includes(q)
-        );
-        if (!selfMatch && children.length === 0) continue;
-        items.push({ ...n, children: selfMatch ? n.children : children });
+        const filteredChildren: NavChild[] = [];
+        for (const child of n.children ?? []) {
+          if (isChildGroup(child)) {
+            const groupMatch = child.label.toLowerCase().includes(q);
+            const groupChildren = child.children.filter((c) =>
+              (c.label + " " + c.href).toLowerCase().includes(q)
+            );
+            if (groupMatch) {
+              filteredChildren.push(child);
+            } else if (groupChildren.length) {
+              filteredChildren.push({ ...child, children: groupChildren });
+            }
+          } else if ((child.label + " " + child.href).toLowerCase().includes(q)) {
+            filteredChildren.push(child);
+          }
+        }
+
+        if (!selfMatch && filteredChildren.length === 0) continue;
+        items.push({ ...n, children: selfMatch ? n.children : filteredChildren });
       }
       if (items.length) filtered.push({ ...g, items });
     }
@@ -844,7 +917,9 @@ export function AppShell({
                       {group.items.map((node) => {
                         const Icon = node.icon;
                         const active = isNavNodeActive(pathname, node);
-                        const hasActiveChild = !!node.children?.some((c) => isActivePath(pathname, c.href));
+                        const hasActiveChild = flattenChildLinks(node.children).some(({ link }) =>
+                          isActivePath(pathname, link.href)
+                        );
                         const open = !collapsed && ((openMap[node.href] ?? true) || hasActiveChild);
 
                         const linkBase = cn(
@@ -913,8 +988,52 @@ export function AppShell({
                             </div>
 
                             {!collapsed && node.children?.length && open ? (
-                              <div className="mt-1 grid gap-1 pl-9 animate-in slide-in-from-top-1 duration-200">
+                              <div className="mt-1 grid gap-2 pl-9 animate-in slide-in-from-top-1 duration-200">
                                 {node.children.map((c) => {
+                                  if (isChildGroup(c)) {
+                                    return (
+                                      <div key={`group-${c.label}`} className="grid gap-1">
+                                        <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-zc-muted">
+                                          {c.label}
+                                        </div>
+                                        {c.children.map((child) => {
+                                          const childActive =
+                                            child.href === node.href ? pathname === child.href : isActivePath(pathname, child.href);
+                                          return (
+                                            <Link
+                                              key={child.href}
+                                              href={child.href as any}
+                                              className={cn(
+                                                "group flex items-center gap-2 rounded-md px-3 py-2 text-xs transition-colors",
+                                                childActive ? rowActive : "",
+                                                rowHover
+                                              )}
+                                              aria-current={childActive ? "page" : undefined}
+                                            >
+                                              <span
+                                                className={cn(
+                                                  "h-1.5 w-1.5 rounded-full transition-colors",
+                                                  childActive ? "bg-zc-accent" : "bg-zc-border"
+                                                )}
+                                              />
+                                              <span
+                                                className={cn(
+                                                  "min-w-0 flex-1 truncate transition-colors",
+                                                  childActive
+                                                    ? "text-zc-text"
+                                                    : "text-zc-muted group-hover:text-zc-text"
+                                                )}
+                                              >
+                                                {child.label}
+                                              </span>
+                                              <NavBadge badge={child.badge} />
+                                            </Link>
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  }
+
                                   const childActive = c.href === node.href ? pathname === c.href : isActivePath(pathname, c.href);
                                   return (
                                     <Link
@@ -936,9 +1055,7 @@ export function AppShell({
                                       <span
                                         className={cn(
                                           "min-w-0 flex-1 truncate transition-colors",
-                                          childActive
-                                            ? "text-zc-text"
-                                            : "text-zc-muted group-hover:text-zc-text"
+                                          childActive ? "text-zc-text" : "text-zc-muted group-hover:text-zc-text"
                                         )}
                                       >
                                         {c.label}

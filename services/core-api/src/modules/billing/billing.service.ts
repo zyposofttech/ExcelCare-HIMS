@@ -1,16 +1,16 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@zypocare/db";
 import type { Principal } from "../auth/access-policy.service";
 import { AuditService } from "../audit/audit.service";
 import { canonicalizeCode } from "../../common/naming.util";
-import type { ActivateTariffPlanDto, CreateTariffPlanDto, UpdateTariffPlanDto, UpsertTariffRateDto } from "./dto";
+import type { ActivateTariffPlanDto, CreateTariffPlanDto, UpdateTariffPlanDto, UpsertTariffRateDto, CreateTaxCodeDto, UpdateTaxCodeDto } from "./dto";
 
 @Injectable()
 export class BillingService {
   constructor(
     @Inject("PRISMA") private readonly prisma: PrismaClient,
     private readonly audit: AuditService,
-  ) {}
+  ) { }
 
   private resolveBranchId(principal: Principal, requestedBranchId?: string | null) {
     if (principal.roleScope === "BRANCH") {
@@ -28,7 +28,115 @@ export class BillingService {
     serviceItemId: true,
     serviceItem: { select: { id: true, code: true, name: true, chargeUnit: true } },
   } satisfies Prisma.ServiceChargeMappingSelect;
+  async listTaxCodes(
+    principal: Principal,
+    opts: { branchId?: string | null; q?: string; includeInactive?: boolean; take?: number },
+  ) {
+    const branchId = this.resolveBranchId(principal, opts.branchId ?? null);
 
+    const where: any = { branchId };
+    if (!opts.includeInactive) where.isActive = true;
+
+    const query = (opts.q ?? "").trim();
+    if (query) {
+      where.OR = [
+        { code: { contains: query, mode: "insensitive" } },
+        { name: { contains: query, mode: "insensitive" } },
+        { hsnSac: { contains: query, mode: "insensitive" } },
+      ];
+    }
+
+    return this.prisma.taxCode.findMany({
+      where,
+      orderBy: [{ isActive: "desc" }, { code: "asc" }],
+      take: opts.take ? Math.min(Math.max(opts.take, 1), 500) : 200,
+    });
+  }
+  async createTaxCode(principal: Principal, dto: CreateTaxCodeDto, branchIdParam?: string | null) {
+    const requested = (branchIdParam ?? dto.branchId ?? null);
+    const branchId = this.resolveBranchId(principal, requested);
+
+    const code = dto.code.trim().toUpperCase();
+    const name = dto.name.trim();
+    if (!code || !name) throw new BadRequestException("code and name are required");
+
+    try {
+      return await this.prisma.taxCode.create({
+        data: {
+          branchId,
+          code,
+          name,
+          taxType: (dto.taxType as any) ?? "GST",
+          ratePercent: dto.ratePercent as any,
+          components: dto.components ?? undefined,
+          hsnSac:
+            dto.hsnSac === undefined
+              ? undefined
+              : dto.hsnSac === null || String(dto.hsnSac).trim() === ""
+                ? null
+                : String(dto.hsnSac).trim(),
+          isActive: dto.isActive ?? true,
+        },
+      });
+    } catch (e: any) {
+      if (String(e?.code) === "P2002") throw new ConflictException("Tax code already exists for this branch");
+      throw e;
+    }
+  }
+
+  async updateTaxCode(principal: Principal, id: string, dto: UpdateTaxCodeDto) {
+    const existing = await this.prisma.taxCode.findUnique({
+      where: { id },
+      select: { id: true, branchId: true, code: true },
+    });
+    if (!existing) throw new NotFoundException("Tax code not found");
+
+    // enforce scoping
+    this.resolveBranchId(principal, existing.branchId);
+
+    const nextCode = dto.code ? dto.code.trim().toUpperCase() : undefined;
+    if (nextCode && nextCode !== existing.code) {
+      const dup = await this.prisma.taxCode.findFirst({
+        where: { branchId: existing.branchId, code: nextCode },
+        select: { id: true },
+      });
+      if (dup) throw new ConflictException("Tax code already exists for this branch");
+    }
+
+    const hsn =
+      dto.hsnSac === undefined
+        ? undefined
+        : dto.hsnSac === null || String(dto.hsnSac).trim() === ""
+          ? null
+          : String(dto.hsnSac).trim();
+
+    return this.prisma.taxCode.update({
+      where: { id },
+      data: {
+        code: nextCode,
+        name: dto.name?.trim(),
+        taxType: dto.taxType as any,
+        ratePercent: dto.ratePercent === undefined ? undefined : (dto.ratePercent as any),
+        components: dto.components === undefined ? undefined : (dto.components as any),
+        hsnSac: hsn,
+        isActive: dto.isActive === undefined ? undefined : dto.isActive,
+      },
+    });
+  }
+
+  async deactivateTaxCode(principal: Principal, id: string) {
+    const existing = await this.prisma.taxCode.findUnique({
+      where: { id },
+      select: { id: true, branchId: true, isActive: true },
+    });
+    if (!existing) throw new NotFoundException("Tax code not found");
+
+    // enforce scoping
+    this.resolveBranchId(principal, existing.branchId);
+
+    if (!existing.isActive) return existing;
+    return this.prisma.taxCode.update({ where: { id }, data: { isActive: false } });
+  }
   // ---------------- Tariff Plans ----------------
 
   async listTariffPlans(principal: Principal, q: { branchId?: string | null; kind?: string; status?: string }) {
@@ -354,6 +462,12 @@ export class BillingService {
       }
     }
 
+    const rateAmount = (dto as any).rateAmount ?? (dto as any).amount;
+    if (rateAmount === undefined || rateAmount === null) {
+      throw new BadRequestException("rateAmount is required");
+    }
+    const currency = ((dto as any).currency ?? "INR") as any;
+
     const saved = await this.prisma.tariffRate.upsert({
       where: {
         tariffPlanId_chargeMasterItemId_version: {
@@ -363,25 +477,27 @@ export class BillingService {
         } as any,
       },
       update: {
-        amount: dto.amount as any,
+        rateAmount: rateAmount as any,
+        currency,
         effectiveFrom,
         effectiveTo,
         taxCodeId: dto.taxCodeId ?? null,
-        rules: dto.rules ?? undefined,
+        rules: (dto as any).rules ?? undefined,
       },
       create: {
         tariffPlanId,
         chargeMasterItemId: cm.id,
-        amount: dto.amount as any,
+        rateAmount: rateAmount as any,
+        currency,
         version,
         effectiveFrom,
         effectiveTo,
         taxCodeId: dto.taxCodeId ?? null,
-        rules: dto.rules ?? undefined,
+        rules: (dto as any).rules ?? undefined,
         createdByUserId: principal.userId,
       },
     });
-        // -------- FixIt: charge unit mismatch for services mapped to this charge master item
+    // -------- FixIt: charge unit mismatch for services mapped to this charge master item
     // If any serviceItem.chargeUnit != cm.chargeUnit -> open CHARGE_UNIT_MISMATCH on the SERVICE_ITEM
     const mappedServices = (await this.prisma.serviceChargeMapping.findMany({
       where: {

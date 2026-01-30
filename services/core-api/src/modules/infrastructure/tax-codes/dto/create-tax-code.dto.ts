@@ -1,14 +1,8 @@
-import { Type } from "class-transformer";
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, MaxLength, Min } from "class-validator";
+import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 
 const TAX_TYPES = ["GST", "TDS", "OTHER"] as const;
-export type TaxType = (typeof TAX_TYPES)[number];
 
 export class CreateTaxCodeDto {
-  @IsOptional()
-  @IsString()
-  branchId?: string;
-
   @IsString()
   @MaxLength(32)
   code!: string;
@@ -19,11 +13,14 @@ export class CreateTaxCodeDto {
 
   @IsOptional()
   @IsIn(TAX_TYPES as any)
-  taxType?: TaxType;
+  taxType?: (typeof TAX_TYPES)[number];
 
-  @Type(() => Number)
+  /**
+   * Stored as Decimal(7,4) in DB. Use percent (e.g. 18, 5, 0).
+   */
   @IsNumber()
   @Min(0)
+  @Max(100)
   ratePercent!: number;
 
   @IsOptional()
