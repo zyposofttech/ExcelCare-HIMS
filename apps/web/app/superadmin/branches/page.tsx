@@ -845,7 +845,7 @@ export default function BranchesPage() {
 
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
-                        <Button asChild variant="info" className="px-3 gap-2">
+                        <Button asChild variant="success" className="px-3 gap-2">
                           <Link href={`/superadmin/branches/${b.id}`}>
                             Details <IconChevronRight className="h-4 w-4" />
                           </Link>
@@ -854,7 +854,7 @@ export default function BranchesPage() {
                         {isSuperAdmin ? (
                           <>
                             <Button
-                              variant="secondary"
+                              variant="info"
                               className="px-3 gap-2"
                               onClick={() => {
                                 setSelected(b);
@@ -864,11 +864,6 @@ export default function BranchesPage() {
                               <Pencil className="h-4 w-4" />
                               Edit
                             </Button>
-
-                            <Button variant="success" className="px-3">
-                              <Link href={`/superadmin/branches/${encodeURIComponent(b.id)}/facility-setup`}>Facility Setup</Link>
-                            </Button>
-
                             <Button
                               variant="destructive"
                               className="px-3 gap-2"

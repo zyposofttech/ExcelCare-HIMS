@@ -97,6 +97,7 @@ const NAV_WORKSPACES: NavNode[] = [
         children: [
           { label: "Facilities", href: "/superadmin/infrastructure/facilities" },
           { label: "Departments", href: "/superadmin/infrastructure/departments" },
+          { label: "Specialties", href: "/superadmin/infrastructure/specialties" },
         ],
       },
       {

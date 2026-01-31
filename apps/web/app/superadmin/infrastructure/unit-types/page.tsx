@@ -1,39 +1,35 @@
 "use client";
 
 import * as React from "react";
-import { AppLink as Link } from "@/components/app-link";
+import { useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/ui/use-toast";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import {
   AlertTriangle,
-  CheckCircle2,
+  Check,
+  Filter,
+  Layers,
+  Plus,
   RefreshCw,
   Save,
-  Layers,
-  Building2,
-  Plus,
+  Search,
   Wand2,
   Pencil,
-  BookAIcon
 } from "lucide-react";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+/* ----------------------------- Types ----------------------------- */
 
 type BranchRow = {
   id: string;
@@ -60,7 +56,24 @@ type BranchUnitTypeRow =
       isEnabled: boolean;
     };
 
+/* ----------------------------- Helpers ----------------------------- */
+
 const LS_KEY = "zc.superadmin.infrastructure.branchId";
+
+type Tone = "indigo" | "emerald" | "amber" | "rose";
+
+function summaryCardClass(tone: Tone) {
+  if (tone === "emerald") {
+    return "border-emerald-200 bg-emerald-50/50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-900/10 dark:text-emerald-200";
+  }
+  if (tone === "amber") {
+    return "border-amber-200 bg-amber-50/50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-900/10 dark:text-amber-200";
+  }
+  if (tone === "rose") {
+    return "border-rose-200 bg-rose-50/50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-900/10 dark:text-rose-200";
+  }
+  return "border-indigo-200 bg-indigo-50/50 text-indigo-700 dark:border-indigo-900/50 dark:bg-indigo-900/10 dark:text-indigo-200";
+}
 
 function readLS(key: string) {
   if (typeof window === "undefined") return null;
@@ -70,6 +83,7 @@ function readLS(key: string) {
     return null;
   }
 }
+
 function writeLS(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
@@ -79,19 +93,54 @@ function writeLS(key: string, value: string) {
 }
 
 function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("animate-pulse rounded bg-zinc-200 dark:bg-zinc-800", className)} />;
+  return <div className={cn("animate-pulse rounded-md bg-zc-panel/30", className)} />;
 }
 
 function suggestCatalogCode(name: string) {
   const raw = (name || "").trim().toUpperCase();
   if (!raw) return "";
-  // Keep A-Z, 0-9, underscore, hyphen. Convert whitespace to underscore.
   const normalized = raw.replace(/\s+/g, "_").replace(/[^A-Z0-9_-]/g, "");
-  return normalized.slice(0, 32); // Prisma allows VarChar(32)
+  return normalized.slice(0, 32);
 }
+
+function normalizeEnabledIds(rows: BranchUnitTypeRow[]): string[] {
+  if (!rows || rows.length === 0) return [];
+  if (typeof rows[0] === "string") return (rows as string[]).filter(Boolean);
+  return (rows as any[])
+    .filter((r) => r?.unitTypeId && r?.isEnabled === true)
+    .map((r) => String(r.unitTypeId));
+}
+
+function errorMessage(err: unknown, fallback: string) {
+  if (err instanceof ApiError) return err.message;
+  if (err instanceof Error) return err.message;
+  return fallback;
+}
+
+function uniqSorted(ids: string[]) {
+  return Array.from(new Set(ids)).sort();
+}
+
+function sameSet(a: string[], b: string[]) {
+  const aa = uniqSorted(a);
+  const bb = uniqSorted(b);
+  if (aa.length !== bb.length) return false;
+  for (let i = 0; i < aa.length; i++) if (aa[i] !== bb[i]) return false;
+  return true;
+}
+
+function sortCatalog(list: UnitTypeCatalogRow[]) {
+  return list
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999) || a.name.localeCompare(b.name));
+}
+
+/* ----------------------------- Page ----------------------------- */
 
 export default function SuperAdminUnitTypeEnablementPage() {
   const { toast } = useToast();
+  const sp = useSearchParams();
+  const qpBranchId = sp.get("branchId") || undefined;
 
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
@@ -101,24 +150,20 @@ export default function SuperAdminUnitTypeEnablementPage() {
   const [branchId, setBranchId] = React.useState<string | undefined>(undefined);
 
   const [catalog, setCatalog] = React.useState<UnitTypeCatalogRow[]>([]);
-  const [enabledSet, setEnabledSet] = React.useState<Set<string>>(new Set());
-  const [initialEnabledSet, setInitialEnabledSet] = React.useState<Set<string>>(new Set());
+  const [enabledIds, setEnabledIds] = React.useState<string[]>([]);
+  const [savedEnabledIds, setSavedEnabledIds] = React.useState<string[]>([]);
 
   const [q, setQ] = React.useState("");
+  const [includeInactive, setIncludeInactive] = React.useState(false);
+  const [enabledFilter, setEnabledFilter] = React.useState<"all" | "enabled" | "disabled">("all");
+  const [showFilters, setShowFilters] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState<"all" | "rooms" | "schedulable">("all");
 
-  // ---- Create Catalog Dialog state ----
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createBusy, setCreateBusy] = React.useState(false);
   const [createErr, setCreateErr] = React.useState<string | null>(null);
   const [manualCode, setManualCode] = React.useState(false);
-  const [createForm, setCreateForm] = React.useState<{
-    code: string;
-    name: string;
-    usesRoomsDefault: boolean;
-    schedulableByDefault: boolean;
-    isActive: boolean;
-    sortOrder: number;
-  }>({
+  const [createForm, setCreateForm] = React.useState({
     code: "",
     name: "",
     usesRoomsDefault: true,
@@ -127,156 +172,172 @@ export default function SuperAdminUnitTypeEnablementPage() {
     sortOrder: 0,
   });
 
-  const hasChanges = React.useMemo(() => {
-    if (enabledSet.size !== initialEnabledSet.size) return true;
-    for (const id of enabledSet) if (!initialEnabledSet.has(id)) return true;
-    return false;
-  }, [enabledSet, initialEnabledSet]);
+  const enabledSet = React.useMemo(() => new Set(enabledIds), [enabledIds]);
+  const dirty = !sameSet(enabledIds, savedEnabledIds);
+
+  const activeCatalog = React.useMemo(
+    () => (includeInactive ? catalog : catalog.filter((c) => c.isActive !== false)),
+    [catalog, includeInactive],
+  );
+
+  const tabGroups = React.useMemo(
+    () => ({
+      all: sortCatalog(activeCatalog),
+      rooms: sortCatalog(activeCatalog.filter((c) => c.usesRoomsDefault)),
+      schedulable: sortCatalog(activeCatalog.filter((c) => c.schedulableByDefault)),
+    }),
+    [activeCatalog],
+  );
+
+  const filteredByTab = React.useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    const applyFilters = (list: UnitTypeCatalogRow[]) => {
+      let out = list;
+      if (qq) out = out.filter((r) => `${r.code} ${r.name}`.toLowerCase().includes(qq));
+      if (enabledFilter === "enabled") out = out.filter((r) => enabledSet.has(r.id));
+      if (enabledFilter === "disabled") out = out.filter((r) => !enabledSet.has(r.id));
+      return out;
+    };
+
+    return {
+      all: applyFilters(tabGroups.all),
+      rooms: applyFilters(tabGroups.rooms),
+      schedulable: applyFilters(tabGroups.schedulable),
+    };
+  }, [q, enabledFilter, enabledSet, tabGroups]);
+
+  const activeIds = React.useMemo(
+    () => new Set(catalog.filter((c) => c.isActive !== false).map((c) => c.id)),
+    [catalog],
+  );
+
+  const enabledCount = enabledIds.filter((id) => activeIds.has(id)).length;
+  const totalCatalog = catalog.length;
+  const inactiveCount = catalog.filter((c) => c.isActive === false).length;
+  const activeTabLabel = activeTab === "rooms" ? "Uses Rooms" : activeTab === "schedulable" ? "Schedulable" : "All";
 
   async function loadBranches(): Promise<string | undefined> {
-    setErr(null);
-    try {
-      const rows = await apiFetch<BranchRow[]>("/api/branches");
-      setBranches(rows || []);
+    const rows = (await apiFetch<BranchRow[]>("/api/branches")) || [];
+    setBranches(rows);
 
-      const stored = readLS(LS_KEY);
-      const first = rows?.[0]?.id;
+    const stored = readLS(LS_KEY);
+    const first = rows[0]?.id;
 
-      const next =
-        (stored && rows?.some((b) => b.id === stored) ? stored : undefined) || first || undefined;
+    const next =
+      (qpBranchId && rows.some((b) => b.id === qpBranchId) ? qpBranchId : undefined) ||
+      (stored && rows.some((b) => b.id === stored) ? stored : undefined) ||
+      first ||
+      undefined;
 
-      setBranchId(next);
-      if (next) writeLS(LS_KEY, next);
-
-      return next;
-    } catch (e: any) {
-      setErr(e?.message || "Unable to load branches.");
-      return undefined;
-    }
+    if (next) writeLS(LS_KEY, next);
+    setBranchId(next);
+    return next;
   }
 
   async function loadCatalog() {
-    const rows = await apiFetch<UnitTypeCatalogRow[]>("/api/infrastructure/unit-types/catalog");
-    setCatalog(rows || []);
-  }
-
-  function normalizeEnabledIds(rows: BranchUnitTypeRow[]): string[] {
-    if (!rows) return [];
-    if (typeof rows[0] === "string") return (rows as string[]).filter(Boolean);
-    return (rows as any[])
-      .filter((r) => r?.unitTypeId && r?.isEnabled === true)
-      .map((r) => String(r.unitTypeId));
+    const rows = (await apiFetch<UnitTypeCatalogRow[]>("/api/infrastructure/unit-types/catalog")) || [];
+    setCatalog(rows);
   }
 
   async function loadBranchEnabledTypes(bid: string) {
-    const rows = await apiFetch<BranchUnitTypeRow[]>(
-      `/api/infrastructure/branches/${encodeURIComponent(bid)}/unit-types`
-    );
-    const ids = normalizeEnabledIds(rows || []);
-    const set = new Set(ids);
-    setEnabledSet(set);
-    setInitialEnabledSet(new Set(ids));
+    const rows = (await apiFetch<BranchUnitTypeRow[]>(
+      `/api/infrastructure/branches/${encodeURIComponent(bid)}/unit-types`,
+    )) || [];
+    const ids = normalizeEnabledIds(rows);
+    setEnabledIds(ids);
+    setSavedEnabledIds(ids);
   }
 
   async function refreshAll(showToast = false) {
+    if (!branchId) return;
     setBusy(true);
     setErr(null);
     try {
-      const nextBranchId = await loadBranches();
-      await loadCatalog();
-      if (nextBranchId) await loadBranchEnabledTypes(nextBranchId);
+      await Promise.all([loadCatalog(), loadBranchEnabledTypes(branchId)]);
       if (showToast) toast({ title: "Refreshed", description: "Loaded latest data." });
-    } catch (e: any) {
-      const msg = e?.message || "Refresh failed.";
-      setErr(msg);
-      if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
+    } catch (e) {
+      const message = errorMessage(e, "Refresh failed.");
+      setErr(message);
+      if (showToast) toast({ title: "Refresh failed", description: message, variant: "destructive" });
     } finally {
       setBusy(false);
-      setLoading(false);
     }
   }
 
-  React.useEffect(() => {
-    void refreshAll(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  React.useEffect(() => {
-    if (!branchId) return;
-    setBusy(true);
-    setErr(null);
-    void (async () => {
-      try {
-        await loadBranchEnabledTypes(branchId);
-      } catch (e: any) {
-        setErr(e?.message || "Unable to load enablement.");
-      } finally {
-        setBusy(false);
-        setLoading(false);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId]);
-
-  const filtered = React.useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return catalog;
-    return catalog.filter((r) => `${r.code} ${r.name}`.toLowerCase().includes(s));
-  }, [catalog, q]);
-
-  function toggle(id: string) {
-    setEnabledSet((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+  function toggleOne(id: string) {
+    setEnabledIds((prev) => {
+      const s = new Set(prev);
+      if (s.has(id)) s.delete(id);
+      else s.add(id);
+      return Array.from(s);
     });
   }
 
-  function selectAll() {
-    setEnabledSet(new Set(catalog.map((c) => c.id)));
+  function toggleAllInList(list: UnitTypeCatalogRow[]) {
+    const activeListIds = list.filter((x) => x.isActive !== false).map((x) => x.id);
+    const enabled = new Set(enabledIds);
+    const allSelected = activeListIds.length > 0 && activeListIds.every((id) => enabled.has(id));
+
+    setEnabledIds((prev) => {
+      const s = new Set(prev);
+      if (allSelected) {
+        for (const id of activeListIds) s.delete(id);
+      } else {
+        for (const id of activeListIds) s.add(id);
+      }
+      return Array.from(s);
+    });
+
+    return !allSelected;
   }
 
-  function deselectAll() {
-    setEnabledSet(new Set());
-  }
-
-  async function save() {
+  async function saveChanges() {
     if (!branchId) return;
     setBusy(true);
     setErr(null);
 
     try {
-      const unitTypeIds = Array.from(enabledSet);
+      const unitTypeIds = Array.from(new Set(enabledIds));
 
       await apiFetch(`/api/infrastructure/branches/${encodeURIComponent(branchId)}/unit-types`, {
         method: "PUT",
         body: JSON.stringify({ unitTypeIds }),
       });
 
-      setInitialEnabledSet(new Set(unitTypeIds));
+      setSavedEnabledIds(unitTypeIds);
       toast({ title: "Saved", description: "Unit type enablement updated successfully." });
-    } catch (e: any) {
-      const msg = e?.message || "Save failed.";
-      setErr(msg);
-      toast({ title: "Save failed", description: msg, variant: "destructive" as any });
+    } catch (e) {
+      const message = errorMessage(e, "Save failed.");
+      setErr(message);
+      toast({ title: "Save failed", description: message, variant: "destructive" });
     } finally {
       setBusy(false);
     }
   }
 
-  const selectedBranch = React.useMemo(
-    () => branches.find((b) => b.id === branchId) || null,
-    [branches, branchId]
-  );
+  React.useEffect(() => {
+    setLoading(true);
+    void loadBranches()
+      .then((bid) => loadCatalog().then(() => (bid ? loadBranchEnabledTypes(bid) : undefined)))
+      .catch((e) => setErr(errorMessage(e, "Unable to load data.")))
+      .finally(() => setLoading(false));
+  }, []);
 
-  // Auto-suggest code from name when not manually edited
+  React.useEffect(() => {
+    if (!branchId) return;
+    writeLS(LS_KEY, branchId);
+    setBusy(true);
+    setErr(null);
+    void loadBranchEnabledTypes(branchId)
+      .catch((e) => setErr(errorMessage(e, "Unable to load enablement.")))
+      .finally(() => setBusy(false));
+  }, [branchId]);
+
   React.useEffect(() => {
     if (!createOpen) return;
     if (manualCode) return;
     const suggested = suggestCatalogCode(createForm.name);
     setCreateForm((p) => ({ ...p, code: suggested }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createForm.name, manualCode, createOpen]);
 
   function openCreateDialog() {
@@ -303,7 +364,7 @@ export default function SuperAdminUnitTypeEnablementPage() {
     if (!code) return setCreateErr("Code is required.");
     if (code.length < 2 || code.length > 32) return setCreateErr("Code must be between 2 and 32 characters.");
     if (!/^[A-Z0-9_-]+$/.test(code)) {
-      return setCreateErr("Code can contain only A–Z, 0–9, underscore (_) and hyphen (-).");
+      return setCreateErr("Code can contain only A-Z, 0-9, underscore (_) and hyphen (-).");
     }
     if (catalog.some((c) => (c.code || "").toUpperCase() === code)) {
       return setCreateErr(`Code "${code}" already exists in the catalog.`);
@@ -331,231 +392,350 @@ export default function SuperAdminUnitTypeEnablementPage() {
 
       setCreateOpen(false);
       await loadCatalog();
-    } catch (e: any) {
-      const msg = e?.message || "Unable to create catalog item.";
-      setCreateErr(msg);
-      toast({ title: "Create failed", description: msg, variant: "destructive" as any });
+    } catch (e) {
+      const message = errorMessage(e, "Unable to create catalog item.");
+      setCreateErr(message);
+      toast({ title: "Create failed", description: message, variant: "destructive" });
     } finally {
       setCreateBusy(false);
     }
   }
 
   return (
-    <AppShell title="Infrastructure • Unit Types">
+    <AppShell title="Infrastructure - Unit Types">
       <div className="grid gap-6">
         {/* Header */}
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-    <div className="flex items-center gap-3">
-        <span className="grid h-10 w-10 place-items-center rounded-2xl border border-indigo-200/60 bg-indigo-50/60 dark:border-indigo-900/40 dark:bg-indigo-900/20">
-            <BookAIcon className="h-5 w-5 text-indigo-600 dark:text-indigo-300" />
-        </span>
-
-        <div className="min-w-0">
-            <div className="text-sm text-zc-muted">
-                <Link href="/superadmin/infrastructure" className="hover:underline">
-                    Infrastructure
-                </Link>
-                <span className="mx-2 text-zc-muted/60">/</span>
-                <span className="text-zc-text">Unit Types</span>
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-2xl border border-zc-border bg-zc-panel/30">
+              <Layers className="h-5 w-5 text-zc-accent" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-3xl font-semibold tracking-tight">Unit Types</div>
+              <div className="mt-1 text-sm text-zc-muted">
+                Enable or disable unit types per branch. Only enabled unit types can be used while creating units.
+              </div>
             </div>
+          </div>
 
-            <div className="mt-1 text-3xl font-semibold tracking-tight">Unit Type Enablement</div>
-
-            <div className="mt-2 max-w-3xl text-sm leading-6 text-zc-muted">
-                Enable/disable unit types per branch. Only enabled unit types can be used while creating Units/Wards.
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" className="px-5 gap-2" onClick={() => void refreshAll(true)} disabled={busy || !branchId}>
+              <RefreshCw className={busy ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+              Refresh
+            </Button>
+            <Button variant="outline" className="px-5 gap-2" onClick={openCreateDialog} disabled={busy}>
+              <Plus className="h-4 w-4" />
+              Create Catalog
+            </Button>
+            <Button variant="primary" className="px-5 gap-2" onClick={() => void saveChanges()} disabled={busy || !branchId || !dirty}>
+              <Save className="h-4 w-4" />
+              Save Changes
+            </Button>
+          </div>
         </div>
-    </div>
-
-    {/* CHANGE IS HERE: Changed 'flex-wrap' to 'flex-nowrap' */}
-    <div className="flex flex-nowrap items-center gap-3">
-        <Button variant="outline" className="gap-2" disabled={busy} onClick={() => void refreshAll(true)}>
-            <RefreshCw className={cn("h-4 w-4", busy ? "animate-spin" : "")} />
-            Refresh
-        </Button>
-
-        <Button variant="outline" className="gap-2" disabled={busy} onClick={openCreateDialog}>
-            <Plus className="h-4 w-4" />
-            Create Catalogue
-        </Button>
-
-        <Button className="gap-2" disabled={busy || !branchId || !hasChanges} onClick={() => void save()}>
-            <Save className="h-4 w-4" />
-            Save Changes
-        </Button>
-    </div>
-</div>
 
         {err ? (
-          <div className="flex items-start gap-2 rounded-xl border border-[rgb(var(--zc-danger-rgb)/0.35)] bg-[rgb(var(--zc-danger-rgb)/0.12)] px-3 py-2 text-sm text-[rgb(var(--zc-danger))]">
-            <AlertTriangle className="mt-0.5 h-4 w-4" />
-            <div className="min-w-0">{err}</div>
-          </div>
-        ) : null}
-
-        <div className="grid gap-4 lg:grid-cols-3">
-          {/* Branch selector */}
-          <Card className="lg:col-span-1 overflow-hidden">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Building2 className="h-5 w-5 text-zc-accent" />
-                Branch
-              </CardTitle>
-              <CardDescription>Select the branch to configure.</CardDescription>
-            </CardHeader>
-            <Separator />
-            <CardContent className="pt-6">
-              {loading ? (
-                <Skeleton className="h-11 w-full rounded-xl" />
-              ) : (
-                <div className="grid gap-3">
-                  <Select
-                    value={branchId}
-                    onValueChange={(v) => {
-                      setBranchId(v);
-                      writeLS(LS_KEY, v);
-                    }}
-                  >
-                    <SelectTrigger className="h-11 rounded-xl border-zc-border bg-zc-card">
-                      <SelectValue placeholder="Select a branch…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {branches.map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.name} <span className="font-mono text-xs text-zc-muted">({b.code})</span>{" "}
-                          <span className="text-xs text-zc-muted">• {b.city}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  {selectedBranch ? (
-                    <div className="rounded-xl border border-sky-200 bg-sky-50/50 p-3 dark:border-sky-900/50 dark:bg-sky-900/10">
-                      <div className="font-semibold text-zc-text">{selectedBranch.name}</div>
-                      <div className="mt-1 text-zc-muted">
-                        <span className="font-mono">{selectedBranch.code}</span> • {selectedBranch.city}
-                      </div>
-                      <div className="mt-2 text-xs text-zc-muted">
-                        Enabled types: <span className="font-semibold tabular-nums">{enabledSet.size}</span>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="success" onClick={selectAll} disabled={busy || catalog.length === 0}>
-                      Select all
-                    </Button>
-                    <Button type="button" variant="destructive" onClick={deselectAll} disabled={busy}>
-                      Deselect all
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Catalog */}
-          <Card className="lg:col-span-2 overflow-hidden">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Layers className="h-5 w-5 text-zc-accent" />
-                Catalog
-              </CardTitle>
-              <CardDescription>Search and toggle which unit types are enabled for the selected branch.</CardDescription>
-            </CardHeader>
-            <Separator />
-            <CardContent className="pt-6">
-              <div className="mb-4 flex items-center gap-3">
-                <input
-                  className="h-11 w-full rounded-xl border border-zc-border bg-zc-card px-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
-                  placeholder="Search unit types (code/name)…"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                />
-                <div className="text-xs text-zc-muted tabular-nums whitespace-nowrap">
-                  {enabledSet.size}/{catalog.length} enabled
+          <Card className="border-zc-danger/40">
+            <CardHeader className="py-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 text-zc-danger" />
+                <div>
+                  <CardTitle className="text-base">Could not load unit types</CardTitle>
+                  <CardDescription className="mt-1">{err}</CardDescription>
                 </div>
               </div>
-
-              {loading ? (
-                <div className="grid gap-3">
-                  <Skeleton className="h-14 w-full rounded-xl" />
-                  <Skeleton className="h-14 w-full rounded-xl" />
-                  <Skeleton className="h-14 w-full rounded-xl" />
-                </div>
-              ) : filtered.length === 0 ? (
-                <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 text-sm text-zc-muted">
-                  No unit types match your search.
-                </div>
-              ) : (
-                <div className="grid gap-2">
-                  {filtered.map((ut) => {
-                    const checked = enabledSet.has(ut.id);
-
-                    // Selected = green, non-selected = red
-                    const bgTone = checked
-                      ? "border-emerald-200/50 bg-emerald-50/40 dark:border-emerald-900/35 dark:bg-emerald-900/15"
-                      : "border-rose-200/60 bg-rose-50/70 dark:border-rose-900/40 dark:bg-rose-900/20";
-
-                    return (
-                      <div
-                        key={ut.id}
-                        className={cn(
-                          "flex items-start justify-between gap-3 rounded-xl border px-3 py-3",
-                          bgTone,
-                          checked ? "ring-1 ring-emerald-500/20" : "ring-1 ring-rose-500/10"
-                        )}
-                      >
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="font-semibold text-zc-text">
-                              {ut.name}{" "}
-                              <span className="ml-1 font-mono text-xs text-zc-muted">({ut.code})</span>
-                            </div>
-
-                            {checked ? (
-                              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200/60 bg-emerald-50/60 px-2 py-0.5 text-[11px] text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-200">
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                Enabled
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center rounded-full border border-rose-200/60 bg-rose-50/60 px-2 py-0.5 text-[11px] text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-200">
-                                Disabled
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="mt-2 flex flex-wrap gap-2 text-xs text-zc-muted">
-                            <span className="rounded-full border border-zc-border bg-white/40 dark:bg-black/10 px-2 py-0.5">
-                              usesRoomsDefault: <span className="font-mono">{String(!!ut.usesRoomsDefault)}</span>
-                            </span>
-                            <span className="rounded-full border border-zc-border bg-white/40 dark:bg-black/10 px-2 py-0.5">
-                              schedulableByDefault:{" "}
-                              <span className="font-mono">{String(!!ut.schedulableByDefault)}</span>
-                            </span>
-                          </div>
-                        </div>
-
-                        <label className="inline-flex items-center gap-2 select-none">
-                          <input
-                            type="checkbox"
-                            className="h-5 w-5 rounded border-zc-border"
-                            checked={checked}
-                            onChange={() => toggle(ut.id)}
-                            disabled={busy || !branchId}
-                          />
-                        </label>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
+            </CardHeader>
           </Card>
-        </div>
+        ) : null}
+
+        {/* Overview */}
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-base">Overview</CardTitle>
+            <CardDescription className="text-sm">
+              Select a branch, review the catalog, and enable the unit types needed for that branch.
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="grid gap-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-2">
+                <Label>Branch</Label>
+                <Select
+                  value={branchId || ""}
+                  onValueChange={(v) => {
+                    setBranchId(v || undefined);
+                    writeLS(LS_KEY, v);
+                  }}
+                >
+                  <SelectTrigger className="h-11 rounded-xl border-zc-border bg-zc-card">
+                    <SelectValue placeholder="Select branch..." />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[320px] overflow-y-auto">
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name} <span className="font-mono text-xs text-zc-muted">({b.code})</span> 
+                        <span className="text-xs text-zc-muted">- {b.city}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label>Catalog status</Label>
+                <div className={cn("rounded-xl border p-3", summaryCardClass(dirty ? "amber" : "emerald"))}>
+                  <div className="text-xs font-medium">Changes</div>
+                  <div className="mt-1 text-lg font-bold">{dirty ? "Unsaved" : "Saved"}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className={cn("rounded-xl border p-3", summaryCardClass("indigo"))}>
+                <div className="text-xs font-medium">Catalog</div>
+                <div className="mt-1 text-lg font-bold">{totalCatalog}</div>
+              </div>
+              <div className={cn("rounded-xl border p-3", summaryCardClass("emerald"))}>
+                <div className="text-xs font-medium">Enabled</div>
+                <div className="mt-1 text-lg font-bold">{enabledCount}</div>
+              </div>
+              <div className={cn("rounded-xl border p-3", summaryCardClass("amber"))}>
+                <div className="text-xs font-medium">Inactive</div>
+                <div className="mt-1 text-lg font-bold">{inactiveCount}</div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="relative w-full lg:max-w-md">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
+                <Input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search by code/name..."
+                  className="pl-10"
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
+                  <Switch checked={includeInactive} onCheckedChange={setIncludeInactive} />
+                  <div className="text-sm">
+                    <div className="font-semibold text-zc-text">Include inactive</div>
+                    <div className="text-xs text-zc-muted">Show disabled catalog items</div>
+                  </div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => setShowFilters((s) => !s)}
+                >
+                  <Filter className="h-4 w-4" />
+                  {showFilters ? "Hide Filters" : "Show Filters"}
+                </Button>
+              </div>
+            </div>
+
+            {showFilters ? (
+              <div className="grid gap-3 rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                  <Filter className="h-4 w-4 text-zc-accent" />
+                  Filters
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-12">
+                  <div className="md:col-span-4">
+                    <Label className="text-xs text-zc-muted">Enabled filter</Label>
+                    <Select value={enabledFilter} onValueChange={(v) => setEnabledFilter(v as "all" | "enabled" | "disabled")}>
+                      <SelectTrigger className="h-10">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any</SelectItem>
+                        <SelectItem value="enabled">Enabled</SelectItem>
+                        <SelectItem value="disabled">Disabled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">Branch scoped</Badge>
+              <Badge variant="secondary">Segment: {activeTabLabel}</Badge>
+              <Badge variant="secondary">Enabled: {enabledCount}</Badge>
+              {dirty ? <Badge variant="warning">Unsaved</Badge> : <Badge variant="ok">Saved</Badge>}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Workspace */}
+        <Card>
+          <CardHeader className="py-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="text-base">Unit Type Workspace</CardTitle>
+                <CardDescription>Search and toggle which unit types are enabled for the selected branch.</CardDescription>
+              </div>
+
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "all" | "rooms" | "schedulable")}>
+                <TabsList className={cn("h-10 rounded-2xl border border-zc-border bg-zc-panel/20 p-1")}>
+                  <TabsTrigger
+                    value="all"
+                    className={cn(
+                      "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
+                    )}
+                  >
+                    All
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="rooms"
+                    className={cn(
+                      "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
+                    )}
+                  >
+                    Uses Rooms
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="schedulable"
+                    className={cn(
+                      "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
+                    )}
+                  >
+                    Schedulable
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+          </CardHeader>
+
+          <CardContent className="pb-6">
+            <Tabs value={activeTab}>
+              {([
+                { key: "all", label: "All" },
+                { key: "rooms", label: "Uses Rooms" },
+                { key: "schedulable", label: "Schedulable" },
+              ] as const).map((tab) => {
+                const list = filteredByTab[tab.key] || [];
+                const base = tabGroups[tab.key] || [];
+                return (
+                  <TabsContent key={tab.key} value={tab.key} className="mt-0">
+                    <div className="rounded-xl border border-zc-border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[140px]">Code</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead className="w-[200px]">Defaults</TableHead>
+                            <TableHead className="w-[120px]">Status</TableHead>
+                            <TableHead className="w-[120px]">Enabled</TableHead>
+                            <TableHead className="w-[120px]" />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {loading ? (
+                            Array.from({ length: 8 }).map((_, i) => (
+                              <TableRow key={i}>
+                                <TableCell colSpan={6}>
+                                  <Skeleton className="h-6 w-full" />
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : !branchId ? (
+                            <TableRow>
+                              <TableCell colSpan={6}>
+                                <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
+                                  <AlertTriangle className="h-4 w-4 text-zc-warn" />
+                                  Select a branch first.
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ) : list.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={6}>
+                                <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
+                                  <Layers className="h-4 w-4" />
+                                  No unit types found.
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            list.map((ut) => {
+                              const enabled = enabledSet.has(ut.id);
+                              const disabled = ut.isActive === false;
+                              return (
+                                <TableRow key={ut.id} className={disabled ? "opacity-70" : ""}>
+                                  <TableCell className="font-mono text-xs font-semibold text-zc-text">{ut.code}</TableCell>
+                                  <TableCell>
+                                    <div className="flex flex-col gap-1">
+                                      <span className="font-semibold text-zc-text">{ut.name}</span>
+                                      <span className="text-xs text-zc-muted">Sort: {ut.sortOrder ?? "--"}</span>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-sm text-zc-muted">
+                                    <div className="flex flex-wrap gap-2">
+                                      <Badge variant={ut.usesRoomsDefault ? "secondary" : "outline"}>Rooms</Badge>
+                                      <Badge variant={ut.schedulableByDefault ? "secondary" : "outline"}>Schedulable</Badge>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    {ut.isActive !== false ? (
+                                      <Badge variant="ok">ACTIVE</Badge>
+                                    ) : (
+                                      <Badge variant="secondary">INACTIVE</Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {enabled ? <Badge variant="ok">ENABLED</Badge> : <Badge variant="secondary">DISABLED</Badge>}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Button
+                                      variant={enabled ? "outline" : "primary"}
+                                      size="sm"
+                                      onClick={() => toggleOne(ut.id)}
+                                      disabled={disabled || busy || !branchId}
+                                    >
+                                      {enabled ? "Disable" : "Enable"}
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })
+                          )}
+                        </TableBody>
+                      </Table>
+
+                      <div className="flex flex-col gap-3 border-t border-zc-border p-4 md:flex-row md:items-center md:justify-between">
+                        <div className="text-sm text-zc-muted">
+                          Showing <span className="font-semibold text-zc-text">{list.length}</span> of{" "}
+                          <span className="font-semibold text-zc-text">{base.length}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-2"
+                            onClick={() => toggleAllInList(base)}
+                            disabled={!branchId || busy || loading}
+                          >
+                            <Check className="h-4 w-4" />
+                            Toggle all (active)
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </TabsContent>
+                );
+              })}
+            </Tabs>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Create Catalog Dialog (no description) */}
       <Dialog
         open={createOpen}
         onOpenChange={(v) => {
@@ -567,26 +747,16 @@ export default function SuperAdminUnitTypeEnablementPage() {
           setCreateOpen(v);
         }}
       >
-        <DialogContent
-          className="sm:max-w-[640px] border-indigo-200/50 dark:border-indigo-800/50 shadow-2xl shadow-indigo-500/10"
-          onInteractOutside={(e) => e.preventDefault()}
-        >
+        <DialogContent className="sm:max-w-[640px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-3 text-indigo-700 dark:text-indigo-400">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/30">
-                <Layers className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-              </div>
-              Create Unit Type Catalogue
-            </DialogTitle>
+            <DialogTitle>Create Unit Type Catalog</DialogTitle>
             <DialogDescription>
-              Adds a new Unit Type to the global catalog. After creation, you can enable it per-branch from this page.
+              Adds a new unit type to the global catalog. After creation, enable it per branch on this page.
             </DialogDescription>
           </DialogHeader>
 
-          <Separator className="my-4" />
-
           {createErr ? (
-            <div className="mb-3 flex items-start gap-2 rounded-xl border border-[rgb(var(--xc-danger-rgb)/0.35)] bg-[rgb(var(--xc-danger-rgb)/0.12)] px-3 py-2 text-sm text-[rgb(var(--xc-danger))]">
+            <div className="mb-3 flex items-start gap-2 rounded-xl border border-[rgb(var(--zc-danger-rgb)/0.35)] bg-[rgb(var(--zc-danger-rgb)/0.12)] px-3 py-2 text-sm text-[rgb(var(--zc-danger))]">
               <AlertTriangle className="mt-0.5 h-4 w-4" />
               <div className="min-w-0">{createErr}</div>
             </div>
@@ -602,14 +772,14 @@ export default function SuperAdminUnitTypeEnablementPage() {
                   placeholder="e.g. Operation Theatre"
                   disabled={createBusy}
                 />
-                <p className="text-[11px] text-xc-muted">Human-friendly display name (max 120 chars).</p>
+                <p className="text-[11px] text-zc-muted">Human-friendly display name (max 120 chars).</p>
               </div>
 
               <div className="grid gap-2">
                 <div className="flex items-center justify-between">
                   <Label>Code</Label>
                   {!manualCode && createForm.code ? (
-                    <span className="flex items-center gap-1 text-[10px] text-indigo-600 dark:text-indigo-400">
+                    <span className="flex items-center gap-1 text-[10px] text-zc-accent">
                       <Wand2 className="h-3 w-3" /> Auto-suggested
                     </span>
                   ) : null}
@@ -623,10 +793,7 @@ export default function SuperAdminUnitTypeEnablementPage() {
                       setCreateForm((p) => ({ ...p, code: e.target.value.toUpperCase() }));
                     }}
                     placeholder="OT"
-                    className={cn(
-                      "font-mono bg-indigo-50/50 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-800 focus-visible:ring-indigo-500",
-                      createBusy && "opacity-80"
-                    )}
+                    className={cn("font-mono", createBusy && "opacity-80")}
                     disabled={createBusy}
                   />
 
@@ -635,7 +802,7 @@ export default function SuperAdminUnitTypeEnablementPage() {
                       type="button"
                       size="icon"
                       variant="ghost"
-                      className="absolute right-1 top-1 h-7 w-7 text-xc-muted hover:text-xc-text"
+                      className="absolute right-1 top-1 h-7 w-7 text-zc-muted hover:text-zc-text"
                       title="Edit manually"
                       onClick={() => setManualCode(true)}
                       disabled={createBusy}
@@ -648,7 +815,7 @@ export default function SuperAdminUnitTypeEnablementPage() {
                       type="button"
                       size="icon"
                       variant="ghost"
-                      className="absolute right-1 top-1 h-7 w-7 text-xc-muted hover:text-xc-text"
+                      className="absolute right-1 top-1 h-7 w-7 text-zc-muted hover:text-zc-text"
                       title="Suggest from name"
                       onClick={() => {
                         setManualCode(false);
@@ -662,20 +829,18 @@ export default function SuperAdminUnitTypeEnablementPage() {
                   )}
                 </div>
 
-                <p className="text-[11px] text-xc-muted">
-                  Allowed: A–Z, 0–9, <span className="font-mono">_</span>, <span className="font-mono">-</span>. Max 32
+                <p className="text-[11px] text-zc-muted">
+                  Allowed: A-Z, 0-9, <span className="font-mono">_</span>, <span className="font-mono">-</span>. Max 32
                   chars.
                 </p>
               </div>
             </div>
 
-            <Separator />
-
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex items-start justify-between gap-3 rounded-xl border border-xc-border bg-xc-panel/10 p-3">
+              <div className="flex items-start justify-between gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-3">
                 <div className="grid gap-1">
                   <div className="text-sm font-semibold">Uses Rooms</div>
-                  <div className="text-[11px] text-xc-muted">Default behavior for new units of this type.</div>
+                  <div className="text-[11px] text-zc-muted">Default behavior for new units of this type.</div>
                 </div>
                 <Switch
                   checked={createForm.usesRoomsDefault}
@@ -684,10 +849,10 @@ export default function SuperAdminUnitTypeEnablementPage() {
                 />
               </div>
 
-              <div className="flex items-start justify-between gap-3 rounded-xl border border-xc-border bg-xc-panel/10 p-3">
+              <div className="flex items-start justify-between gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-3">
                 <div className="grid gap-1">
                   <div className="text-sm font-semibold">Schedulable</div>
-                  <div className="text-[11px] text-xc-muted">Default scheduling capability.</div>
+                  <div className="text-[11px] text-zc-muted">Default scheduling capability.</div>
                 </div>
                 <Switch
                   checked={createForm.schedulableByDefault}
@@ -696,10 +861,10 @@ export default function SuperAdminUnitTypeEnablementPage() {
                 />
               </div>
 
-              <div className="flex items-start justify-between gap-3 rounded-xl border border-xc-border bg-xc-panel/10 p-3">
+              <div className="flex items-start justify-between gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-3">
                 <div className="grid gap-1">
                   <div className="text-sm font-semibold">Active</div>
-                  <div className="text-[11px] text-xc-muted">Inactive types stay hidden in selectors.</div>
+                  <div className="text-[11px] text-zc-muted">Inactive types stay hidden in selectors.</div>
                 </div>
                 <Switch
                   checked={createForm.isActive}
@@ -716,7 +881,7 @@ export default function SuperAdminUnitTypeEnablementPage() {
                   onChange={(e) => setCreateForm((p) => ({ ...p, sortOrder: Number(e.target.value || 0) }))}
                   disabled={createBusy}
                 />
-                <p className="text-[11px] text-xc-muted">Lower numbers appear first. Leave 0 if unsure.</p>
+                <p className="text-[11px] text-zc-muted">Lower numbers appear first. Leave 0 if unsure.</p>
               </div>
             </div>
           </div>
@@ -727,7 +892,7 @@ export default function SuperAdminUnitTypeEnablementPage() {
             </Button>
             <Button type="button" className="gap-2" onClick={() => void createCatalog()} disabled={createBusy}>
               <Plus className={cn("h-4 w-4", createBusy ? "animate-pulse" : "")} />
-              Create Catalogue
+              Create Catalog
             </Button>
           </DialogFooter>
         </DialogContent>

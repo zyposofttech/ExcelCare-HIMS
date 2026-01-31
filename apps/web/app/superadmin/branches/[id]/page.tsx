@@ -666,7 +666,7 @@ export default function BranchDetailPage() {
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<"overview" | "setup">("overview");
 
-  const facilitySetupHref = `/superadmin/branches/${encodeURIComponent(id)}/facility-setup`;
+  const facilitySetupHref = `/superadmin/infrastructure/facilities/`;
   const policyOverridesHref = `/admin/policy-overrides?branchId=${encodeURIComponent(id)}`;
   const policiesHref = `/superadmin/policy/policies`;
   const approvalsHref = `/superadmin/policy/approvals`;
