@@ -281,11 +281,12 @@ export default function SuperAdminServiceCataloguesPage() {
     return next;
   }
 
-  async function loadDepartments() {
-    if (!branchId) return;
+  async function loadDepartments(forBranchId?: string) {
+    const bid = forBranchId ?? branchId;
+    if (!bid) return;
     try {
       const deps = (await apiFetch<DepartmentRow[]>(
-        `/api/infrastructure/departments?${buildQS({ branchId })}`,
+        `/api/departments?${buildQS({ branchId: bid })}`,
       )) || [];
       setDepartments(deps);
     } catch {
@@ -293,14 +294,15 @@ export default function SuperAdminServiceCataloguesPage() {
     }
   }
 
-  async function loadCatalogues(showToast = false) {
-    if (!branchId) return;
+  async function loadCatalogues(showToast = false, forBranchId?: string) {
+    const bid = forBranchId ?? branchId;
+    if (!bid) return;
     setErr(null);
     setLoading(true);
     try {
       const res = (await apiFetch<ServiceCatalogueRow[]>(
         `/api/infrastructure/service-catalogues?${buildQS({
-          branchId,
+          branchId: bid,
           q: q.trim() || undefined,
           status: status !== "all" ? status : undefined,
           includeInactive: includeInactive ? "true" : undefined,
@@ -337,7 +339,7 @@ export default function SuperAdminServiceCataloguesPage() {
         setLoading(false);
         return;
       }
-      await Promise.all([loadDepartments(), loadCatalogues(false)]);
+      await Promise.all([loadDepartments(bid), loadCatalogues(false, bid)]);
       if (showToast) toast({ title: "Ready", description: "Branch scope and catalogues are up to date." });
     } catch (e: any) {
       const msg = e?.message || "Refresh failed";
@@ -363,13 +365,13 @@ export default function SuperAdminServiceCataloguesPage() {
     if (!branchId) return;
     setSelectedId("");
     setSelected(null);
-    void loadCatalogues(false);
+    void loadCatalogues(false, branchId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId, includeInactive]);
 
   React.useEffect(() => {
     if (!branchId) return;
-    const t = setTimeout(() => void loadCatalogues(false), 250);
+    const t = setTimeout(() => void loadCatalogues(false, branchId), 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, status]);
@@ -396,7 +398,7 @@ export default function SuperAdminServiceCataloguesPage() {
     setErr(null);
     setLoading(true);
     try {
-      await Promise.all([loadDepartments(), loadCatalogues(false)]);
+      await Promise.all([loadDepartments(nextId), loadCatalogues(false, nextId)]);
       toast({ title: "Branch scope changed", description: "Loaded catalogues for selected branch." });
     } catch (e: any) {
       toast({ title: "Load failed", description: e?.message || "Request failed", variant: "destructive" as any });

@@ -94,29 +94,46 @@ type ChargeMasterRow = {
   isActive: boolean;
 };
 
+
+type TariffPlanStatus = "DRAFT" | "ACTIVE" | "RETIRED";
+
+type TariffPlanKind = "PRICE_LIST" | "PAYER_CONTRACT";
+
 type TariffPlanRow = {
   id: string;
   branchId: string;
   code: string;
   name: string;
-  description?: string | null;
 
-  isActive: boolean;
+  status: TariffPlanStatus;
+  kind: TariffPlanKind;
+  currency?: string | null;
+  isTaxInclusive?: boolean | null;
+
+  payerId?: string | null;
+  contractId?: string | null;
+  payer?: any | null;
+  contract?: any | null;
+
+  // optional fields (if present in DB)
+  description?: string | null;
   isDefault?: boolean | null;
 
   effectiveFrom?: string | null;
   effectiveTo?: string | null;
-  version?: number | null;
 
   createdAt?: string;
   updatedAt?: string;
+  version?: number | null;
+
+  // UI helper (derived on client)
+  isActive?: boolean;
 
   _count?: {
     rates?: number;
     payerContracts?: number;
   };
 };
-
 type TariffRateRow = {
   id: string;
   tariffPlanId: string;
@@ -219,6 +236,23 @@ function activeBadge(isActive: boolean) {
   return isActive ? <Badge variant="ok">ACTIVE</Badge> : <Badge variant="secondary">INACTIVE</Badge>;
 }
 
+function planStatusBadge(status?: TariffPlanStatus | string | null) {
+  const s = (status || "").toString().toUpperCase();
+  if (s === "ACTIVE") return <Badge variant="ok">ACTIVE</Badge>;
+  if (s === "DRAFT") {
+    return (
+      <Badge
+        variant="secondary"
+        className="border-amber-500/30 bg-amber-500/15 text-amber-700 dark:text-amber-200"
+      >
+        DRAFT
+      </Badge>
+    );
+  }
+  if (s === "RETIRED") return <Badge variant="secondary">RETIRED</Badge>;
+  return <Badge variant="secondary">{s || "—"}</Badge>;
+}
+
 function unitLabel(u?: ServiceChargeUnit | null) {
   const x = u || "PER_UNIT";
   switch (x) {
@@ -293,6 +327,13 @@ function toAmountString(v: any) {
   if (!s) return "";
   // keep as string to preserve Decimal precision; backend will validate
   return s;
+}
+
+function toAmountNumber(v: any): number | null {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -388,18 +429,27 @@ export default function SuperAdminTariffPlansPage() {
         branchId,
         q: q.trim() || undefined,
         includeInactive: includeInactive ? "true" : undefined,
-        includeCounts: "true",
       });
 
       // billing module primary, infra fallback
       const res = await apiTry<any>(`/api/billing/tariff-plans?${qs}`, `/api/infrastructure/tariff-plans?${qs}`);
-      const list: TariffPlanRow[] = Array.isArray(res) ? res : (res?.rows || []);
+      const listRaw: TariffPlanRow[] = Array.isArray(res) ? res : (res?.rows || []);
+      const list: TariffPlanRow[] = (listRaw || []).map((p) => ({ ...p, isActive: p.status === "ACTIVE" }));
+
       setPlans(list);
 
       const nextSelected =
         selectedPlanId && list.some((x) => x.id === selectedPlanId) ? selectedPlanId : list[0]?.id || "";
       setSelectedPlanId(nextSelected);
       setSelectedPlan(nextSelected ? list.find((x) => x.id === nextSelected) || null : null);
+
+      if (nextSelected) {
+        if (nextSelected === selectedPlanId) {
+          await loadRatesForPlan(nextSelected, false);
+        }
+      } else {
+        setRates([]);
+      }
 
       if (showToast) toast({ title: "Tariff plans refreshed", description: "Loaded latest plans for this branch." });
     } catch (e: any) {
@@ -408,6 +458,7 @@ export default function SuperAdminTariffPlansPage() {
       setPlans([]);
       setSelectedPlanId("");
       setSelectedPlan(null);
+      setRates([]);
       if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
     } finally {
       setLoading(false);
@@ -419,15 +470,10 @@ export default function SuperAdminTariffPlansPage() {
     setRatesErr(null);
     setRatesLoading(true);
     try {
-      const qs = buildQS({ tariffPlanId: planId, includeInactive: "true", includeRefs: "true" });
+      // Prefer the direct tariff-rates endpoint so we can request includeRefs.
+      const qs = buildQS({ tariffPlanId: planId, includeHistory: "true", includeRefs: "true" });
 
-      const res = await apiTryMany<any>([
-        { url: `/api/billing/tariff-plans/${encodeURIComponent(planId)}/rates?${buildQS({ includeInactive: "true", includeRefs: "true" })}` },
-        { url: `/api/billing/tariff-rates?${qs}` },
-        { url: `/api/infrastructure/tariff-plans/${encodeURIComponent(planId)}/rates?${buildQS({ includeInactive: "true", includeRefs: "true" })}` },
-        { url: `/api/infrastructure/tariff-rates?${qs}` },
-      ]);
-
+      const res = await apiTry<any>(`/api/billing/tariff-rates?${qs}`, `/api/infrastructure/tariff-rates?${qs}`);
       const list: TariffRateRow[] = Array.isArray(res) ? res : (res?.rows || []);
       setRates(list);
 
@@ -454,10 +500,6 @@ export default function SuperAdminTariffPlansPage() {
       await Promise.all([loadTaxCodesForBranch(bid), loadChargeMasterForBranch(bid)]);
       await loadPlans(false);
 
-      // load rates for selected plan if any
-      const plan = selectedPlanId || (plans[0]?.id ?? "");
-      if (plan) await loadRatesForPlan(plan, false);
-
       if (showToast) toast({ title: "Ready", description: "Tariff plans and rates are up to date." });
     } catch (e: any) {
       const msg = e?.message || "Refresh failed";
@@ -467,7 +509,6 @@ export default function SuperAdminTariffPlansPage() {
       setLoading(false);
     }
   }
-
   React.useEffect(() => {
     void refreshAll(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -575,6 +616,16 @@ export default function SuperAdminTariffPlansPage() {
     setPlanEditOpen(true);
   }
   function openEditPlan(row: TariffPlanRow) {
+    if (!row) return;
+    if (row.status !== "DRAFT") {
+      toast({
+        title: "Edit not allowed",
+        description: "Only DRAFT tariff plans can be edited. Activate/Retire using the actions menu.",
+        variant: "destructive" as any,
+      });
+      return;
+    }
+
     setPlanEditMode("edit");
     setPlanEditing(row);
     setPlanEditOpen(true);
@@ -582,52 +633,125 @@ export default function SuperAdminTariffPlansPage() {
 
   function openCreateRate() {
     if (!selectedPlan) return;
+    if (selectedPlan.status === "RETIRED") {
+      toast({
+        title: "Plan is retired",
+        description: "You cannot add rates to a retired tariff plan.",
+        variant: "destructive" as any,
+      });
+      return;
+    }
+
     setRateEditMode("create");
     setRateEditing(null);
     setRateEditOpen(true);
   }
+
   function openEditRate(row: TariffRateRow) {
+    if (!row) return;
+    if (!selectedPlan) return;
+    if (selectedPlan.status !== "DRAFT") {
+      toast({
+        title: "Edit not allowed",
+        description: "Rate editing (PATCH) is allowed only while the plan is in DRAFT. For ACTIVE plans, add a new rate version with a new Effective From.",
+        variant: "destructive" as any,
+      });
+      return;
+    }
+
     setRateEditMode("edit");
     setRateEditing(row);
     setRateEditOpen(true);
   }
-
   async function removePlan(row: TariffPlanRow) {
     if (!row?.id) return;
-    const ok = window.confirm("Delete this tariff plan? (Only safe if not referenced by payer contracts/orders.)");
+
+    const ok = window.confirm(
+      "Retire this plan? (Retired plans are hidden by default. You cannot edit a retired plan.)",
+    );
     if (!ok) return;
 
     setBusy(true);
     try {
       await apiTry(
-        `/api/billing/tariff-plans/${encodeURIComponent(row.id)}`,
-        `/api/infrastructure/tariff-plans/${encodeURIComponent(row.id)}`,
-        { method: "DELETE" },
+        `/api/billing/tariff-plans/${encodeURIComponent(row.id)}/retire`,
+        `/api/infrastructure/tariff-plans/${encodeURIComponent(row.id)}/retire`,
+        { method: "POST" },
       );
-      toast({ title: "Deleted", description: "Tariff plan deleted." });
+      toast({ title: "Retired", description: "Tariff plan retired." });
       await loadPlans(false);
     } catch (e: any) {
-      toast({ title: "Delete failed", description: e?.message || "Request failed", variant: "destructive" as any });
+      toast({ title: "Retire failed", description: e?.message || "Request failed", variant: "destructive" as any });
     } finally {
       setBusy(false);
     }
   }
 
   async function togglePlan(row: TariffPlanRow, nextActive: boolean) {
-    const ok = window.confirm(nextActive ? "Activate this plan?" : "Deactivate this plan?");
+    if (!row?.id) return;
+
+    // Backend semantics:
+    // - Activate => status ACTIVE (closes other ACTIVE plans in scope)
+    // - Deactivate => RETIRE (effectiveTo=now)
+
+    if (nextActive) {
+      if (row.status === "ACTIVE") {
+        toast({ title: "Already active", description: "This plan is already ACTIVE." });
+        return;
+      }
+      if (row.status === "RETIRED") {
+        toast({
+          title: "Cannot activate",
+          description: "This plan is RETIRED. Create a new plan instead.",
+          variant: "destructive" as any,
+        });
+        return;
+      }
+
+      const ok = window.confirm(
+        "Activate this plan now? (This will retire any currently ACTIVE plan in the same scope.)",
+      );
+      if (!ok) return;
+
+      setBusy(true);
+      try {
+        await apiTry(
+          `/api/billing/tariff-plans/${encodeURIComponent(row.id)}/activate`,
+          `/api/infrastructure/tariff-plans/${encodeURIComponent(row.id)}/activate`,
+          { method: "POST", body: JSON.stringify({ effectiveFrom: new Date().toISOString() }) },
+        );
+        toast({ title: "Activated", description: "Plan is now ACTIVE." });
+        await loadPlans(false);
+      } catch (e: any) {
+        toast({ title: "Activate failed", description: e?.message || "Request failed", variant: "destructive" as any });
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    // nextActive === false
+    if (row.status !== "ACTIVE") {
+      toast({ title: "Nothing to do", description: "Only ACTIVE plans can be retired." });
+      return;
+    }
+
+    const ok = window.confirm(
+      "Deactivate this plan? (Backend will RETIRE it: sets effectiveTo=now. This cannot be reversed.)",
+    );
     if (!ok) return;
 
     setBusy(true);
     try {
       await apiTry(
-        `/api/billing/tariff-plans/${encodeURIComponent(row.id)}`,
-        `/api/infrastructure/tariff-plans/${encodeURIComponent(row.id)}`,
-        { method: "PATCH", body: JSON.stringify({ isActive: nextActive }) },
+        `/api/billing/tariff-plans/${encodeURIComponent(row.id)}/retire`,
+        `/api/infrastructure/tariff-plans/${encodeURIComponent(row.id)}/retire`,
+        { method: "POST" },
       );
-      toast({ title: "Updated", description: `Plan is now ${nextActive ? "ACTIVE" : "INACTIVE"}.` });
+      toast({ title: "Deactivated", description: "Plan retired (effectiveTo set)." });
       await loadPlans(false);
     } catch (e: any) {
-      toast({ title: "Update failed", description: e?.message || "Request failed", variant: "destructive" as any });
+      toast({ title: "Deactivate failed", description: e?.message || "Request failed", variant: "destructive" as any });
     } finally {
       setBusy(false);
     }
@@ -655,16 +779,21 @@ export default function SuperAdminTariffPlansPage() {
 
   async function closeRate(row: TariffRateRow) {
     if (!row?.id) return;
-    const ok = window.confirm("Close this rate by setting effectiveTo now? (Recommended vs delete)");
+    const ok = window.confirm("Close this rate by setting effectiveTo = now? (Recommended vs delete)");
     if (!ok) return;
 
     setBusy(true);
     try {
+      const effectiveTo = encodeURIComponent(new Date().toISOString());
       await apiTryMany([
-        { url: `/api/billing/tariff-rates/${encodeURIComponent(row.id)}/close`, init: { method: "POST" } },
-        { url: `/api/billing/tariff-rates/${encodeURIComponent(row.id)}`, init: { method: "PATCH", body: JSON.stringify({ close: true }) } },
-        { url: `/api/infrastructure/tariff-rates/${encodeURIComponent(row.id)}/close`, init: { method: "POST" } },
-        { url: `/api/infrastructure/tariff-rates/${encodeURIComponent(row.id)}`, init: { method: "PATCH", body: JSON.stringify({ close: true }) } },
+        {
+          url: `/api/billing/tariff-rates/${encodeURIComponent(row.id)}/close?effectiveTo=${effectiveTo}`,
+          init: { method: "POST" },
+        },
+        {
+          url: `/api/infrastructure/tariff-rates/${encodeURIComponent(row.id)}/close?effectiveTo=${effectiveTo}`,
+          init: { method: "POST" },
+        },
       ]);
       toast({ title: "Closed", description: "Rate closed (effectiveTo set)." });
       if (selectedPlan) await loadRatesForPlan(selectedPlan.id, false);
@@ -674,7 +803,6 @@ export default function SuperAdminTariffPlansPage() {
       setBusy(false);
     }
   }
-
   return (
     <AppShell title="Infrastructure • Tariff Plans">
       <div className="grid gap-6">
@@ -962,7 +1090,7 @@ export default function SuperAdminTariffPlansPage() {
                                   </TableCell>
                                   <TableCell>
                                     <div className="flex flex-col gap-1">
-                                      {activeBadge(p.isActive)}
+                                      {planStatusBadge(p.status)}
                                       {p.isDefault ? <Badge variant="secondary">DEFAULT</Badge> : null}
                                     </div>
                                   </TableCell>
@@ -976,7 +1104,7 @@ export default function SuperAdminTariffPlansPage() {
                                       <DropdownMenuContent align="end" className="w-[220px]">
                                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
                                         <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => openEditPlan(p)}>
+                                        <DropdownMenuItem disabled={p.status !== "DRAFT"} onClick={() => openEditPlan(p)}>
                                           <Wrench className="mr-2 h-4 w-4" />
                                           Edit plan
                                         </DropdownMenuItem>
@@ -987,7 +1115,7 @@ export default function SuperAdminTariffPlansPage() {
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem onClick={() => removePlan(p)}>
                                           <Trash2 className="mr-2 h-4 w-4" />
-                                          Delete plan
+                                          Retire plan
                                         </DropdownMenuItem>
                                       </DropdownMenuContent>
                                     </DropdownMenu>
@@ -1216,7 +1344,7 @@ function PlanDetail(props: {
                 <span className="font-mono">{plan.code}</span> • {plan.name}
               </CardTitle>
               <CardDescription className="mt-1">
-                {activeBadge(plan.isActive)}{" "}
+                {planStatusBadge(plan.status)}{" "}
                 {plan.isDefault ? (
                   <>
                     <span className="mx-2 text-zc-muted">•</span>
@@ -1231,7 +1359,7 @@ function PlanDetail(props: {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" className="gap-2" onClick={onEditPlan} disabled={busy}>
+              <Button variant="outline" className="gap-2" onClick={onEditPlan} disabled={busy || plan.status !== "DRAFT"}>
                 <Wrench className="h-4 w-4" />
                 Edit
               </Button>
@@ -1239,7 +1367,7 @@ function PlanDetail(props: {
                 <Eye className="h-4 w-4" />
                 Policy
               </Button>
-              <Button variant={plan.isActive ? "outline" : "primary"} className="gap-2" onClick={onTogglePlan} disabled={busy}>
+              <Button variant={plan.isActive ? "outline" : "primary"} className="gap-2" onClick={onTogglePlan} disabled={busy || plan.status === "RETIRED"}>
                 <CheckCircle2 className="h-4 w-4" />
                 {plan.isActive ? "Deactivate" : "Activate"}
               </Button>
@@ -1418,7 +1546,7 @@ function PlanDetail(props: {
                             <DropdownMenuContent align="end" className="w-[240px]">
                               <DropdownMenuLabel>Rate actions</DropdownMenuLabel>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => onEditRate(r)}>
+                              <DropdownMenuItem disabled={plan.status !== "DRAFT"} onClick={() => onEditRate(r)}>
                                 <Wrench className="mr-2 h-4 w-4" />
                                 Edit rate
                               </DropdownMenuItem>
@@ -1506,88 +1634,108 @@ function TariffPlanEditModal({
   }
 
   async function save() {
-    if (!branchId) return;
+  if (!branchId) return;
 
-    const code = String(form.code || "").trim();
-    const name = String(form.name || "").trim();
-    if (!code || !name) {
-      toast({ title: "Missing fields", description: "Code and Name are required." });
-      return;
-    }
+  const code = String(form.code || "").trim();
+  const name = String(form.name || "").trim();
+  if (!code || !name) {
+    toast({ title: "Missing fields", description: "Code and Name are required." });
+    return;
+  }
 
-    const payload: any = {
-      branchId, // ensures branch-specific only
-      code,
-      name,
-      description: String(form.description || "").trim() || null,
-      isActive: Boolean(form.isActive),
-      isDefault: Boolean(form.isDefault),
-      effectiveFrom: form.effectiveFrom ? new Date(String(form.effectiveFrom)).toISOString() : null,
+  // Use Effective From only for activation; plan itself is created as DRAFT
+  const effectiveFromIso = form.effectiveFrom
+    ? new Date(String(form.effectiveFrom) + "T00:00:00.000Z").toISOString()
+    : new Date().toISOString();
+
+  setSaving(true);
+  try {
+    const setDefault = async (planId: string, isDefault: boolean) => {
+      await apiTry(
+        `/api/billing/tariff-plans/${encodeURIComponent(planId)}/default`,
+        `/api/infrastructure/tariff-plans/${encodeURIComponent(planId)}/default`,
+        {
+          method: "POST",
+          body: JSON.stringify({ isDefault }),
+        },
+      );
     };
 
-    // Minimal payload if backend currently accepts only code/name/isActive
-    const payloadMin: any = {
-      branchId,
-      code,
-      name,
-      isActive: payload.isActive,
-    };
+    if (mode === "create") {
+      const created = await apiTry<any>(`/api/billing/tariff-plans`, `/api/infrastructure/tariff-plans`, {
+        method: "POST",
+        body: JSON.stringify({
+          branchId,
+          code,
+          name,
+          kind: "PRICE_LIST",
+          currency: "INR",
+          isTaxInclusive: false,
+        }),
+      });
 
-    setSaving(true);
-    try {
-      if (mode === "create") {
-        try {
-          await apiTry(`/api/billing/tariff-plans`, `/api/infrastructure/tariff-plans`, {
+      const newId: string | undefined = created?.id;
+
+      if (Boolean(form.isActive) && newId) {
+        await apiTry(
+          `/api/billing/tariff-plans/${encodeURIComponent(newId)}/activate`,
+          `/api/infrastructure/tariff-plans/${encodeURIComponent(newId)}/activate`,
+          {
             method: "POST",
-            body: JSON.stringify(payload),
-          });
-        } catch (e: any) {
-          const msg = e?.message || "";
-          if (e instanceof ApiError && e.status === 400 && looksLikeWhitelistError(msg)) {
-            await apiTry(`/api/billing/tariff-plans`, `/api/infrastructure/tariff-plans`, {
-              method: "POST",
-              body: JSON.stringify(payloadMin),
-            });
-            toast({
-              title: "Saved (basic only)",
-              description: "Backend DTO currently accepts only basic fields. We’ll align plan DTO later.",
-            });
-          } else {
-            throw e;
-          }
-        }
-      } else {
-        if (!editing?.id) throw new Error("Invalid editing row");
-        try {
-          await apiTry(`/api/billing/tariff-plans/${encodeURIComponent(editing.id)}`, `/api/infrastructure/tariff-plans/${encodeURIComponent(editing.id)}`, {
-            method: "PATCH",
-            body: JSON.stringify(payload),
-          });
-        } catch (e: any) {
-          const msg = e?.message || "";
-          if (e instanceof ApiError && e.status === 400 && looksLikeWhitelistError(msg)) {
-            await apiTry(`/api/billing/tariff-plans/${encodeURIComponent(editing.id)}`, `/api/infrastructure/tariff-plans/${encodeURIComponent(editing.id)}`, {
-              method: "PATCH",
-              body: JSON.stringify(payloadMin),
-            });
-            toast({
-              title: "Updated (basic only)",
-              description: "Backend update endpoint rejects advanced fields. Align DTO next.",
-            });
-          } else {
-            throw e;
-          }
-        }
+            body: JSON.stringify({ effectiveFrom: effectiveFromIso }),
+          },
+        );
       }
 
-      onOpenChange(false);
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message || "Request failed", variant: "destructive" as any });
-    } finally {
-      setSaving(false);
+      // ✅ Wire isDefault end-to-end
+      if (Boolean(form.isDefault) && newId) {
+        await setDefault(newId, true);
+      }
+    } else {
+      if (!editing?.id) throw new Error("Invalid editing row");
+
+      // Backend allows updating only while DRAFT
+      await apiTry(
+        `/api/billing/tariff-plans/${encodeURIComponent(editing.id)}`,
+        `/api/infrastructure/tariff-plans/${encodeURIComponent(editing.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            name,
+            currency: "INR",
+            isTaxInclusive: false,
+          }),
+        },
+      );
+
+      // Optional activation after edit
+      if (Boolean(form.isActive) && editing.status !== "ACTIVE") {
+        await apiTry(
+          `/api/billing/tariff-plans/${encodeURIComponent(editing.id)}/activate`,
+          `/api/infrastructure/tariff-plans/${encodeURIComponent(editing.id)}/activate`,
+          {
+            method: "POST",
+            body: JSON.stringify({ effectiveFrom: effectiveFromIso }),
+          },
+        );
+      }
+
+      // ✅ Wire isDefault end-to-end (supports both setting and clearing)
+      const nextDefault = Boolean(form.isDefault);
+      const prevDefault = Boolean(editing.isDefault);
+      if (nextDefault !== prevDefault) {
+        await setDefault(editing.id, nextDefault);
+      }
     }
+
+    onOpenChange(false);
+    onSaved();
+  } catch (e: any) {
+    toast({ title: "Save failed", description: e?.message || "Request failed", variant: "destructive" as any });
+  } finally {
+    setSaving(false);
   }
+}
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1608,7 +1756,7 @@ function TariffPlanEditModal({
           <div className="grid gap-4 md:grid-cols-2">
             <div className="grid gap-2">
               <Label>Code</Label>
-              <Input value={form.code || ""} onChange={(e) => patch({ code: e.target.value })} placeholder="e.g., SELF" />
+              <Input value={form.code || ""} onChange={(e) => patch({ code: e.target.value })} placeholder="e.g., SELF" disabled={mode === "edit"} />
             </div>
 
             <div className="grid gap-2">
@@ -1756,13 +1904,13 @@ function TariffRateEditModal({
     if (!branchId || !plan?.id) return;
 
     const cmId = String(form.chargeMasterItemId || "").trim();
-    const amt = toAmountString(form.rateAmount);
+    const amt = toAmountNumber(form.rateAmount);
     if (!cmId) {
       toast({ title: "Missing item", description: "Select a Charge Master item." });
       return;
     }
-    if (!amt) {
-      toast({ title: "Missing rate", description: "Enter the rate amount." });
+    if (amt === null) {
+      toast({ title: "Missing rate", description: "Enter a valid rate amount." });
       return;
     }
 
@@ -1786,70 +1934,67 @@ function TariffRateEditModal({
       return;
     }
 
-    const payloadFull: any = {
-      tariffPlanId: plan.id,
-      chargeMasterItemId: cmId,
-      rateAmount: amt,
-      currency: String(form.currency || "INR").trim() || "INR",
-      taxCodeId,
-      isTaxInclusive: Boolean(form.isTaxInclusive),
-      isActive: Boolean(form.isActive),
-      effectiveFrom: form.effectiveFrom ? new Date(String(form.effectiveFrom)).toISOString() : null,
-      notes: String(form.notes || "").trim() || null,
-    };
-
-    // Minimal payload fallback
-    const payloadMin: any = {
-      tariffPlanId: plan.id,
-      chargeMasterItemId: cmId,
-      rateAmount: amt,
-      isActive: Boolean(form.isActive),
-    };
+    const effectiveFromIso = form.effectiveFrom ? new Date(String(form.effectiveFrom) + "T00:00:00.000Z").toISOString() : null;
+    const currency = String(form.currency || "INR").trim() || "INR";
 
     setSaving(true);
     try {
       if (mode === "create") {
-        try {
-          await apiTry(`/api/billing/tariff-rates`, `/api/infrastructure/tariff-rates`, {
-            method: "POST",
-            body: JSON.stringify(payloadFull),
-          });
-        } catch (e: any) {
-          const msg = e?.message || "";
-          if (e instanceof ApiError && e.status === 400 && looksLikeWhitelistError(msg)) {
-            await apiTry(`/api/billing/tariff-rates`, `/api/infrastructure/tariff-rates`, {
-              method: "POST",
-              body: JSON.stringify(payloadMin),
-            });
-            toast({
-              title: "Saved (basic only)",
-              description: "Backend DTO accepts only basic fields. We’ll align rate DTO for tax/effectiveFrom next.",
-            });
-          } else {
-            throw e;
-          }
+        const created = await apiTry<any>(`/api/billing/tariff-rates`, `/api/infrastructure/tariff-rates`, {
+          method: "POST",
+          body: JSON.stringify({
+            tariffPlanId: plan.id,
+            chargeMasterItemId: cmId,
+            rateAmount: amt,
+            currency,
+            taxCodeId,
+            isTaxInclusive: Boolean(form.isTaxInclusive),
+            effectiveFrom: effectiveFromIso,
+            notes: String(form.notes || "").trim() || null,
+          }),
+        });
+
+        // Optional immediate close (kept only to honor existing UI switch)
+        if (!Boolean(form.isActive) && created?.id) {
+          const effectiveTo = encodeURIComponent(new Date().toISOString());
+          await apiTry(
+            `/api/billing/tariff-rates/${encodeURIComponent(created.id)}/close?effectiveTo=${effectiveTo}`,
+            `/api/infrastructure/tariff-rates/${encodeURIComponent(created.id)}/close?effectiveTo=${effectiveTo}`,
+            { method: "POST" },
+          );
         }
       } else {
         if (!editing?.id) throw new Error("Invalid editing row");
-        try {
-          await apiTry(`/api/billing/tariff-rates/${encodeURIComponent(editing.id)}`, `/api/infrastructure/tariff-rates/${encodeURIComponent(editing.id)}`, {
+
+        await apiTry(
+          `/api/billing/tariff-rates/${encodeURIComponent(editing.id)}`,
+          `/api/infrastructure/tariff-rates/${encodeURIComponent(editing.id)}`,
+          {
             method: "PATCH",
-            body: JSON.stringify(payloadFull),
+            body: JSON.stringify({
+              rateAmount: amt,
+              currency,
+              taxCodeId,
+              isTaxInclusive: Boolean(form.isTaxInclusive),
+              effectiveFrom: effectiveFromIso,
+              notes: String(form.notes || "").trim() || null,
+            }),
+          },
+        );
+
+        if (!Boolean(form.isActive) && Boolean(editing.isActive)) {
+          const effectiveTo = encodeURIComponent(new Date().toISOString());
+          await apiTry(
+            `/api/billing/tariff-rates/${encodeURIComponent(editing.id)}/close?effectiveTo=${effectiveTo}`,
+            `/api/infrastructure/tariff-rates/${encodeURIComponent(editing.id)}/close?effectiveTo=${effectiveTo}`,
+            { method: "POST" },
+          );
+        }
+        if (Boolean(form.isActive) && !Boolean(editing.isActive)) {
+          toast({
+            title: "Cannot re-open a closed rate",
+            description: "Create a new version using Add Rate with a new effectiveFrom.",
           });
-        } catch (e: any) {
-          const msg = e?.message || "";
-          if (e instanceof ApiError && e.status === 400 && looksLikeWhitelistError(msg)) {
-            await apiTry(`/api/billing/tariff-rates/${encodeURIComponent(editing.id)}`, `/api/infrastructure/tariff-rates/${encodeURIComponent(editing.id)}`, {
-              method: "PATCH",
-              body: JSON.stringify(payloadMin),
-            });
-            toast({
-              title: "Updated (basic only)",
-              description: "Backend update endpoint rejects advanced fields. Align DTO next.",
-            });
-          } else {
-            throw e;
-          }
         }
       }
 
@@ -1861,7 +2006,6 @@ function TariffRateEditModal({
       setSaving(false);
     }
   }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={drawerClassName()}>

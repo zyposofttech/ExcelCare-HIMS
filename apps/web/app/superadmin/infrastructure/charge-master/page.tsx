@@ -5,32 +5,15 @@ import { AppLink as Link } from "@/components/app-link";
 
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/use-toast";
 
 import { ApiError, apiFetch } from "@/lib/api";
@@ -40,15 +23,12 @@ import {
   AlertTriangle,
   ExternalLink,
   Filter,
-  MoreHorizontal,
+  Eye,
   Plus,
   RefreshCw,
+  Receipt,
   Search,
   Wrench,
-  Trash2,
-  CheckCircle2,
-  Receipt,
-  Eye,
 } from "lucide-react";
 
 /* -------------------------------------------------------------------------- */
@@ -144,31 +124,8 @@ function buildQS(params: Record<string, any>) {
   return usp.toString();
 }
 
-function fmtDateTime(v?: string | null) {
-  if (!v) return "—";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "—";
-  return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-}
-
-function toNumber(v: any) {
-  const n = typeof v === "number" ? v : Number(String(v ?? "").trim());
-  return Number.isFinite(n) ? n : NaN;
-}
-
 function Skeleton({ className }: { className?: string }) {
   return <div className={cn("animate-pulse rounded-md bg-zc-panel/30", className)} />;
-}
-
-function drawerClassName(extra?: string) {
-  return cn(
-    "left-auto right-0 top-0 h-screen w-[95vw] max-w-[980px] translate-x-0 translate-y-0",
-    "rounded-2xl",
-    "border border-indigo-200/50 dark:border-indigo-800/50 bg-zc-card",
-    "shadow-2xl shadow-indigo-500/10",
-    "overflow-y-auto",
-    extra,
-  );
 }
 
 function activeBadge(isActive: boolean) {
@@ -214,16 +171,6 @@ async function apiTry<T>(primary: string, fallback: string, init?: RequestInit):
   }
 }
 
-function looksLikeWhitelistError(msg?: string) {
-  const s = (msg || "").toLowerCase();
-  return (
-    s.includes("property") && s.includes("should not exist") ||
-    s.includes("whitelist") ||
-    s.includes("forbidden") ||
-    s.includes("non-whitelisted")
-  );
-}
-
 /* -------------------------------------------------------------------------- */
 /*                                   Page                                     */
 /* -------------------------------------------------------------------------- */
@@ -242,22 +189,10 @@ export default function SuperAdminChargeMasterPage() {
   const [branchId, setBranchId] = React.useState<string>("");
 
   const [rows, setRows] = React.useState<ChargeMasterRow[]>([]);
-  const [selectedId, setSelectedId] = React.useState<string>("");
-  const [selected, setSelected] = React.useState<ChargeMasterRow | null>(null);
-
-  const [taxCodes, setTaxCodes] = React.useState<TaxCodeRow[]>([]);
 
   // filters
   const [q, setQ] = React.useState("");
   const [includeInactive, setIncludeInactive] = React.useState(false);
-
-  // modals
-  const [editOpen, setEditOpen] = React.useState(false);
-  const [editMode, setEditMode] = React.useState<"create" | "edit">("create");
-  const [editing, setEditing] = React.useState<ChargeMasterRow | null>(null);
-
-  const [policyOpen, setPolicyOpen] = React.useState(false);
-  const [policyPayload, setPolicyPayload] = React.useState<any>(null);
 
   const mustSelectBranch = !branchId;
 
@@ -274,56 +209,35 @@ export default function SuperAdminChargeMasterPage() {
     return next;
   }
 
-  async function loadTaxCodesForBranch(bid: string) {
-    try {
-      const qs = buildQS({ branchId: bid, includeInactive: "true" });
-      const res = await apiTry<any>(`/api/billing/tax-codes?${qs}`, `/api/infrastructure/tax-codes?${qs}`);
-      const list: TaxCodeRow[] = Array.isArray(res) ? res : (res?.rows || []);
-      setTaxCodes(list);
-    } catch {
-      setTaxCodes([]);
-    }
-  }
-
-  async function loadChargeMaster(showToast = false) {
-    if (!branchId) return;
+  async function loadChargeMaster(showToast = false, targetBranchId?: string) {
+    const target = targetBranchId || branchId;
+    if (!target) return;
     setErr(null);
     setLoading(true);
     try {
       const qs = buildQS({
-        branchId,
+        branchId: target,
         q: q.trim() || undefined,
         includeInactive: includeInactive ? "true" : undefined,
         includeCounts: "true",
         includeTax: "true",
       });
 
-      // Primary & fallback (controller supports /infrastructure and /infra)
       const res = await apiTry<any>(
         `/api/infrastructure/charge-master?${qs}`,
         `/api/infra/charge-master?${qs}`,
       );
 
-      const list: ChargeMasterRow[] = Array.isArray(res) ? res : (res?.rows || []);
+      const list: ChargeMasterRow[] = Array.isArray(res) ? res : res?.rows || [];
       setRows(list);
 
-      const nextSelected =
-        selectedId && list.some((x) => x.id === selectedId) ? selectedId : list[0]?.id || "";
-      setSelectedId(nextSelected);
-      setSelected(nextSelected ? list.find((x) => x.id === nextSelected) || null : null);
-
       if (showToast) {
-        toast({
-          title: "Charge Master refreshed",
-          description: "Loaded latest items for this branch.",
-        });
+        toast({ title: "Charge master refreshed", description: "Loaded latest items for this branch." });
       }
     } catch (e: any) {
       const msg = e?.message || "Failed to load charge master";
       setErr(msg);
       setRows([]);
-      setSelectedId("");
-      setSelected(null);
       if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
     } finally {
       setLoading(false);
@@ -339,8 +253,7 @@ export default function SuperAdminChargeMasterPage() {
         setLoading(false);
         return;
       }
-      await loadTaxCodesForBranch(bid);
-      await loadChargeMaster(false);
+      await loadChargeMaster(false, bid);
       if (showToast) toast({ title: "Ready", description: "Branch scope and charge master are up to date." });
     } catch (e: any) {
       const msg = e?.message || "Refresh failed";
@@ -358,9 +271,6 @@ export default function SuperAdminChargeMasterPage() {
 
   React.useEffect(() => {
     if (!branchId) return;
-    setSelectedId("");
-    setSelected(null);
-    void loadTaxCodesForBranch(branchId);
     void loadChargeMaster(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId, includeInactive]);
@@ -372,35 +282,15 @@ export default function SuperAdminChargeMasterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
-  React.useEffect(() => {
-    if (!selectedId) {
-      setSelected(null);
-      return;
-    }
-    setSelected(rows.find((x) => x.id === selectedId) || null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, rows]);
-
-  async function onBranchChange(nextId: string) {
+  function onBranchChange(nextId: string) {
     setBranchId(nextId);
     writeLS(LS_BRANCH, nextId);
 
     setQ("");
     setIncludeInactive(false);
-    setSelectedId("");
-    setSelected(null);
 
     setErr(null);
-    setLoading(true);
-    try {
-      await loadTaxCodesForBranch(nextId);
-      await loadChargeMaster(false);
-      toast({ title: "Branch scope changed", description: "Loaded charge master for selected branch." });
-    } catch (e: any) {
-      toast({ title: "Load failed", description: e?.message || "Request failed", variant: "destructive" as any });
-    } finally {
-      setLoading(false);
-    }
+    void loadChargeMaster(false, nextId);
   }
 
   const stats = React.useMemo(() => {
@@ -414,73 +304,8 @@ export default function SuperAdminChargeMasterPage() {
     return { total, active, inactive, missingTax, missingUnit };
   }, [rows]);
 
-  function openCreate() {
-    setEditMode("create");
-    setEditing(null);
-    setEditOpen(true);
-  }
-
-  function openEdit(row: ChargeMasterRow) {
-    setEditMode("edit");
-    setEditing(row);
-    setEditOpen(true);
-  }
-
-  async function remove(row: ChargeMasterRow) {
-    if (!row?.id) return;
-    const ok = window.confirm("Delete this charge master item? (Only safe if not referenced anywhere.)");
-    if (!ok) return;
-
-    setBusy(true);
-    try {
-      await apiTry(
-        `/api/infrastructure/charge-master/${encodeURIComponent(row.id)}`,
-        `/api/infra/charge-master/${encodeURIComponent(row.id)}`,
-        { method: "DELETE" },
-      );
-      toast({ title: "Deleted", description: "Charge master item deleted." });
-      await loadChargeMaster(false);
-    } catch (e: any) {
-      toast({
-        title: "Delete failed",
-        description:
-          e?.message ||
-          "This backend may not support delete yet. If you need delete/toggle/edit endpoints, we’ll add them in Step-Backend.",
-        variant: "destructive" as any,
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function quickToggle(row: ChargeMasterRow, nextActive: boolean) {
-    const ok = window.confirm(nextActive ? "Activate this item?" : "Deactivate this item? (May create FixIts if used.)");
-    if (!ok) return;
-
-    setBusy(true);
-    try {
-      await apiTry(
-        `/api/infrastructure/charge-master/${encodeURIComponent(row.id)}`,
-        `/api/infra/charge-master/${encodeURIComponent(row.id)}`,
-        { method: "PATCH", body: JSON.stringify({ isActive: nextActive }) },
-      );
-      toast({ title: "Updated", description: `Item is now ${nextActive ? "ACTIVE" : "INACTIVE"}.` });
-      await loadChargeMaster(false);
-    } catch (e: any) {
-      toast({
-        title: "Update failed",
-        description:
-          e?.message ||
-          "This backend may not support PATCH yet. If needed, we’ll add update/toggle endpoints next.",
-        variant: "destructive" as any,
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
-    <AppShell title="Infrastructure • Charge Master">
+    <AppShell title="Infrastructure - Charge Master">
       <div className="grid gap-6">
         {/* Header */}
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -491,37 +316,29 @@ export default function SuperAdminChargeMasterPage() {
             <div className="min-w-0">
               <div className="text-3xl font-semibold tracking-tight">Charge Master</div>
               <div className="mt-1 text-sm text-zc-muted">
-                Branch-scoped billable items used by Tariff Plans. Single source of truth for “what can be billed”.
+                Branch-scoped billable items used by tariff plans and packages.
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-nowrap overflow-x-auto">
-            <Button
-              variant="outline"
-              className="px-5 gap-2 whitespace-nowrap shrink-0"
-              onClick={() => refreshAll(true)}
-              disabled={loading || busy}
-            >
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" className="px-5 gap-2" onClick={() => refreshAll(true)} disabled={loading || busy}>
               <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
               Refresh
             </Button>
 
-            <Button variant="outline" asChild className="px-5 gap-2 whitespace-nowrap shrink-0">
+            <Button variant="outline" asChild className="px-5 gap-2">
               <Link href="/superadmin/infrastructure/fixit">
                 <Wrench className="h-4 w-4" />
                 FixIt Inbox
               </Link>
             </Button>
 
-            <Button
-              variant="primary"
-              className="px-5 gap-2 whitespace-nowrap shrink-0"
-              onClick={openCreate}
-              disabled={mustSelectBranch}
-            >
-              <Plus className="h-4 w-4" />
-              New Item
+            <Button variant="primary" className="px-5 gap-2" asChild>
+              <Link href="/superadmin/infrastructure/charge-master/new">
+                <Plus className="h-4 w-4" />
+                New Item
+              </Link>
             </Button>
           </div>
         </div>
@@ -545,8 +362,7 @@ export default function SuperAdminChargeMasterPage() {
           <CardHeader className="pb-4">
             <CardTitle className="text-base">Overview</CardTitle>
             <CardDescription className="text-sm">
-              Best practice: every active item must have a <span className="font-semibold text-zc-text">Charge Unit</span>{" "}
-              and an active <span className="font-semibold text-zc-text">Tax Code</span>.
+              Pick a branch, search items, and review billing completeness.
             </CardDescription>
           </CardHeader>
 
@@ -584,9 +400,9 @@ export default function SuperAdminChargeMasterPage() {
                 <div className="text-xs font-medium text-amber-700 dark:text-amber-300">Active missing Tax</div>
                 <div className="mt-1 text-lg font-bold text-amber-800 dark:text-amber-200">{stats.missingTax}</div>
               </div>
-              <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/50 dark:bg-amber-900/10">
-                <div className="text-xs font-medium text-amber-700 dark:text-amber-300">Active missing Unit</div>
-                <div className="mt-1 text-lg font-bold text-amber-800 dark:text-amber-200">{stats.missingUnit}</div>
+              <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3 dark:border-rose-900/50 dark:bg-rose-900/10">
+                <div className="text-xs font-medium text-rose-700 dark:text-rose-300">Active missing Unit</div>
+                <div className="mt-1 text-lg font-bold text-rose-800 dark:text-rose-200">{stats.missingUnit}</div>
               </div>
             </div>
 
@@ -596,7 +412,7 @@ export default function SuperAdminChargeMasterPage() {
                 <Input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search by code/name…"
+                  placeholder="Search by code or name..."
                   className="pl-10"
                   disabled={mustSelectBranch}
                 />
@@ -631,8 +447,8 @@ export default function SuperAdminChargeMasterPage() {
                   What belongs in Charge Master
                 </div>
                 <div className="text-sm text-zc-muted">
-                  Create items that appear in billing: investigations, procedures, bed/ward charges, consultations,
-                  packages, consumables billing heads, OT charges, etc. Tariff Plans attach prices to these items.
+                  Create items that appear in billing: investigations, procedures, bed or ward charges, consultations,
+                  packages, consumables billing heads, OT charges, and more.
                 </div>
               </div>
             ) : null}
@@ -640,18 +456,18 @@ export default function SuperAdminChargeMasterPage() {
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary">Branch scoped</Badge>
               <Badge variant="ok">Tariff uses ChargeMasterItem</Badge>
-              <Badge variant="warning">Missing tax/unit → FixIt</Badge>
+              <Badge variant="warning">Missing tax or unit {"->"} FixIt</Badge>
             </div>
           </CardContent>
         </Card>
 
-        {/* Workspace */}
+        {/* Main tabs */}
         <Card>
           <CardHeader className="py-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <CardTitle className="text-base">Charge Master Workspace</CardTitle>
-                <CardDescription>Create and maintain billable items for tariff pricing and packages.</CardDescription>
+                <CardTitle className="text-base">Manage Charge Master</CardTitle>
+                <CardDescription>Items and guidance for billing and tariffs.</CardDescription>
               </div>
 
               <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
@@ -682,168 +498,114 @@ export default function SuperAdminChargeMasterPage() {
           <CardContent className="pb-6">
             <Tabs value={activeTab}>
               <TabsContent value="items" className="mt-0">
-                <div className="grid gap-4 lg:grid-cols-12">
-                  {/* Left list */}
-                  <div className="lg:col-span-5">
-                    <div className="rounded-xl border border-zc-border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-[160px]">Code</TableHead>
-                            <TableHead>Name</TableHead>
-                            <TableHead className="w-[140px]">Status</TableHead>
-                            <TableHead className="w-[56px]" />
+                <div className="rounded-xl border border-zc-border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[180px]">Code</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead className="w-[140px]">Status</TableHead>
+                        <TableHead className="w-[120px]" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {loading ? (
+                        Array.from({ length: 10 }).map((_, i) => (
+                          <TableRow key={i}>
+                            <TableCell colSpan={4}>
+                              <Skeleton className="h-6 w-full" />
+                            </TableCell>
                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {loading ? (
-                            Array.from({ length: 10 }).map((_, i) => (
-                              <TableRow key={i}>
-                                <TableCell colSpan={4}>
-                                  <Skeleton className="h-6 w-full" />
-                                </TableCell>
-                              </TableRow>
-                            ))
-                          ) : rows.length === 0 ? (
-                            <TableRow>
-                              <TableCell colSpan={4}>
-                                <div className="flex items-center justify-center gap-3 py-10 text-sm text-zc-muted">
-                                  <Receipt className="h-4 w-4" />
-                                  No items found. Create one to begin.
+                        ))
+                      ) : rows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4}>
+                            <div className="flex flex-col items-center justify-center gap-3 py-10 text-sm text-zc-muted">
+                              <div className="flex items-center gap-2">
+                                <Receipt className="h-4 w-4" />
+                                No items found.
+                              </div>
+                              <Button size="sm" asChild>
+                                <Link href="/superadmin/infrastructure/charge-master/new">New Item</Link>
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        rows.map((r) => {
+                          const missingTax = r.isActive && !r.taxCodeId;
+                          const missingUnit = r.isActive && !r.chargeUnit;
+
+                          return (
+                            <TableRow key={r.id}>
+                              <TableCell className="font-mono text-xs">
+                                <div className="flex flex-col gap-1">
+                                  <span className="font-semibold text-zc-text">{r.code}</span>
+                                  <span className="text-[11px] text-zc-muted">
+                                    {r.chargeUnit ? unitLabel(r.chargeUnit) : "-"}
+                                  </span>
                                 </div>
                               </TableCell>
+                              <TableCell>
+                                <div className="flex flex-col gap-1">
+                                  <span className="font-semibold text-zc-text">{r.name}</span>
+                                  <span className="text-xs text-zc-muted">
+                                    {r.category ? (
+                                      <>
+                                        <span className="font-semibold text-zc-text">{r.category}</span>
+                                        <span className="mx-2">-</span>
+                                      </>
+                                    ) : null}
+                                    Tax:{" "}
+                                    <span
+                                      className={cn(
+                                        "font-semibold",
+                                        missingTax ? "text-amber-700 dark:text-amber-300" : "text-zc-text",
+                                      )}
+                                    >
+                                      {r.taxCode?.code || (r.taxCodeId ? "Linked" : "Missing")}
+                                    </span>
+                                    {missingUnit ? (
+                                      <>
+                                        <span className="mx-2">-</span>
+                                        <span className="font-semibold text-rose-700 dark:text-rose-300">Unit missing</span>
+                                      </>
+                                    ) : null}
+                                  </span>
+                                </div>
+                              </TableCell>
+                              <TableCell>{activeBadge(r.isActive)}</TableCell>
+                              <TableCell className="text-right">
+                                <Button variant="outline" size="sm" className="gap-2" asChild>
+                                  <Link href={`/superadmin/infrastructure/charge-master/${encodeURIComponent(r.id)}`}>
+                                    <Eye className="h-4 w-4" />
+                                    View
+                                  </Link>
+                                </Button>
+                              </TableCell>
                             </TableRow>
-                          ) : (
-                            rows.map((r) => {
-                              const missingTax = r.isActive && !r.taxCodeId;
-                              const missingUnit = r.isActive && !r.chargeUnit;
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
 
-                              return (
-                                <TableRow
-                                  key={r.id}
-                                  className={cn("cursor-pointer", selectedId === r.id ? "bg-zc-panel/30" : "")}
-                                  onClick={() => setSelectedId(r.id)}
-                                >
-                                  <TableCell className="font-mono text-xs">
-                                    <div className="flex flex-col gap-1">
-                                      <span className="font-semibold text-zc-text">{r.code}</span>
-                                      <span className="text-[11px] text-zc-muted">
-                                        {r.chargeUnit ? unitLabel(r.chargeUnit) : "—"}
-                                      </span>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex flex-col gap-1">
-                                      <span className="font-semibold text-zc-text">{r.name}</span>
-                                      <span className="text-xs text-zc-muted">
-                                        {r.category ? (
-                                          <>
-                                            <span className="font-semibold text-zc-text">{r.category}</span>
-                                            <span className="mx-2">•</span>
-                                          </>
-                                        ) : null}
-                                        Tax:{" "}
-                                        <span className={cn("font-semibold", missingTax ? "text-amber-700 dark:text-amber-300" : "text-zc-text")}>
-                                          {r.taxCode?.code || (r.taxCodeId ? "Linked" : "Missing")}
-                                        </span>
-                                        {missingUnit ? (
-                                          <>
-                                            <span className="mx-2">•</span>
-                                            <span className="font-semibold text-amber-700 dark:text-amber-300">Unit missing</span>
-                                          </>
-                                        ) : null}
-                                      </span>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>{activeBadge(r.isActive)}</TableCell>
-                                  <TableCell onClick={(e) => e.stopPropagation()}>
-                                    <DropdownMenu>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                                          <MoreHorizontal className="h-4 w-4" />
-                                        </Button>
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end" className="w-[220px]">
-                                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => openEdit(r)}>
-                                          <Wrench className="mr-2 h-4 w-4" />
-                                          Edit item
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem
-                                          onClick={() => {
-                                            setPolicyPayload(r.billingPolicy ?? null);
-                                            setPolicyOpen(true);
-                                          }}
-                                        >
-                                          <Eye className="mr-2 h-4 w-4" />
-                                          View billing policy
-                                        </DropdownMenuItem>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => quickToggle(r, !r.isActive)}>
-                                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                                          {r.isActive ? "Deactivate" : "Activate"}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => remove(r)}>
-                                          <Trash2 className="mr-2 h-4 w-4" />
-                                          Delete
-                                        </DropdownMenuItem>
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })
-                          )}
-                        </TableBody>
-                      </Table>
-
-                      <div className="flex flex-col gap-3 border-t border-zc-border p-4 md:flex-row md:items-center md:justify-between">
-                        <div className="text-sm text-zc-muted">
-                          Total: <span className="font-semibold text-zc-text">{rows.length}</span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button variant="outline" size="sm" className="gap-2" asChild>
-                            <Link href="/superadmin/infrastructure/tariff-plans">
-                              Tariff Plans <ExternalLink className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                          <Button variant="outline" size="sm" className="gap-2" asChild>
-                            <Link href="/superadmin/infrastructure/tax-codes">
-                              Tax Codes <ExternalLink className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                        </div>
-                      </div>
+                  <div className="flex flex-col gap-3 border-t border-zc-border p-4 md:flex-row md:items-center md:justify-between">
+                    <div className="text-sm text-zc-muted">
+                      Total: <span className="font-semibold text-zc-text">{rows.length}</span>
                     </div>
-                  </div>
-
-                  {/* Right detail */}
-                  <div className="lg:col-span-7">
-                    {!selected ? (
-                      <Card className="border-zc-border">
-                        <CardHeader className="py-4">
-                          <CardTitle className="text-base">Select an item</CardTitle>
-                          <CardDescription>Pick an item from the left list to view details and actions.</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 text-sm text-zc-muted">
-                            Tip: Keep codes consistent and canonical (e.g., “RAD-CT-HEAD”, “LAB-CBC”, “WARD-GEN-PERDAY”).
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ) : (
-                      <ChargeMasterDetail
-                        row={selected}
-                        busy={busy}
-                        onEdit={() => openEdit(selected)}
-                        onToggle={() => quickToggle(selected, !selected.isActive)}
-                        onViewPolicy={() => {
-                          setPolicyPayload(selected.billingPolicy ?? null);
-                          setPolicyOpen(true);
-                        }}
-                      />
-                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="outline" size="sm" className="gap-2" asChild>
+                        <Link href="/superadmin/infrastructure/tariff-plans">
+                          Tariff Plans <ExternalLink className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                      <Button variant="outline" size="sm" className="gap-2" asChild>
+                        <Link href="/superadmin/infrastructure/tax-codes">
+                          Tax Codes <ExternalLink className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </TabsContent>
@@ -852,41 +614,35 @@ export default function SuperAdminChargeMasterPage() {
                 <Card className="border-zc-border">
                   <CardHeader className="py-4">
                     <CardTitle className="text-base">How Charge Master works</CardTitle>
-                    <CardDescription>Use Charge Master as the only anchor for pricing & tariffs.</CardDescription>
+                    <CardDescription>Use Charge Master as the only anchor for pricing and tariffs.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-4">
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                         <div className="text-sm font-semibold text-zc-text">1) Create billable heads</div>
-                        <div className="mt-1 text-sm text-zc-muted">
-                          These are the “items” that appear in billing.
-                        </div>
+                        <div className="mt-1 text-sm text-zc-muted">These are the items that appear in billing.</div>
                       </div>
                       <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                         <div className="text-sm font-semibold text-zc-text">2) Enforce charge unit</div>
                         <div className="mt-1 text-sm text-zc-muted">
-                          Per day / per session / per procedure etc. should be consistent end-to-end.
+                          Per day, per session, or per procedure should be consistent end-to-end.
                         </div>
                       </div>
                       <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                         <div className="text-sm font-semibold text-zc-text">3) Set tax code</div>
-                        <div className="mt-1 text-sm text-zc-muted">
-                          Use active Tax Codes (GST/TDS). Inactive usage should create FixIts.
-                        </div>
+                        <div className="mt-1 text-sm text-zc-muted">Use active tax codes. Inactive usage should create FixIts.</div>
                       </div>
                       <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                         <div className="text-sm font-semibold text-zc-text">4) Tariff plans set prices</div>
-                        <div className="mt-1 text-sm text-zc-muted">
-                          Tariff rates reference charge master item, not service codes.
-                        </div>
+                        <div className="mt-1 text-sm text-zc-muted">Tariff rates reference charge master item, not service codes.</div>
                       </div>
                     </div>
 
                     <Separator />
 
                     <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 text-sm text-zc-muted">
-                      If edit/toggle/delete aren’t working, it means backend endpoints are not added yet.
-                      Tell me and I’ll give you the backend controllers/services next.
+                      If edit, toggle, or delete are not working, it means backend endpoints are not added yet.
+                      Tell me and I will give you the backend controllers and services next.
                     </div>
                   </CardContent>
                 </Card>
@@ -895,555 +651,6 @@ export default function SuperAdminChargeMasterPage() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Create/Edit drawer */}
-      <ChargeMasterEditModal
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        mode={editMode}
-        branchId={branchId}
-        editing={editing}
-        taxCodes={taxCodes}
-        onSaved={async () => {
-          toast({ title: "Saved", description: "Charge master item saved successfully." });
-          await loadChargeMaster(false);
-        }}
-      />
-
-      {/* Policy viewer */}
-      <Dialog open={policyOpen} onOpenChange={setPolicyOpen}>
-        <DialogContent className="sm:max-w-[980px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Eye className="h-4 w-4 text-zc-accent" />
-              Billing Policy JSON
-            </DialogTitle>
-            <DialogDescription>Optional JSON: rounding, caps, package rules, refunds, etc.</DialogDescription>
-          </DialogHeader>
-
-          <div className="mt-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-            <pre className="max-h-[60vh] overflow-auto text-xs leading-relaxed text-zc-text">
-              {JSON.stringify(policyPayload ?? {}, null, 2)}
-            </pre>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPolicyOpen(false)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </AppShell>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*                            Detail Right Panel                               */
-/* -------------------------------------------------------------------------- */
-
-function ChargeMasterDetail({
-  row,
-  busy,
-  onEdit,
-  onToggle,
-  onViewPolicy,
-}: {
-  row: ChargeMasterRow;
-  busy: boolean;
-  onEdit: () => void;
-  onToggle: () => void;
-  onViewPolicy: () => void;
-}) {
-  const c = row._count || {};
-  const missingTax = row.isActive && !row.taxCodeId;
-  const missingUnit = row.isActive && !row.chargeUnit;
-
-  return (
-    <div className="grid gap-4">
-      <Card className="border-zc-border">
-        <CardHeader className="py-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <CardTitle className="text-base">
-                <span className="font-mono">{row.code}</span> • {row.name}
-              </CardTitle>
-              <CardDescription>
-                {activeBadge(row.isActive)} <span className="mx-2 text-zc-muted">•</span>
-                Unit:{" "}
-                <span className={cn("font-semibold", missingUnit ? "text-amber-700 dark:text-amber-300" : "text-zc-text")}>
-                  {row.chargeUnit ? unitLabel(row.chargeUnit) : "Missing"}
-                </span>{" "}
-                <span className="mx-2 text-zc-muted">•</span>
-                Tax:{" "}
-                <span className={cn("font-semibold", missingTax ? "text-amber-700 dark:text-amber-300" : "text-zc-text")}>
-                  {row.taxCode?.code || (row.taxCodeId ? "Linked" : "Missing")}
-                </span>
-              </CardDescription>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" className="gap-2" onClick={onEdit} disabled={busy}>
-                <Wrench className="h-4 w-4" />
-                Edit
-              </Button>
-              <Button variant="outline" className="gap-2" onClick={onViewPolicy} disabled={busy}>
-                <Eye className="h-4 w-4" />
-                Policy
-              </Button>
-              <Button
-                variant={row.isActive ? "outline" : "primary"}
-                className="gap-2"
-                onClick={onToggle}
-                disabled={busy}
-              >
-                <CheckCircle2 className="h-4 w-4" />
-                {row.isActive ? "Deactivate" : "Activate"}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-
-        <CardContent className="grid gap-4">
-          {(missingTax || missingUnit) && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-900/10 dark:text-amber-200">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-700 dark:text-amber-300" />
-                <div>
-                  <div className="font-semibold">Billing completeness warning</div>
-                  <div className="mt-1 text-sm opacity-90">
-                    Active items should have a charge unit and an active tax code to avoid FixIts and tariff gaps.
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-              <div className="text-xs font-semibold text-zc-muted">Category</div>
-              <div className="mt-1 text-sm font-semibold text-zc-text">{row.category || "—"}</div>
-              <div className="mt-2 text-xs text-zc-muted">Updated: {fmtDateTime(row.updatedAt || null)}</div>
-            </div>
-
-            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-              <div className="text-xs font-semibold text-zc-muted">Usage</div>
-              <div className="mt-1 flex flex-wrap gap-2">
-                <Badge variant="secondary">TariffRates: {c.tariffRates || 0}</Badge>
-                <Badge variant="secondary">Mappings: {c.mappings || 0}</Badge>
-                <Badge variant="secondary">Packages: {c.servicePackages || 0}</Badge>
-              </div>
-              <div className="mt-2 text-xs text-zc-muted">Unit field (display): {row.unit || "—"}</div>
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-            <div className="text-sm font-semibold text-zc-text">Tax details</div>
-            <div className="mt-1 text-sm text-zc-muted">
-              Tax Code: <span className="font-semibold text-zc-text">{row.taxCode?.code || "—"}</span>{" "}
-              {row.taxCode?.ratePercent != null ? (
-                <>
-                  • Rate: <span className="font-semibold text-zc-text">{String(row.taxCode.ratePercent)}%</span>
-                </>
-              ) : null}{" "}
-              • Inclusive: <span className="font-semibold text-zc-text">{row.isTaxInclusive ? "Yes" : "No"}</span>
-            </div>
-            <div className="mt-1 text-sm text-zc-muted">
-              HSN/SAC: <span className="font-semibold text-zc-text">{row.hsnSac || row.taxCode?.hsnSac || "—"}</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*                              Create/Edit Drawer                             */
-/* -------------------------------------------------------------------------- */
-
-function ChargeMasterEditModal({
-  open,
-  onOpenChange,
-  mode,
-  branchId,
-  editing,
-  taxCodes,
-  onSaved,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  mode: "create" | "edit";
-  branchId: string;
-  editing: ChargeMasterRow | null;
-  taxCodes: TaxCodeRow[];
-  onSaved: () => void;
-}) {
-  const { toast } = useToast();
-  const [saving, setSaving] = React.useState(false);
-
-  const [tab, setTab] = React.useState<"basic" | "billing" | "policy">("basic");
-
-  const [form, setForm] = React.useState<any>({
-    code: "",
-    name: "",
-    category: "",
-    unit: "",
-    isActive: true,
-
-    chargeUnit: "PER_UNIT" as ServiceChargeUnit,
-    taxCodeId: "",
-    isTaxInclusive: false,
-    hsnSac: "",
-    billingPolicyText: "",
-  });
-
-  React.useEffect(() => {
-    if (!open) return;
-    setTab("basic");
-
-    if (mode === "edit" && editing) {
-      setForm({
-        code: editing.code || "",
-        name: editing.name || "",
-        category: editing.category || "",
-        unit: editing.unit || "",
-        isActive: Boolean(editing.isActive),
-
-        chargeUnit: (editing.chargeUnit || "PER_UNIT") as ServiceChargeUnit,
-        taxCodeId: editing.taxCodeId || "",
-        isTaxInclusive: Boolean(editing.isTaxInclusive),
-        hsnSac: editing.hsnSac || "",
-        billingPolicyText: editing.billingPolicy != null ? JSON.stringify(editing.billingPolicy, null, 2) : "",
-      });
-    } else {
-      setForm({
-        code: "",
-        name: "",
-        category: "",
-        unit: "",
-        isActive: true,
-
-        chargeUnit: "PER_UNIT",
-        taxCodeId: "",
-        isTaxInclusive: false,
-        hsnSac: "",
-        billingPolicyText: "",
-      });
-    }
-  }, [open, mode, editing]);
-
-  function patch(p: Partial<any>) {
-    setForm((prev: any) => ({ ...prev, ...p }));
-  }
-
-  const activeTaxCodes = React.useMemo(() => taxCodes.filter((t) => t.isActive), [taxCodes]);
-
-  async function save() {
-    if (!branchId) return;
-
-    const code = String(form.code || "").trim();
-    const name = String(form.name || "").trim();
-
-    if (!code || !name) {
-      toast({ title: "Missing fields", description: "Code and Name are required." });
-      return;
-    }
-
-    let billingPolicy: any = null;
-    const bpText = String(form.billingPolicyText || "").trim();
-    if (bpText) {
-      try {
-        billingPolicy = JSON.parse(bpText);
-      } catch {
-        toast({ title: "Invalid JSON", description: "Billing policy must be valid JSON (or leave blank)." });
-        return;
-      }
-    }
-
-    // UI-level enforcement: tax code must be active if selected
-    const taxCodeId = String(form.taxCodeId || "").trim() || null;
-    if (taxCodeId) {
-      const tc = taxCodes.find((x) => x.id === taxCodeId);
-      if (tc && !tc.isActive) {
-        toast({
-          title: "Inactive tax code",
-          description: "Please choose an active tax code (or activate it in Tax Codes).",
-          variant: "destructive" as any,
-        });
-        return;
-      }
-    }
-
-    // Full payload (aligned schema)
-    const payloadFull: any = {
-      code,
-      name,
-      category: String(form.category || "").trim() || null,
-      unit: String(form.unit || "").trim() || null,
-      isActive: Boolean(form.isActive),
-
-      chargeUnit: (form.chargeUnit || "PER_UNIT") as ServiceChargeUnit,
-      taxCodeId,
-      isTaxInclusive: Boolean(form.isTaxInclusive),
-      hsnSac: String(form.hsnSac || "").trim() || null,
-      billingPolicy,
-    };
-
-    // Minimal payload (current DTO in backend, if whitelist rejects advanced fields)
-    const payloadMin: any = {
-      code,
-      name,
-      category: payloadFull.category,
-      unit: payloadFull.unit,
-      isActive: payloadFull.isActive,
-    };
-
-    setSaving(true);
-    try {
-      if (mode === "create") {
-        const urlA = `/api/infrastructure/charge-master?${buildQS({ branchId })}`;
-        const urlB = `/api/infra/charge-master?${buildQS({ branchId })}`;
-
-        try {
-          await apiTry(urlA, urlB, { method: "POST", body: JSON.stringify(payloadFull) });
-        } catch (e: any) {
-          const msg = e?.message || "";
-          if (e instanceof ApiError && e.status === 400 && looksLikeWhitelistError(msg)) {
-            await apiTry(urlA, urlB, { method: "POST", body: JSON.stringify(payloadMin) });
-            toast({
-              title: "Saved (basic only)",
-              description: "Backend DTO currently accepts only basic fields. We’ll add chargeUnit/taxCode support next.",
-            });
-          } else {
-            throw e;
-          }
-        }
-      } else {
-        if (!editing?.id) throw new Error("Invalid editing row");
-        const urlA = `/api/infrastructure/charge-master/${encodeURIComponent(editing.id)}`;
-        const urlB = `/api/infra/charge-master/${encodeURIComponent(editing.id)}`;
-
-        try {
-          await apiTry(urlA, urlB, { method: "PATCH", body: JSON.stringify(payloadFull) });
-        } catch (e: any) {
-          const msg = e?.message || "";
-          if (e instanceof ApiError && e.status === 400 && looksLikeWhitelistError(msg)) {
-            await apiTry(urlA, urlB, { method: "PATCH", body: JSON.stringify(payloadMin) });
-            toast({
-              title: "Updated (basic only)",
-              description: "Backend update endpoint exists but rejects advanced fields. We’ll align DTO next.",
-            });
-          } else {
-            throw e;
-          }
-        }
-      }
-
-      onOpenChange(false);
-      onSaved();
-    } catch (e: any) {
-      toast({
-        title: "Save failed",
-        description:
-          e?.message ||
-          "If create works but edit doesn’t, it means PATCH endpoint isn’t added yet. Tell me and I’ll give backend files.",
-        variant: "destructive" as any,
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={drawerClassName()}>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-3 text-indigo-700 dark:text-indigo-400">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/30">
-              <Receipt className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-            </div>
-            {mode === "create" ? "New Charge Master Item" : "Edit Charge Master Item"}
-          </DialogTitle>
-          <DialogDescription>
-            Create billable items used by tariffs. Advanced billing fields depend on backend DTO alignment.
-          </DialogDescription>
-        </DialogHeader>
-
-        <Separator className="my-4" />
-
-        <div className="px-6 pb-6 grid gap-4">
-          <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
-            <TabsList className={cn("h-10 rounded-2xl border border-zc-border bg-zc-panel/20 p-1")}>
-              <TabsTrigger
-                value="basic"
-                className={cn(
-                  "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
-                )}
-              >
-                Basic
-              </TabsTrigger>
-              <TabsTrigger
-                value="billing"
-                className={cn(
-                  "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
-                )}
-              >
-                Billing
-              </TabsTrigger>
-              <TabsTrigger
-                value="policy"
-                className={cn(
-                  "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
-                )}
-              >
-                Policy JSON
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="basic" className="mt-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label>Code</Label>
-                  <Input value={form.code || ""} onChange={(e) => patch({ code: e.target.value })} placeholder="e.g., LAB-CBC" />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label>Name</Label>
-                  <Input value={form.name || ""} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g., Complete Blood Count" />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label>Category (optional)</Label>
-                  <Input value={form.category || ""} onChange={(e) => patch({ category: e.target.value })} placeholder="e.g., LAB / RADIOLOGY / WARD / OT" />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label>Unit (display, optional)</Label>
-                  <Input value={form.unit || ""} onChange={(e) => patch({ unit: e.target.value })} placeholder="e.g., Test / Day / Session" />
-                </div>
-
-                <div className="grid gap-2 md:col-span-2">
-                  <Label>Active</Label>
-                  <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
-                    <Switch checked={Boolean(form.isActive)} onCheckedChange={(v) => patch({ isActive: v })} />
-                    <div className="text-sm">
-                      <div className="font-semibold text-zc-text">{form.isActive ? "Active" : "Inactive"}</div>
-                      <div className="text-xs text-zc-muted">Inactive items should not be used for new tariffs</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="billing" className="mt-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label>Charge Unit (enforced)</Label>
-                  <Select value={form.chargeUnit} onValueChange={(v) => patch({ chargeUnit: v as ServiceChargeUnit })}>
-                    <SelectTrigger className="h-10">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-[320px] overflow-y-auto">
-                      {[
-                        "PER_UNIT",
-                        "PER_VISIT",
-                        "PER_TEST",
-                        "PER_HOUR",
-                        "PER_DAY",
-                        "PER_SIDE",
-                        "PER_LEVEL",
-                        "PER_SESSION",
-                        "PER_PROCEDURE",
-                        "PER_PACKAGE",
-                      ].map((v) => (
-                        <SelectItem key={v} value={v}>
-                          {unitLabel(v as ServiceChargeUnit)} ({v})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <div className="text-xs text-zc-muted">Tariff rate and billing must match this unit.</div>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label>Tax Code</Label>
-                  <Select value={form.taxCodeId || ""} onValueChange={(v) => patch({ taxCodeId: v === "none" ? "" : v })}>
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select tax code..." />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-[360px] overflow-y-auto">
-                      <SelectItem value="none">No Tax Code</SelectItem>
-                      {activeTaxCodes.map((t) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {t.code} • {t.name} • {String(t.ratePercent)}%
-                        </SelectItem>
-                      ))}
-                      {taxCodes.filter((t) => !t.isActive).length > 0 ? (
-                        <>
-                          <Separator className="my-2" />
-                          <div className="px-2 py-1 text-xs text-zc-muted">Inactive (not selectable)</div>
-                          {taxCodes
-                            .filter((t) => !t.isActive)
-                            .map((t) => (
-                              <div key={t.id} className="px-2 py-1 text-xs text-zc-muted opacity-70">
-                                {t.code} • {t.name} • {String(t.ratePercent)}% (inactive)
-                              </div>
-                            ))}
-                        </>
-                      ) : null}
-                    </SelectContent>
-                  </Select>
-                  <div className="text-xs text-zc-muted">Must be active to avoid FixIts.</div>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label>Tax Inclusive</Label>
-                  <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
-                    <Switch checked={Boolean(form.isTaxInclusive)} onCheckedChange={(v) => patch({ isTaxInclusive: v })} />
-                    <div className="text-sm">
-                      <div className="font-semibold text-zc-text">{form.isTaxInclusive ? "Inclusive" : "Exclusive"}</div>
-                      <div className="text-xs text-zc-muted">Overrides plan defaults if backend supports</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label>HSN/SAC (optional)</Label>
-                  <Input value={form.hsnSac || ""} onChange={(e) => patch({ hsnSac: e.target.value })} placeholder="e.g., 999312" />
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="policy" className="mt-4">
-              <div className="grid gap-2">
-                <Label>Billing Policy JSON (optional)</Label>
-                <Textarea
-                  value={form.billingPolicyText || ""}
-                  onChange={(e) => patch({ billingPolicyText: e.target.value })}
-                  placeholder={`{\n  "rounding": "NEAREST_1",\n  "capAmount": 25000,\n  "discountRules": [{ "type": "PERCENT", "value": 10 }]\n}`}
-                  className="min-h-[220px]"
-                />
-                <div className="text-xs text-zc-muted">
-                  Use this for advanced rules (caps, discounts, inclusions). Backend must store billingPolicy as JSON.
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-              Cancel
-            </Button>
-            <Button onClick={save} disabled={saving}>
-              {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Save
-            </Button>
-          </DialogFooter>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }

@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient } from "@zypocare/db";
 import type { Principal } from "../auth/access-policy.service";
 import { AuditService } from "../audit/audit.service";
 import { canonicalizeCode } from "../../common/naming.util";
-import type { ActivateTariffPlanDto, CreateTariffPlanDto, UpdateTariffPlanDto, UpsertTariffRateDto, CreateTaxCodeDto, UpdateTaxCodeDto } from "./dto";
+import type { ActivateTariffPlanDto, CreateTariffPlanDto, UpdateTariffPlanDto, UpsertTariffRateDto, CreateTaxCodeDto, UpdateTaxCodeDto,SetDefaultTariffPlanDto  } from "./dto";
 
 @Injectable()
 export class BillingService {
@@ -139,18 +139,46 @@ export class BillingService {
   }
   // ---------------- Tariff Plans ----------------
 
-  async listTariffPlans(principal: Principal, q: { branchId?: string | null; kind?: string; status?: string }) {
+  async listTariffPlans(
+    principal: Principal,
+    q: {
+      branchId?: string | null;
+      kind?: string;
+      status?: string;
+      q?: string;
+      includeInactive?: boolean;
+      includeRefs?: boolean;
+      take?: number;
+    },
+  ) {
     const branchId = this.resolveBranchId(principal, q.branchId ?? null);
+
     const where: any = { branchId };
+
     if (q.kind) where.kind = q.kind as any;
     if (q.status) where.status = q.status as any;
 
+    const search = (q.q ?? "").trim();
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { code: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    if (!q.includeInactive) {
+      // Hide retired by default
+      where.status = where.status ?? { not: "RETIRED" };
+    }
+
     return this.prisma.tariffPlan.findMany({
       where,
-      orderBy: [{ updatedAt: "desc" }],
-      include: { payer: true, contract: true },
+      orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
+      take: q.take ? Math.min(Math.max(q.take, 1), 500) : 200,
+      include: q.includeRefs ? { payer: true, contract: true } : undefined,
     });
   }
+
 
   async getTariffPlan(principal: Principal, id: string) {
     const plan = await this.prisma.tariffPlan.findUnique({
@@ -265,7 +293,7 @@ export class BillingService {
 
     await this.prisma.tariffPlan.updateMany({
       where: { ...scopeWhere, id: { not: plan.id } },
-      data: { status: "RETIRED" as any, effectiveTo: effFrom },
+      data: { status: "RETIRED" as any, effectiveTo: effFrom, isDefault: false },
     });
 
     const activated = await this.prisma.tariffPlan.update({
@@ -293,7 +321,7 @@ export class BillingService {
     const now = new Date();
     const retired = await this.prisma.tariffPlan.update({
       where: { id },
-      data: { status: "RETIRED" as any, effectiveTo: now },
+      data: { status: "RETIRED" as any, effectiveTo: now, isDefault: false },
     });
 
     await this.audit.log({
@@ -307,28 +335,93 @@ export class BillingService {
 
     return retired;
   }
+  async setTariffPlanDefault(principal: Principal, id: string, dto: SetDefaultTariffPlanDto) {
+  const plan = await this.prisma.tariffPlan.findUnique({
+    where: { id },
+    select: { id: true, branchId: true, kind: true, contractId: true, status: true, isDefault: true },
+  });
+  if (!plan) throw new NotFoundException("TariffPlan not found");
 
+  this.resolveBranchId(principal, plan.branchId);
+
+  if (plan.status === ("RETIRED" as any)) {
+    throw new BadRequestException("Cannot set default on a RETIRED plan");
+  }
+
+  const next = Boolean(dto?.isDefault);
+
+  // No-op fast path
+  if (next === Boolean(plan.isDefault)) return plan as any;
+
+  if (!next) {
+    const updated = await this.prisma.tariffPlan.update({ where: { id }, data: { isDefault: false } });
+    await this.audit.log({
+      branchId: plan.branchId,
+      actorUserId: principal.userId,
+      action: "BILLING_TARIFF_PLAN_CLEAR_DEFAULT",
+      entity: "TariffPlan",
+      entityId: id,
+      meta: { isDefault: false },
+    });
+    return updated;
+  }
+
+  // Compute default scope
+  const scopeWhere: any =
+    plan.kind === ("PRICE_LIST" as any)
+      ? { branchId: plan.branchId, kind: "PRICE_LIST" }
+      : { branchId: plan.branchId, kind: "PAYER_CONTRACT", contractId: plan.contractId };
+
+  const [, updated] = await this.prisma.$transaction([
+    this.prisma.tariffPlan.updateMany({
+      where: { ...scopeWhere, id: { not: plan.id }, status: { not: "RETIRED" as any } },
+      data: { isDefault: false },
+    }),
+    this.prisma.tariffPlan.update({ where: { id: plan.id }, data: { isDefault: true } }),
+  ]);
+
+  await this.audit.log({
+    branchId: plan.branchId,
+    actorUserId: principal.userId,
+    action: "BILLING_TARIFF_PLAN_SET_DEFAULT",
+    entity: "TariffPlan",
+    entityId: id,
+    meta: { isDefault: true },
+  });
+
+  return updated;
+}
   // ---------------- Tariff Rates ----------------
 
   async listTariffRates(
     principal: Principal,
     tariffPlanId: string,
-    q: { chargeMasterItemId?: string; includeHistory?: boolean },
+    q: { chargeMasterItemId?: string; includeHistory?: boolean; includeRefs?: boolean },
   ) {
-    const plan = await this.prisma.tariffPlan.findUnique({ where: { id: tariffPlanId }, select: { id: true, branchId: true } });
+    const plan = await this.prisma.tariffPlan.findUnique({
+      where: { id: tariffPlanId },
+      select: { id: true, branchId: true },
+    });
     if (!plan) throw new NotFoundException("TariffPlan not found");
     this.resolveBranchId(principal, plan.branchId);
 
     const where: any = { tariffPlanId };
+
     if (q.chargeMasterItemId) where.chargeMasterItemId = q.chargeMasterItemId;
-    if (!q.includeHistory) where.effectiveTo = null;
+
+    if (!q.includeHistory) {
+      // only current / open rates
+      where.effectiveTo = null;
+      where.isActive = true;
+    }
 
     return this.prisma.tariffRate.findMany({
       where,
       orderBy: [{ chargeMasterItemId: "asc" }, { version: "desc" }],
-      include: { chargeMasterItem: true, taxCode: true },
+      include: q.includeRefs ? { chargeMasterItem: true, taxCode: true } : undefined,
     });
   }
+
 
   private async openFixIt(branchId: string, input: { type: any; entityType?: any; entityId?: string | null; title: string; details?: any; severity?: any }) {
     const exists = await this.prisma.fixItTask.findFirst({
@@ -466,7 +559,11 @@ export class BillingService {
     if (rateAmount === undefined || rateAmount === null) {
       throw new BadRequestException("rateAmount is required");
     }
-    const currency = ((dto as any).currency ?? "INR") as any;
+
+    const currency = ((dto as any).currency ?? (await this.prisma.tariffPlan.findUnique({
+      where: { id: tariffPlanId },
+      select: { currency: true },
+    }))?.currency ?? "INR").toUpperCase();
 
     const saved = await this.prisma.tariffRate.upsert({
       where: {
@@ -479,24 +576,32 @@ export class BillingService {
       update: {
         rateAmount: rateAmount as any,
         currency,
+        isTaxInclusive: dto.isTaxInclusive ?? undefined,
         effectiveFrom,
         effectiveTo,
         taxCodeId: dto.taxCodeId ?? null,
         rules: (dto as any).rules ?? undefined,
+        notes: (dto as any).notes ?? undefined,
+        isActive: dto.effectiveTo ? false : true,
       },
       create: {
         tariffPlanId,
         chargeMasterItemId: cm.id,
+        serviceCode: (dto as any).serviceCode ?? null,
         rateAmount: rateAmount as any,
         currency,
         version,
+        isTaxInclusive: dto.isTaxInclusive ?? false,
         effectiveFrom,
         effectiveTo,
         taxCodeId: dto.taxCodeId ?? null,
         rules: (dto as any).rules ?? undefined,
+        notes: (dto as any).notes ?? undefined,
+        isActive: dto.effectiveTo ? false : true,
         createdByUserId: principal.userId,
       },
     });
+
     // -------- FixIt: charge unit mismatch for services mapped to this charge master item
     // If any serviceItem.chargeUnit != cm.chargeUnit -> open CHARGE_UNIT_MISMATCH on the SERVICE_ITEM
     const mappedServices = (await this.prisma.serviceChargeMapping.findMany({
@@ -662,4 +767,102 @@ export class BillingService {
 
     return updated;
   }
+  async updateTariffRateById(principal: Principal, id: string, dto: any) {
+    const rate = await this.prisma.tariffRate.findUnique({
+      where: { id },
+      select: { id: true, tariffPlanId: true, chargeMasterItemId: true },
+    });
+    if (!rate) throw new NotFoundException("TariffRate not found");
+
+    const plan = await this.prisma.tariffPlan.findUnique({
+      where: { id: rate.tariffPlanId },
+      select: { id: true, branchId: true, status: true, currency: true },
+    });
+    if (!plan) throw new NotFoundException("TariffPlan not found");
+    this.resolveBranchId(principal, plan.branchId);
+
+    // safest rule (advanced governance): editable only in DRAFT
+    if (plan.status !== ("DRAFT" as any)) {
+      throw new BadRequestException("Only DRAFT plans can edit an existing rate. Create a new version instead.");
+    }
+
+    const rateAmount = dto.rateAmount ?? dto.amount;
+    const currency = (dto.currency ?? plan.currency ?? "INR").toUpperCase();
+
+    // Validate taxCodeId if provided
+    if (dto.taxCodeId) {
+      const tx = await this.prisma.taxCode.findFirst({
+        where: { id: dto.taxCodeId, branchId: plan.branchId, isActive: true },
+        select: { id: true },
+      });
+      if (!tx) throw new BadRequestException("taxCodeId must be ACTIVE and belong to this branch");
+    }
+
+    const effFrom = dto.effectiveFrom ? new Date(dto.effectiveFrom) : undefined;
+    if (effFrom && Number.isNaN(effFrom.getTime())) throw new BadRequestException("Invalid effectiveFrom");
+
+    const effTo = dto.effectiveTo ? new Date(dto.effectiveTo) : dto.effectiveTo === null ? null : undefined;
+    if (effTo && Number.isNaN(effTo.getTime())) throw new BadRequestException("Invalid effectiveTo");
+
+    return this.prisma.tariffRate.update({
+      where: { id },
+      data: {
+        rateAmount: rateAmount === undefined ? undefined : (rateAmount as any),
+        currency: dto.currency === undefined ? undefined : currency,
+        taxCodeId: dto.taxCodeId === undefined ? undefined : (dto.taxCodeId ?? null),
+        isTaxInclusive: dto.isTaxInclusive === undefined ? undefined : dto.isTaxInclusive,
+        effectiveFrom: effFrom,
+        effectiveTo: effTo,
+        rules: dto.rules === undefined ? undefined : (dto.rules as any),
+        notes: dto.notes === undefined ? undefined : dto.notes,
+        isActive: effTo === null ? true : effTo ? false : undefined,
+      },
+      include: { chargeMasterItem: true, taxCode: true },
+    });
+  }
+  async closeTariffRateById(principal: Principal, id: string, effectiveToIso: string) {
+    const rate = await this.prisma.tariffRate.findUnique({
+      where: { id },
+      select: { id: true, tariffPlanId: true, effectiveFrom: true, effectiveTo: true },
+    });
+    if (!rate) throw new NotFoundException("TariffRate not found");
+
+    const plan = await this.prisma.tariffPlan.findUnique({
+      where: { id: rate.tariffPlanId },
+      select: { id: true, branchId: true },
+    });
+    if (!plan) throw new NotFoundException("TariffPlan not found");
+    this.resolveBranchId(principal, plan.branchId);
+
+    if (rate.effectiveTo) return rate; // already closed
+
+    const effectiveTo = new Date(effectiveToIso);
+    if (Number.isNaN(effectiveTo.getTime())) throw new BadRequestException("Invalid effectiveTo");
+    if (effectiveTo < rate.effectiveFrom) throw new BadRequestException("effectiveTo cannot be before effectiveFrom");
+
+    return this.prisma.tariffRate.update({
+      where: { id },
+      data: { effectiveTo, isActive: false },
+    });
+  }
+  async deactivateTariffRateById(principal: Principal, id: string) {
+    const rate = await this.prisma.tariffRate.findUnique({
+      where: { id },
+      select: { id: true, tariffPlanId: true },
+    });
+    if (!rate) throw new NotFoundException("TariffRate not found");
+
+    const plan = await this.prisma.tariffPlan.findUnique({
+      where: { id: rate.tariffPlanId },
+      select: { id: true, branchId: true },
+    });
+    if (!plan) throw new NotFoundException("TariffPlan not found");
+    this.resolveBranchId(principal, plan.branchId);
+
+    return this.prisma.tariffRate.update({
+      where: { id },
+      data: { isActive: false, effectiveTo: new Date() },
+    });
+  }
+
 }

@@ -27,11 +27,31 @@ export class ServiceItemsController {
     @Query("branchId") branchId?: string,
     @Query("q") q?: string,
     @Query("includeInactive") includeInactive?: string,
+    @Query("includeCounts") includeCounts?: string,
   ) {
     return this.svc.listServiceItems(this.principal(req), {
       branchId: branchId ?? null,
       q,
       includeInactive: includeInactive === "true",
+      includeCounts: includeCounts === "true",
+    });
+  }
+
+  // Backward-compatible route for UI: /infra/service-items
+  @Get("service-items")
+  @Permissions(PERM.INFRA_SERVICE_READ)
+  async listServiceItems(
+    @Req() req: any,
+    @Query("branchId") branchId?: string,
+    @Query("q") q?: string,
+    @Query("includeInactive") includeInactive?: string,
+    @Query("includeCounts") includeCounts?: string,
+  ) {
+    return this.svc.listServiceItems(this.principal(req), {
+      branchId: branchId ?? null,
+      q,
+      includeInactive: includeInactive === "true",
+      includeCounts: includeCounts === "true",
     });
   }
 

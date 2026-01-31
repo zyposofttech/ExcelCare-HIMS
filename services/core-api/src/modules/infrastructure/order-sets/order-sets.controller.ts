@@ -16,6 +16,13 @@ export class OrderSetsController {
     return req.principal;
   }
 
+  // ✅ IMPORTANT: keep this above ":id" routes
+  @Get("meta")
+  @Permissions(PERM.INFRA_ORDER_SET_READ)
+  async meta(@Req() req: any, @Query("branchId") branchId?: string) {
+    return this.svc.meta(this.principal(req), branchId ?? null);
+  }
+
   @Post()
   @Permissions(PERM.INFRA_ORDER_SET_CREATE)
   async create(@Req() req: any, @Body() dto: CreateOrderSetDto, @Query("branchId") branchId?: string) {
@@ -29,8 +36,14 @@ export class OrderSetsController {
     @Query("branchId") branchId?: string,
     @Query("q") q?: string,
     @Query("status") status?: string,
+    @Query("channel") channel?: string,
   ) {
-    return this.svc.list(this.principal(req), { branchId: branchId ?? null, q, status: status ?? null });
+    return this.svc.list(this.principal(req), {
+      branchId: branchId ?? null,
+      q,
+      status: status ?? null,
+      channel: channel ?? null,
+    });
   }
 
   @Get(":id")

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { Permissions } from "../../auth/permissions.decorator";
 import { PERM } from "../../iam/iam.constants";
@@ -51,5 +51,15 @@ export class ChargeMasterController {
   @Permissions(PERM.INFRA_CHARGE_MASTER_UPDATE)
   async updateChargeMaster(@Req() req: any, @Param("id") id: string, @Body() dto: UpdateChargeMasterItemDto) {
     return this.svc.updateChargeMasterItem(this.principal(req), id, dto);
+  }
+
+  /**
+   * UI has "Delete" button. In healthcare billing you typically DON'T hard delete,
+   * to avoid breaking historical tariffs/mappings. So this is a SAFE soft-deactivate.
+   */
+  @Delete("charge-master/:id")
+  @Permissions(PERM.INFRA_CHARGE_MASTER_UPDATE)
+  async deactivateChargeMaster(@Req() req: any, @Param("id") id: string) {
+    return this.svc.deactivateChargeMasterItem(this.principal(req), id);
   }
 }

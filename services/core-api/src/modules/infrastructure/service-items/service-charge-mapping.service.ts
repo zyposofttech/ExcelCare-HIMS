@@ -1,59 +1,104 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { Principal } from "../../auth/access-policy.service";
 import { InfraContextService } from "../shared/infra-context.service";
-import type { CloseServiceChargeMappingDto, UpsertServiceChargeMappingDto } from "./dto";
+import type { CloseServiceChargeMappingDto ,CloseCurrentServiceChargeMappingDto ,UpsertServiceChargeMappingDto } from "./dto";
+
 
 @Injectable()
 export class ServiceChargeMappingService {
   constructor(private readonly ctx: InfraContextService) {}
 
-  private async openFixItOnce(branchId: string, input: {
-    type: any;
-    entityType?: any;
-    entityId?: string | null;
-    serviceItemId?: string | null;
-    title: string;
-    details?: any;
-    severity?: any;
-  }) {
-    const exists = await this.ctx.prisma.fixItTask.findFirst({
-      where: {
-        branchId,
-        type: input.type,
-        status: { in: ["OPEN", "IN_PROGRESS"] as any },
-        entityType: input.entityType ?? null,
-        entityId: input.entityId ?? null,
-      },
-      select: { id: true },
-    });
-    if (exists) return;
+  async listServiceChargeMappings(
+    principal: Principal,
+    opts: {
+      branchId: string | null;
+      serviceItemId?: string;
+      includeHistory?: boolean;
+      includeRefs?: boolean;
+      take?: number;
+    },
+  ) {
+    const branchId = this.ctx.resolveBranchId(principal, opts.branchId ?? null);
 
-    await this.ctx.prisma.fixItTask.create({
-      data: {
-        branchId,
-        type: input.type,
-        status: "OPEN" as any,
-        severity: (input.severity ?? "BLOCKER") as any,
-        entityType: (input.entityType ?? null) as any,
-        entityId: input.entityId ?? null,
-        serviceItemId: input.serviceItemId ?? null,
-        title: input.title,
-        details: input.details ?? undefined,
-      },
+    const where: any = { branchId };
+    if (opts.serviceItemId) where.serviceItemId = opts.serviceItemId;
+
+    if (!opts.includeHistory) {
+      where.effectiveTo = null; // only current/open mapping
+    }
+
+    return this.ctx.prisma.serviceChargeMapping.findMany({
+      where,
+      orderBy: [{ serviceItemId: "asc" }, { version: "desc" }],
+      take: opts.take ? Math.min(Math.max(opts.take, 1), 500) : 500,
+      include: opts.includeRefs
+        ? {
+            serviceItem: true,
+            chargeMasterItem: { include: { taxCode: true } },
+          }
+        : undefined,
     });
   }
 
-  private async resolveFixIts(branchId: string, where: any) {
-    await this.ctx.prisma.fixItTask.updateMany({
-      where: { branchId, status: { in: ["OPEN", "IN_PROGRESS"] as any }, ...where },
-      data: { status: "RESOLVED" as any, resolvedAt: new Date() },
+  async getCurrentMappingForServiceItem(principal: Principal, serviceItemId: string, includeRefs?: boolean) {
+    const svc = await this.ctx.prisma.serviceItem.findUnique({
+      where: { id: serviceItemId },
+      select: { id: true, branchId: true },
     });
+    if (!svc) throw new BadRequestException("Invalid serviceItemId");
+
+    const branchId = this.ctx.resolveBranchId(principal, svc.branchId);
+
+    return this.ctx.prisma.serviceChargeMapping.findFirst({
+      where: { branchId, serviceItemId, effectiveTo: null },
+      orderBy: [{ version: "desc" }],
+      include: includeRefs
+        ? {
+            serviceItem: true,
+            chargeMasterItem: { include: { taxCode: true } },
+          }
+        : undefined,
+    });
+  }
+
+  async closeServiceChargeMapping(principal: Principal, id: string, dto: CloseServiceChargeMappingDto) {
+    const row = await this.ctx.prisma.serviceChargeMapping.findUnique({
+      where: { id },
+      select: { id: true, branchId: true, effectiveFrom: true, effectiveTo: true },
+    });
+    if (!row) throw new NotFoundException("ServiceChargeMapping not found");
+
+    const branchId = this.ctx.resolveBranchId(principal, row.branchId);
+
+    if (row.effectiveTo) return row; // already closed
+
+    const effectiveTo = new Date(dto.effectiveTo);
+    if (Number.isNaN(effectiveTo.getTime())) throw new BadRequestException("Invalid effectiveTo");
+    if (effectiveTo < row.effectiveFrom) {
+      throw new BadRequestException("effectiveTo cannot be before effectiveFrom");
+    }
+
+    const updated = await this.ctx.prisma.serviceChargeMapping.update({
+      where: { id },
+      data: { effectiveTo },
+    });
+
+    await this.ctx.audit.log({
+      branchId,
+      actorUserId: principal.userId,
+      action: "INFRA_SERVICE_MAPPING_UPDATE",
+      entity: "ServiceChargeMapping",
+      entityId: id,
+      meta: { effectiveTo: dto.effectiveTo },
+    });
+
+    return updated;
   }
 
   async upsertServiceChargeMapping(principal: Principal, dto: UpsertServiceChargeMappingDto) {
     const svc = await this.ctx.prisma.serviceItem.findUnique({
       where: { id: dto.serviceItemId },
-      select: { id: true, branchId: true, code: true, name: true, chargeUnit: true },
+      select: { id: true, branchId: true },
     });
     if (!svc) throw new BadRequestException("Invalid serviceItemId");
 
@@ -61,10 +106,9 @@ export class ServiceChargeMappingService {
 
     const cm = await this.ctx.prisma.chargeMasterItem.findFirst({
       where: { id: dto.chargeMasterItemId, branchId },
-      select: { id: true, code: true, name: true, chargeUnit: true, isActive: true },
+      select: { id: true },
     });
     if (!cm) throw new BadRequestException("Invalid chargeMasterItemId for this branch");
-    if (cm.isActive === false) throw new BadRequestException("Cannot map an INACTIVE ChargeMasterItem");
 
     const effectiveFrom = dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date();
     const effectiveTo = dto.effectiveTo ? new Date(dto.effectiveTo) : null;
@@ -105,39 +149,15 @@ export class ServiceChargeMappingService {
       },
     });
 
-    // Resolve mapping-missing FixIt (old + new style)
-    await this.resolveFixIts(branchId, {
-      type: "SERVICE_CHARGE_MAPPING_MISSING" as any,
-      OR: [
-        { serviceItemId: dto.serviceItemId },
-        { entityType: "SERVICE_ITEM" as any, entityId: dto.serviceItemId },
-      ],
+    await this.ctx.prisma.fixItTask.updateMany({
+      where: {
+        branchId,
+        serviceItemId: dto.serviceItemId,
+        type: "SERVICE_CHARGE_MAPPING_MISSING" as any,
+        status: { in: ["OPEN", "IN_PROGRESS"] as any },
+      },
+      data: { status: "RESOLVED" as any, resolvedAt: new Date() },
     });
-
-    // Charge unit mismatch open/resolve
-    const mismatch = (svc.chargeUnit as any) !== (cm.chargeUnit as any);
-    if (mismatch) {
-      await this.openFixItOnce(branchId, {
-        type: "CHARGE_UNIT_MISMATCH" as any,
-        entityType: "SERVICE_ITEM" as any,
-        entityId: svc.id,
-        serviceItemId: svc.id,
-        title: `Charge unit mismatch for ${svc.code}`,
-        details: {
-          serviceItemId: svc.id,
-          serviceChargeUnit: svc.chargeUnit,
-          chargeMasterItemId: cm.id,
-          chargeMasterChargeUnit: cm.chargeUnit,
-        },
-        severity: "BLOCKER",
-      });
-    } else {
-      await this.resolveFixIts(branchId, {
-        type: "CHARGE_UNIT_MISMATCH" as any,
-        entityType: "SERVICE_ITEM" as any,
-        entityId: svc.id,
-      });
-    }
 
     await this.ctx.audit.log({
       branchId,
@@ -150,41 +170,34 @@ export class ServiceChargeMappingService {
 
     return created;
   }
+  async closeCurrentMappingForServiceItem(principal: Principal, dto: CloseCurrentServiceChargeMappingDto) {
+  const svc = await this.ctx.prisma.serviceItem.findUnique({
+    where: { id: dto.serviceItemId },
+    select: { id: true, branchId: true },
+  });
+  if (!svc) throw new BadRequestException("Invalid serviceItemId");
 
-  async closeCurrentMapping(principal: Principal, dto: CloseServiceChargeMappingDto) {
-    const svc = await this.ctx.prisma.serviceItem.findUnique({
-      where: { id: dto.serviceItemId },
-      select: { id: true, branchId: true },
+  const branchId = this.ctx.resolveBranchId(principal, svc.branchId);
+
+  let mappingId = dto.mappingId;
+
+  if (mappingId) {
+    const m = await this.ctx.prisma.serviceChargeMapping.findFirst({
+      where: { id: mappingId, branchId, serviceItemId: dto.serviceItemId },
+      select: { id: true },
     });
-    if (!svc) throw new BadRequestException("Invalid serviceItemId");
-
-    const branchId = this.ctx.resolveBranchId(principal, svc.branchId);
-
-    const active = await this.ctx.prisma.serviceChargeMapping.findFirst({
+    if (!m) throw new NotFoundException("Mapping not found for this serviceItemId");
+  } else {
+    const current = await this.ctx.prisma.serviceChargeMapping.findFirst({
       where: { branchId, serviceItemId: dto.serviceItemId, effectiveTo: null },
-      orderBy: [{ effectiveFrom: "desc" }],
-      select: { id: true, effectiveFrom: true },
+      orderBy: [{ version: "desc" }],
+      select: { id: true },
     });
-    if (!active) throw new BadRequestException("No active mapping to close");
-
-    const effectiveTo = new Date(dto.effectiveTo);
-    if (Number.isNaN(effectiveTo.getTime())) throw new BadRequestException("Invalid effectiveTo");
-    if (effectiveTo < active.effectiveFrom) throw new BadRequestException("effectiveTo cannot be before effectiveFrom");
-
-    const closed = await this.ctx.prisma.serviceChargeMapping.update({
-      where: { id: active.id },
-      data: { effectiveTo },
-    });
-
-    await this.ctx.audit.log({
-      branchId,
-      actorUserId: principal.userId,
-      action: "INFRA_SERVICE_MAPPING_CLOSE",
-      entity: "ServiceChargeMapping",
-      entityId: closed.id,
-      meta: dto,
-    });
-
-    return closed;
+    if (!current) throw new BadRequestException("No active mapping to close");
+    mappingId = current.id;
   }
+
+  return this.closeServiceChargeMapping(principal, mappingId!, { effectiveTo: dto.effectiveTo });
+}
+
 }

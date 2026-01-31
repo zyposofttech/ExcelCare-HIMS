@@ -50,42 +50,41 @@ type BranchRow = { id: string; code: string; name: string; city?: string };
 
 type PackageStatus = "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED" | "RETIRED";
 
-type ChargeMasterItemRow = {
+type ChargeMasterMini = {
   id: string;
   code: string;
   name: string;
   chargeUnit?: string | null;
-  isActive?: boolean;
 };
 
 type ServiceItemRow = {
   id: string;
   code: string;
   name: string;
-  isBillable?: boolean;
-  lifecycleStatus?: string | null;
-  chargeUnit?: string | null;
+  category?: string | null;
+  unit?: string | null;
+  isOrderable?: boolean;
+  isActive?: boolean;
 };
 
-type ServicePackageItemRow = {
+type ServicePackageComponentRow = {
   id: string;
   packageId: string;
 
-  // Prefer ChargeMasterItem for billing-pricing consistency
-  chargeMasterItemId: string;
-  chargeMasterItem?: ChargeMasterItemRow | null;
+  componentType: "SERVICE_ITEM" | "DIAGNOSTIC_ITEM" | "CHARGE_MASTER_ITEM";
 
-  // Optional serviceItem for ordering linkage (if your backend supports it)
   serviceItemId?: string | null;
+  diagnosticItemId?: string | null;
+  chargeMasterItemId?: string | null;
+
   serviceItem?: ServiceItemRow | null;
+  chargeMaster?: ChargeMasterMini | null;
 
-  qty: number;
+  quantity: number;
   isIncluded: boolean;
-  isOptional: boolean;
+  condition?: any;
   sortOrder: number;
-
-  // optional override knobs (keep as JSON-friendly)
-  overrides?: any;
+  isActive: boolean;
 
   createdAt?: string;
   updatedAt?: string;
@@ -102,21 +101,10 @@ type ServicePackageRow = {
   status: PackageStatus;
   version: number;
 
-  // pricing behavior for advanced billing
-  pricingModel?: "INCLUSIVE" | "EXCLUSIVE" | null; // inclusive/exclusive package pricing
-  capAmount?: number | null;
-  discountPercent?: number | null;
-
-  // tax behavior (backend should enforce active tax codes)
-  taxTreatment?: "PACKAGE_LEVEL" | "ITEM_LEVEL" | null;
-
-  // governance
   effectiveFrom?: string;
   effectiveTo?: string | null;
 
-  isActive?: boolean;
-
-  items?: ServicePackageItemRow[];
+  components?: ServicePackageComponentRow[];
 
   createdAt?: string;
   updatedAt?: string;
@@ -245,22 +233,23 @@ export default function SuperAdminServicePackagesPage() {
     setErr(null);
     setLoading(true);
     try {
-      const res = (await apiFetch<ServicePackageRow[]>(
-        `/api/infrastructure/service-packages?${buildQS({
-          branchId,
-          q: q.trim() || undefined,
-          status: status !== "all" ? status : undefined,
-          includeInactive: includeInactive ? "true" : undefined,
-          includeItems: "true",
-        })}`,
-      )) as any;
+      const list =
+        (await apiFetch<ServicePackageRow[]>(
+          `/api/infrastructure/service-packages?${buildQS({
+            branchId,
+            q: q.trim() || undefined,
+            status: status !== "all" ? status : undefined,
+          })}`,
+        )) || [];
 
-      const list: ServicePackageRow[] = Array.isArray(res) ? res : (res?.rows || []);
-      setRows(list);
+      // Client-side toggle for RETIRED visibility (backend list endpoint doesn't support includeInactive)
+      const visible = includeInactive ? list : list.filter((r) => r.status !== "RETIRED");
 
-      const nextSelected = selectedId && list.some((x) => x.id === selectedId) ? selectedId : list[0]?.id || "";
+      setRows(visible);
+
+      const nextSelected = selectedId && visible.some((x) => x.id === selectedId) ? selectedId : visible[0]?.id || "";
       setSelectedId(nextSelected);
-      setSelected(nextSelected ? list.find((x) => x.id === nextSelected) || null : null);
+      setSelected(nextSelected ? visible.find((x) => x.id === nextSelected) || null : null);
 
       if (showToast) toast({ title: "Packages refreshed", description: "Loaded latest packages for this branch." });
     } catch (e: any) {
@@ -357,7 +346,7 @@ export default function SuperAdminServicePackagesPage() {
     const review = byStatus.IN_REVIEW || 0;
     const approved = byStatus.APPROVED || 0;
     const retired = byStatus.RETIRED || 0;
-    const totalItems = rows.reduce((n, r) => n + (r.items?.length || 0), 0);
+    const totalItems = rows.reduce((n, r) => n + ((r.components || []).filter((c) => c.isActive !== false).length || 0), 0);
     return { total, published, draft, review, approved, retired, totalItems };
   }, [rows]);
 
@@ -402,9 +391,7 @@ export default function SuperAdminServicePackagesPage() {
             </span>
             <div className="min-w-0">
               <div className="text-3xl font-semibold tracking-tight">Service Packages</div>
-              <div className="mt-1 text-sm text-zc-muted">
-                Curate package details + pricing rulesin the workspace.
-              </div>
+              <div className="mt-1 text-sm text-zc-muted">Curate package details and add components inside each package.</div>
             </div>
           </div>
 
@@ -454,7 +441,7 @@ export default function SuperAdminServicePackagesPage() {
           <CardHeader className="pb-4">
             <CardTitle className="text-base">Overview</CardTitle>
             <CardDescription className="text-sm">
-              Pick a branch → create package → add ChargeMaster items (and optionally service items) → publish. Billing & GoLive validations rely on ChargeMaster linkage.
+              Pick a branch → create package → add service items as components → publish. Billing & GoLive validations rely on each service’s charge mapping.
             </CardDescription>
           </CardHeader>
 
@@ -466,11 +453,13 @@ export default function SuperAdminServicePackagesPage() {
                   <SelectValue placeholder="Select branch..." />
                 </SelectTrigger>
                 <SelectContent className="max-h-[320px] overflow-y-auto">
-                  {branches.filter((b) => b.id).map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.code} - {b.name} {b.city ? `(${b.city})` : ""}
-                    </SelectItem>
-                  ))}
+                  {branches
+                    .filter((b) => b.id)
+                    .map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.code} - {b.name} {b.city ? `(${b.city})` : ""}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -569,7 +558,7 @@ export default function SuperAdminServicePackagesPage() {
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <CardTitle className="text-base">Package Workspace</CardTitle>
-                <CardDescription>Create packages and curate charge items inside each package.</CardDescription>
+                <CardDescription>Create packages and curate service components inside each package.</CardDescription>
               </div>
 
               <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
@@ -607,8 +596,8 @@ export default function SuperAdminServicePackagesPage() {
                         <TableHead className="w-[180px]">Code</TableHead>
                         <TableHead>Name</TableHead>
                         <TableHead className="w-[140px]">Status</TableHead>
-                        <TableHead className="w-[160px]">Pricing</TableHead>
-                        <TableHead className="w-[120px]">Items</TableHead>
+                        <TableHead className="w-[180px]">Effective From</TableHead>
+                        <TableHead className="w-[120px]">Components</TableHead>
                         <TableHead className="w-[72px]" />
                       </TableRow>
                     </TableHeader>
@@ -642,12 +631,14 @@ export default function SuperAdminServicePackagesPage() {
                             <TableCell>
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-zc-text">{r.name}</span>
-                                <span className="text-xs text-zc-muted">{r.taxTreatment || "—"}</span>
+                                <span className="text-xs text-zc-muted">{r.description?.trim() ? r.description : "—"}</span>
                               </div>
                             </TableCell>
                             <TableCell>{statusBadge(r.status)}</TableCell>
-                            <TableCell className="text-sm text-zc-muted">{r.pricingModel || "—"}</TableCell>
-                            <TableCell className="text-sm text-zc-muted">{r.items?.length || 0}</TableCell>
+                            <TableCell className="text-sm text-zc-muted">{fmtDateTime(r.effectiveFrom)}</TableCell>
+                            <TableCell className="text-sm text-zc-muted">
+                              {(r.components || []).filter((c) => c.isActive !== false).length}
+                            </TableCell>
                             <TableCell>
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -658,11 +649,15 @@ export default function SuperAdminServicePackagesPage() {
                                 <DropdownMenuContent align="end" className="w-[240px]">
                                   <DropdownMenuLabel>Actions</DropdownMenuLabel>
                                   <DropdownMenuSeparator />
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/superadmin/infrastructure/service-packages/${encodeURIComponent(r.id)}`}>
-                                      <Eye className="mr-2 h-4 w-4" />
-                                      View details
-                                    </Link>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelected(r);
+                                      setSelectedId(r.id);
+                                      setItemsOpen(true);
+                                    }}
+                                  >
+                                    <Eye className="mr-2 h-4 w-4" />
+                                    Open
                                   </DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => openEdit(r)}>
                                     <Wrench className="mr-2 h-4 w-4" />
@@ -676,7 +671,7 @@ export default function SuperAdminServicePackagesPage() {
                                     }}
                                   >
                                     <Plus className="mr-2 h-4 w-4" />
-                                    Manage items
+                                    Manage components
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem onClick={() => workflow(r, "submit")}>
@@ -728,7 +723,7 @@ export default function SuperAdminServicePackagesPage() {
                 <Card className="border-zc-border">
                   <CardHeader className="py-4">
                     <CardTitle className="text-base">How to use Service Packages</CardTitle>
-                    <CardDescription>Packages are governed bundles: ordering + billing stays consistent via ChargeMaster.</CardDescription>
+                    <CardDescription>Packages are governed bundles: they group orderable services into a single package.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-4">
                     <div className="grid gap-3 md:grid-cols-2">
@@ -737,17 +732,18 @@ export default function SuperAdminServicePackagesPage() {
                           <Badge variant="ok">1</Badge> Create package (branch scoped)
                         </div>
                         <div className="mt-1 text-sm text-zc-muted">
-                          Decide pricing model: <span className="font-semibold">INCLUSIVE</span> (package priced as a bundle) or{" "}
-                          <span className="font-semibold">EXCLUSIVE</span> (items billed individually with package rules).
+                          Define package code/name and description. Package starts as <span className="font-semibold">DRAFT</span>; add
+                          components, then publish via workflow.
                         </div>
                       </div>
 
                       <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                         <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                          <Badge variant="ok">2</Badge> Add ChargeMaster items
+                          <Badge variant="ok">2</Badge> Add service items
                         </div>
                         <div className="mt-1 text-sm text-zc-muted">
-                          Each package line item references <span className="font-semibold">ChargeMasterItem</span>. This keeps tax & charge unit enforcement aligned.
+                          Each package component references a <span className="font-semibold">Service Item</span>. Billing is derived from
+                          that service’s Charge Mapping.
                         </div>
                       </div>
 
@@ -765,7 +761,8 @@ export default function SuperAdminServicePackagesPage() {
                           <Badge variant="ok">4</Badge> Billing readiness
                         </div>
                         <div className="mt-1 text-sm text-zc-muted">
-                          GoLive validations should flag: missing tariff rates, tax inactive, charge unit mismatches, and missing package pricing rules.
+                          GoLive validations should flag: missing tariff rates, tax inactive, charge unit mismatches, and missing package pricing
+                          rules.
                         </div>
                       </div>
                     </div>
@@ -778,7 +775,8 @@ export default function SuperAdminServicePackagesPage() {
                         Practical tip
                       </div>
                       <div className="mt-1 text-sm text-zc-muted">
-                        Keep package items ordered (sortOrder) and mark optional items explicitly. Use overrides JSON for future rules (caps, constraints).
+                        Keep package items ordered (sortOrder) and mark optional items explicitly. Use overrides JSON for future rules (caps,
+                        constraints).
                       </div>
                     </div>
                   </CardContent>
@@ -841,15 +839,10 @@ function PackageEditModal({
   const { toast } = useToast();
   const [saving, setSaving] = React.useState(false);
 
-  const [form, setForm] = React.useState<any>({
+  const [form, setForm] = React.useState<{ code: string; name: string; description: string }>({
     code: "",
     name: "",
     description: "",
-    pricingModel: "INCLUSIVE",
-    taxTreatment: "PACKAGE_LEVEL",
-    capAmount: "",
-    discountPercent: "",
-    isActive: true,
   });
 
   React.useEffect(() => {
@@ -859,28 +852,14 @@ function PackageEditModal({
         code: editing.code || "",
         name: editing.name || "",
         description: editing.description || "",
-        pricingModel: editing.pricingModel || "INCLUSIVE",
-        taxTreatment: editing.taxTreatment || "PACKAGE_LEVEL",
-        capAmount: editing.capAmount ?? "",
-        discountPercent: editing.discountPercent ?? "",
-        isActive: editing.isActive !== false,
       });
     } else {
-      setForm({
-        code: "",
-        name: "",
-        description: "",
-        pricingModel: "INCLUSIVE",
-        taxTreatment: "PACKAGE_LEVEL",
-        capAmount: "",
-        discountPercent: "",
-        isActive: true,
-      });
+      setForm({ code: "", name: "", description: "" });
     }
   }, [open, mode, editing]);
 
-  function patch(p: Partial<any>) {
-    setForm((prev: any) => ({ ...prev, ...p }));
+  function patch(p: Partial<typeof form>) {
+    setForm((prev) => ({ ...prev, ...p }));
   }
 
   async function save() {
@@ -890,20 +869,10 @@ function PackageEditModal({
       code: String(form.code || "").trim(),
       name: String(form.name || "").trim(),
       description: form.description?.trim() ? String(form.description).trim() : null,
-      pricingModel: form.pricingModel || "INCLUSIVE",
-      taxTreatment: form.taxTreatment || "PACKAGE_LEVEL",
-      capAmount: form.capAmount === "" || form.capAmount === null ? null : Number(form.capAmount),
-      discountPercent: form.discountPercent === "" || form.discountPercent === null ? null : Number(form.discountPercent),
-      isActive: Boolean(form.isActive),
     };
 
     if (!payload.code || !payload.name) {
       toast({ title: "Missing fields", description: "Code and Name are required." });
-      return;
-    }
-
-    if (payload.discountPercent !== null && (payload.discountPercent < 0 || payload.discountPercent > 100)) {
-      toast({ title: "Invalid discount", description: "Discount percent must be between 0 and 100." });
       return;
     }
 
@@ -941,7 +910,9 @@ function PackageEditModal({
             </div>
             {mode === "create" ? "New Service Package" : "Edit Service Package"}
           </DialogTitle>
-          <DialogDescription>Define package details + pricing rules. Add items in the next step.</DialogDescription>
+          <DialogDescription>
+            Packages are branch scoped and governed by workflow actions (Submit → Approve → Publish → Retire).
+          </DialogDescription>
         </DialogHeader>
 
         <Separator className="my-4" />
@@ -950,66 +921,13 @@ function PackageEditModal({
           <div className="grid gap-4 md:grid-cols-2">
             <div className="grid gap-2">
               <Label>Code</Label>
-              <Input value={form.code || ""} onChange={(e) => patch({ code: e.target.value })} placeholder="e.g., WELLNESS-BASIC" />
-              <div className="text-xs text-zc-muted min-h-[16px] invisible" aria-hidden="true">
-                Placeholder helper
-              </div>
+              <Input value={form.code} onChange={(e) => patch({ code: e.target.value })} placeholder="e.g., WELLNESS-BASIC" />
+              <div className="text-xs text-zc-muted min-h-[16px]">Unique within branch.</div>
             </div>
+
             <div className="grid gap-2">
               <Label>Name</Label>
-              <Input value={form.name || ""} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g., Basic Wellness Package" />
-              <div className="text-xs text-zc-muted min-h-[16px] invisible" aria-hidden="true">
-                Placeholder helper
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Pricing Model</Label>
-              <Select value={form.pricingModel || "INCLUSIVE"} onValueChange={(v) => patch({ pricingModel: v })}>
-                <SelectTrigger className="h-10">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="INCLUSIVE">INCLUSIVE (bundle price)</SelectItem>
-                  <SelectItem value="EXCLUSIVE">EXCLUSIVE (items billed with rules)</SelectItem>
-                </SelectContent>
-              </Select>
-              <div className="text-xs text-zc-muted min-h-[16px]">
-                Inclusive is typical for health check packages. Exclusive fits add-on bundles.
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Tax Treatment</Label>
-              <Select value={form.taxTreatment || "PACKAGE_LEVEL"} onValueChange={(v) => patch({ taxTreatment: v })}>
-                <SelectTrigger className="h-10">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="PACKAGE_LEVEL">PACKAGE_LEVEL (single tax)</SelectItem>
-                  <SelectItem value="ITEM_LEVEL">ITEM_LEVEL (per item)</SelectItem>
-                </SelectContent>
-              </Select>
-              <div className="text-xs text-zc-muted min-h-[16px]">
-                Backend should enforce active tax codes on package/items.
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Cap Amount (optional)</Label>
-              <Input value={String(form.capAmount ?? "")} onChange={(e) => patch({ capAmount: e.target.value })} placeholder="e.g., 5000" />
-              <div className="text-xs text-zc-muted min-h-[16px]">
-                Used in advanced rules (caps/limits). Keep null if not needed.
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Discount % (optional)</Label>
-              <Input
-                value={String(form.discountPercent ?? "")}
-                onChange={(e) => patch({ discountPercent: e.target.value })}
-                placeholder="e.g., 10"
-              />
+              <Input value={form.name} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g., Basic Wellness Package" />
               <div className="text-xs text-zc-muted min-h-[16px] invisible" aria-hidden="true">
                 Placeholder helper
               </div>
@@ -1017,16 +935,30 @@ function PackageEditModal({
 
             <div className="grid gap-2 md:col-span-2">
               <Label>Description (optional)</Label>
-              <Textarea value={form.description || ""} onChange={(e) => patch({ description: e.target.value })} placeholder="What does this package include?" />
+              <Textarea value={form.description} onChange={(e) => patch({ description: e.target.value })} placeholder="What does this package include?" />
+              <div className="text-xs text-zc-muted min-h-[16px]">Keep it short — visible in ordering UI.</div>
             </div>
 
-            <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-3 md:col-span-2">
-              <Switch checked={!!form.isActive} onCheckedChange={(v) => patch({ isActive: v })} />
-              <div className="text-sm">
-                <div className="font-semibold text-zc-text">Active</div>
-                <div className="text-xs text-zc-muted">Inactive packages should not be used in ordering.</div>
+            {mode === "edit" && editing ? (
+              <div className="md:col-span-2 grid gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">Status: {editing.status}</Badge>
+                  <Badge variant="secondary">Version: v{editing.version ?? 1}</Badge>
+                  <Badge variant="secondary">Effective: {fmtDateTime(editing.effectiveFrom)}</Badge>
+                </div>
+                <div className="text-xs text-zc-muted">
+                  To move status forward/backward, use the workflow actions from the package list (Submit/Approve/Publish/Retire).
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="md:col-span-2 grid gap-2 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                  <Badge variant="secondary">DRAFT</Badge>
+                  <span>Package starts in draft.</span>
+                </div>
+                <div className="text-xs text-zc-muted">After creation, add components and then publish via workflow.</div>
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -1066,38 +998,26 @@ function PackageItemsDrawer({
   const [loading, setLoading] = React.useState(false);
   const [detail, setDetail] = React.useState<ServicePackageRow | null>(null);
 
-  // search charge master + service (optional)
-  const [cmQ, setCmQ] = React.useState("");
-  const [cmLoading, setCmLoading] = React.useState(false);
-  const [cmRows, setCmRows] = React.useState<ChargeMasterItemRow[]>([]);
-  const [pickedCm, setPickedCm] = React.useState<ChargeMasterItemRow | null>(null);
-
+  // component picker (SERVICE_ITEM)
   const [svcQ, setSvcQ] = React.useState("");
   const [svcLoading, setSvcLoading] = React.useState(false);
   const [svcRows, setSvcRows] = React.useState<ServiceItemRow[]>([]);
   const [pickedSvc, setPickedSvc] = React.useState<ServiceItemRow | null>(null);
 
-  // item fields
+  // component fields
   const [qty, setQty] = React.useState<string>("1");
   const [isIncluded, setIsIncluded] = React.useState(true);
-  const [isOptional, setIsOptional] = React.useState(false);
-  const [sortOrder, setSortOrder] = React.useState<string>("0");
-  const [overridesText, setOverridesText] = React.useState("");
+  const [rulesText, setRulesText] = React.useState("");
 
   React.useEffect(() => {
     if (!open) return;
     setDetail(null);
-    setCmQ("");
-    setCmRows([]);
-    setPickedCm(null);
     setSvcQ("");
     setSvcRows([]);
     setPickedSvc(null);
     setQty("1");
     setIsIncluded(true);
-    setIsOptional(false);
-    setSortOrder("0");
-    setOverridesText("");
+    setRulesText("");
     void loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, pkg?.id]);
@@ -1106,37 +1026,13 @@ function PackageItemsDrawer({
     if (!pkg?.id) return;
     setLoading(true);
     try {
-      const d = await apiFetch<ServicePackageRow>(
-        `/api/infrastructure/service-packages/${encodeURIComponent(pkg.id)}?${buildQS({ includeItems: "true" })}`,
-      );
+      const d = await apiFetch<ServicePackageRow>(`/api/infrastructure/service-packages/${encodeURIComponent(pkg.id)}`);
       setDetail(d || null);
     } catch (e: any) {
       toast({ title: "Failed to load package", description: e?.message || "Request failed", variant: "destructive" as any });
       setDetail(null);
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function searchCM(query: string) {
-    if (!branchId) return;
-    setCmLoading(true);
-    try {
-      const rows =
-        (await apiFetch<ChargeMasterItemRow[]>(
-          `/api/infrastructure/charge-master?${buildQS({
-            branchId,
-            q: query.trim() || undefined,
-            take: 60,
-            includeInactive: "false",
-          })}`,
-        )) || [];
-      setCmRows(rows);
-    } catch (e: any) {
-      toast({ title: "Charge master search failed", description: e?.message || "Request failed", variant: "destructive" as any });
-      setCmRows([]);
-    } finally {
-      setCmLoading(false);
     }
   }
 
@@ -1153,13 +1049,7 @@ function PackageItemsDrawer({
           })}`,
         )) || [];
 
-      const filtered = list.filter((r) => {
-        const billableOk = r.isBillable === undefined ? true : Boolean(r.isBillable);
-        const publishedOk = r.lifecycleStatus ? String(r.lifecycleStatus).toUpperCase() === "PUBLISHED" : true;
-        return billableOk && publishedOk;
-      });
-
-      setSvcRows(filtered.slice(0, 60));
+      setSvcRows(list.slice(0, 80));
     } catch (e: any) {
       toast({ title: "Service search failed", description: e?.message || "Request failed", variant: "destructive" as any });
       setSvcRows([]);
@@ -1170,70 +1060,56 @@ function PackageItemsDrawer({
 
   React.useEffect(() => {
     if (!open) return;
-    const t = setTimeout(() => void searchCM(cmQ), 250);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cmQ, open]);
-
-  React.useEffect(() => {
-    if (!open) return;
     const t = setTimeout(() => void searchServices(svcQ), 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [svcQ, open]);
 
-  function parseOverrides(): any {
-    const t = (overridesText || "").trim();
+  function parseRules(): any {
+    const t = (rulesText || "").trim();
     if (!t) return undefined;
     try {
       return JSON.parse(t);
     } catch {
-      throw new Error("Overrides must be valid JSON.");
+      throw new Error("Rules must be valid JSON.");
     }
   }
 
-  async function upsertItem() {
+  async function upsertComponent() {
     if (!pkg?.id) return;
-    if (!pickedCm?.id) {
-      toast({ title: "Pick Charge Master item", description: "Package items must reference ChargeMasterItem." });
+    if (!pickedSvc?.id) {
+      toast({ title: "Pick a Service Item", description: "Select a service item to add to this package." });
       return;
     }
 
-    let overrides: any = undefined;
+    let rules: any = undefined;
     try {
-      overrides = parseOverrides();
+      rules = parseRules();
     } catch (e: any) {
-      toast({ title: "Invalid overrides JSON", description: e?.message || "Fix the JSON and try again." });
+      toast({ title: "Invalid rules JSON", description: e?.message || "Fix JSON and try again." });
       return;
     }
 
     const payload: any = {
-      chargeMasterItemId: pickedCm.id,
-      serviceItemId: pickedSvc?.id || null, // optional, if your backend supports
-      qty: Math.max(1, Number(qty) || 1),
+      serviceItemId: pickedSvc.id,
+      quantity: Math.max(1, Number(qty) || 1),
       isIncluded: Boolean(isIncluded),
-      isOptional: Boolean(isOptional),
-      sortOrder: Number(sortOrder) || 0,
-      overrides,
+      rules,
     };
 
     setLoading(true);
     try {
-      await apiFetch(`/api/infrastructure/service-packages/${encodeURIComponent(pkg.id)}/items`, {
+      await apiFetch(`/api/infrastructure/service-packages/${encodeURIComponent(pkg.id)}/components`, {
         method: "POST",
         body: JSON.stringify(payload),
       });
 
-      toast({ title: "Item saved", description: "Package item added/updated." });
+      toast({ title: "Component saved", description: "Service item added/updated in package." });
 
-      // reset
-      setPickedCm(null);
       setPickedSvc(null);
       setQty("1");
       setIsIncluded(true);
-      setIsOptional(false);
-      setSortOrder("0");
-      setOverridesText("");
+      setRulesText("");
 
       await loadDetail();
       onSaved();
@@ -1244,17 +1120,18 @@ function PackageItemsDrawer({
     }
   }
 
-  async function removeItem(itemId: string) {
+  async function removeComponent(serviceItemId: string) {
     if (!pkg?.id) return;
-    const ok = window.confirm("Remove this item from the package?");
+    const ok = window.confirm("Remove this component from the package?");
     if (!ok) return;
 
     setLoading(true);
     try {
-      await apiFetch(`/api/infrastructure/service-packages/${encodeURIComponent(pkg.id)}/items/${encodeURIComponent(itemId)}`, {
-        method: "DELETE",
-      });
-      toast({ title: "Removed", description: "Item removed from package." });
+      await apiFetch(
+        `/api/infrastructure/service-packages/${encodeURIComponent(pkg.id)}/components/${encodeURIComponent(serviceItemId)}`,
+        { method: "DELETE" },
+      );
+      toast({ title: "Removed", description: "Component removed from package." });
       await loadDetail();
       onSaved();
     } catch (e: any) {
@@ -1264,7 +1141,8 @@ function PackageItemsDrawer({
     }
   }
 
-  const items = detail?.items || [];
+  const components = (detail?.components || []).filter((c) => c.isActive !== false);
+  const svcComponents = components.filter((c) => c.componentType === "SERVICE_ITEM" && !!c.serviceItemId);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1274,9 +1152,11 @@ function PackageItemsDrawer({
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/30">
               <Wrench className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
             </div>
-            Manage Items • {pkg?.code || ""}
+            Manage Components • {pkg?.code || ""}
           </DialogTitle>
-          <DialogDescription>Add ChargeMaster items to this package. Optional ServiceItem linkage helps ordering screens (if enabled).</DialogDescription>
+          <DialogDescription>
+            Add service items as package components. Billing is derived from each service’s charge mapping.
+          </DialogDescription>
         </DialogHeader>
 
         <Separator className="my-4" />
@@ -1286,22 +1166,21 @@ function PackageItemsDrawer({
           <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 grid gap-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-zc-text">Add / Update Item</div>
-                <div className="text-xs text-zc-muted">Package items must reference ChargeMasterItem (billing primary).</div>
+                <div className="text-sm font-semibold text-zc-text">Add / Update Component</div>
+                <div className="text-xs text-zc-muted">Current backend supports SERVICE_ITEM components.</div>
               </div>
               <Button variant="outline" size="sm" className="gap-2" asChild>
-                <Link href="/superadmin/infrastructure/charge-master">
-                  Charge Master <ExternalLink className="h-4 w-4" />
+                <Link href="/superadmin/infrastructure/service-items">
+                  Service Items <ExternalLink className="h-4 w-4" />
                 </Link>
               </Button>
             </div>
 
-            {/* Charge master picker */}
             <div className="grid gap-2">
-              <Label>Find Charge Master Item</Label>
+              <Label>Find Service Item</Label>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
-                <Input value={cmQ} onChange={(e) => setCmQ(e.target.value)} placeholder="Search by code/name…" className="pl-10" />
+                <Input value={svcQ} onChange={(e) => setSvcQ(e.target.value)} placeholder="Search by code/name…" className="pl-10" />
               </div>
 
               <div className="rounded-xl border border-zc-border">
@@ -1310,83 +1189,13 @@ function PackageItemsDrawer({
                     <TableRow>
                       <TableHead className="w-[180px]">Code</TableHead>
                       <TableHead>Name</TableHead>
-                      <TableHead className="w-[150px]">Charge Unit</TableHead>
-                      <TableHead className="w-[120px]">Pick</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {cmLoading ? (
-                      Array.from({ length: 8 }).map((_, i) => (
-                        <TableRow key={i}>
-                          <TableCell colSpan={4}>
-                            <Skeleton className="h-6 w-full" />
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    ) : cmRows.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={4}>
-                          <div className="flex items-center justify-center gap-2 py-8 text-sm text-zc-muted">
-                            <AlertTriangle className="h-4 w-4 text-zc-warn" />
-                            No charge items found.
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      cmRows.map((cm) => {
-                        const picked = pickedCm?.id === cm.id;
-                        return (
-                          <TableRow key={cm.id} className={picked ? "bg-zc-panel/30" : ""}>
-                            <TableCell className="font-mono text-xs">
-                              <div className="flex flex-col gap-1">
-                                <span className="font-semibold text-zc-text">{cm.code}</span>
-                                <span className="text-[11px] text-zc-muted">{String(cm.id).slice(0, 8)}…</span>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col gap-1">
-                                <span className="font-semibold text-zc-text">{cm.name}</span>
-                                <span className="text-xs text-zc-muted">{cm.isActive === false ? "Inactive" : "Active"}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="secondary">{cm.chargeUnit || "—"}</Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Button variant={picked ? "primary" : "outline"} size="sm" onClick={() => setPickedCm(cm)}>
-                                {picked ? "Picked" : "Pick"}
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-
-            {/* Optional service linkage */}
-            <div className="grid gap-2">
-              <Label>Optional: Link Service Item (for ordering)</Label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
-                <Input value={svcQ} onChange={(e) => setSvcQ(e.target.value)} placeholder="Search billable published services…" className="pl-10" />
-              </div>
-
-              <div className="rounded-xl border border-zc-border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[180px]">Code</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead className="w-[140px]">Charge Unit</TableHead>
+                      <TableHead className="w-[180px]">Category</TableHead>
                       <TableHead className="w-[120px]">Pick</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {svcLoading ? (
-                      Array.from({ length: 6 }).map((_, i) => (
+                      Array.from({ length: 8 }).map((_, i) => (
                         <TableRow key={i}>
                           <TableCell colSpan={4}>
                             <Skeleton className="h-6 w-full" />
@@ -1413,16 +1222,17 @@ function PackageItemsDrawer({
                                 <span className="text-[11px] text-zc-muted">{String(s.id).slice(0, 8)}…</span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-sm text-zc-muted">{s.name}</TableCell>
                             <TableCell>
-                              <Badge variant="secondary">{s.chargeUnit || "—"}</Badge>
+                              <div className="flex flex-col gap-1">
+                                <span className="font-semibold text-zc-text">{s.name}</span>
+                                <span className="text-xs text-zc-muted">{s.isActive === false ? "Inactive" : "Active"}</span>
+                              </div>
                             </TableCell>
                             <TableCell>
-                              <Button
-                                variant={picked ? "primary" : "outline"}
-                                size="sm"
-                                onClick={() => setPickedSvc(picked ? null : s)}
-                              >
+                              <Badge variant="secondary">{s.category || "—"}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Button variant={picked ? "primary" : "outline"} size="sm" onClick={() => setPickedSvc(picked ? null : s)}>
                                 {picked ? "Picked" : "Pick"}
                               </Button>
                             </TableCell>
@@ -1434,66 +1244,53 @@ function PackageItemsDrawer({
                 </Table>
               </div>
 
-              <div className="text-xs text-zc-muted">
-                If you don’t want ordering linkage, leave it empty—billing still works because ChargeMaster is primary.
-              </div>
+              <div className="text-xs text-zc-muted">Tip: ensure the service item is charge-mapped before publishing package.</div>
             </div>
 
-            {/* Item fields */}
-            <div className="grid gap-3 md:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-3">
               <div className="grid gap-2">
-                <Label>Qty</Label>
+                <Label>Quantity</Label>
                 <Input value={qty} onChange={(e) => setQty(e.target.value)} placeholder="1" />
               </div>
-              <div className="grid gap-2">
-                <Label>Sort Order</Label>
-                <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} placeholder="0" />
-              </div>
-              <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
+
+              <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2 md:col-span-2">
                 <Switch checked={isIncluded} onCheckedChange={setIsIncluded} />
                 <div className="text-sm">
                   <div className="font-semibold text-zc-text">{isIncluded ? "Included" : "Not included"}</div>
-                  <div className="text-xs text-zc-muted">Included in package</div>
+                  <div className="text-xs text-zc-muted">Controls whether component is part of package</div>
                 </div>
               </div>
-              <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
-                <Switch checked={isOptional} onCheckedChange={setIsOptional} />
-                <div className="text-sm">
-                  <div className="font-semibold text-zc-text">{isOptional ? "Optional" : "Mandatory"}</div>
-                  <div className="text-xs text-zc-muted">Optional add-on</div>
-                </div>
-              </div>
-              <div className="grid gap-2 md:col-span-4">
-                <Label>Overrides (JSON, optional)</Label>
+
+              <div className="grid gap-2 md:col-span-3">
+                <Label>Rules (JSON, optional)</Label>
                 <Textarea
-                  value={overridesText}
-                  onChange={(e) => setOverridesText(e.target.value)}
+                  value={rulesText}
+                  onChange={(e) => setRulesText(e.target.value)}
                   placeholder='e.g., {"maxQty": 1, "note": "Only once per visit"}'
                   className="min-h-[42px]"
                 />
+                <div className="text-xs text-zc-muted">Stored as component.condition in backend.</div>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-xs text-zc-muted">
-                Selected CM: <span className="font-mono font-semibold text-zc-text">{pickedCm ? pickedCm.code : "—"}</span>{" "}
-                <span className="mx-2">•</span>
-                Linked Service: <span className="font-mono font-semibold text-zc-text">{pickedSvc ? pickedSvc.code : "—"}</span>
+                Selected: <span className="font-mono font-semibold text-zc-text">{pickedSvc ? pickedSvc.code : "—"}</span>
               </div>
-              <Button onClick={upsertItem} disabled={loading || !pickedCm}>
+              <Button onClick={upsertComponent} disabled={loading || !pickedSvc}>
                 {loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                Save Item
+                Save Component
               </Button>
             </div>
           </div>
 
-          {/* Items list */}
+          {/* Components list */}
           <div className="grid gap-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-zc-text">Package Items</div>
+                <div className="text-sm font-semibold text-zc-text">Package Components</div>
                 <div className="text-xs text-zc-muted">
-                  Total: <span className="font-semibold text-zc-text">{items.length}</span>
+                  Total: <span className="font-semibold text-zc-text">{svcComponents.length}</span>
                 </div>
               </div>
               <Button variant="outline" size="sm" className="gap-2" onClick={loadDetail} disabled={loading}>
@@ -1506,54 +1303,68 @@ function PackageItemsDrawer({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[180px]">Charge Master</TableHead>
+                    <TableHead className="w-[200px]">Service</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead className="w-[90px]">Qty</TableHead>
                     <TableHead className="w-[110px]">Included</TableHead>
-                    <TableHead className="w-[110px]">Optional</TableHead>
-                    <TableHead className="w-[90px]">Sort</TableHead>
-                    <TableHead className="w-[120px]" />
+                    <TableHead className="w-[120px]">Rules</TableHead>
+                    <TableHead className="w-[160px]" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
                     Array.from({ length: 10 }).map((_, i) => (
                       <TableRow key={i}>
-                        <TableCell colSpan={7}>
+                        <TableCell colSpan={6}>
                           <Skeleton className="h-6 w-full" />
                         </TableCell>
                       </TableRow>
                     ))
-                  ) : items.length === 0 ? (
+                  ) : svcComponents.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7}>
+                      <TableCell colSpan={6}>
                         <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
                           <AlertTriangle className="h-4 w-4 text-zc-warn" />
-                          No items yet.
+                          No components yet.
                         </div>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    items.map((it) => (
-                      <TableRow key={it.id}>
+                    svcComponents.map((c) => (
+                      <TableRow key={c.id}>
                         <TableCell className="font-mono text-xs">
                           <div className="flex flex-col gap-1">
-                            <span className="font-semibold text-zc-text">{it.chargeMasterItem?.code || it.chargeMasterItemId}</span>
-                            {it.serviceItem?.code ? (
-                              <span className="text-[11px] text-zc-muted">svc: {it.serviceItem.code}</span>
-                            ) : null}
+                            <span className="font-semibold text-zc-text">{c.serviceItem?.code || c.serviceItemId}</span>
+                            <span className="text-[11px] text-zc-muted">{String(c.id).slice(0, 8)}…</span>
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm text-zc-muted">{it.chargeMasterItem?.name || "—"}</TableCell>
-                        <TableCell className="text-sm text-zc-muted">{it.qty ?? 1}</TableCell>
-                        <TableCell>{it.isIncluded ? <Badge variant="ok">YES</Badge> : <Badge variant="secondary">NO</Badge>}</TableCell>
-                        <TableCell>{it.isOptional ? <Badge variant="warning">YES</Badge> : <Badge variant="secondary">NO</Badge>}</TableCell>
-                        <TableCell className="text-sm text-zc-muted">{it.sortOrder ?? 0}</TableCell>
-                        <TableCell>
-                          <Button variant="outline" size="sm" className="gap-2" onClick={() => removeItem(it.id)}>
-                            <Trash2 className="h-4 w-4" />
-                            Remove
-                          </Button>
+                        <TableCell className="text-sm text-zc-muted">{c.serviceItem?.name || "—"}</TableCell>
+                        <TableCell className="text-sm text-zc-muted">{c.quantity ?? 1}</TableCell>
+                        <TableCell>{c.isIncluded ? <Badge variant="ok">YES</Badge> : <Badge variant="secondary">NO</Badge>}</TableCell>
+                        <TableCell>{c.condition ? <Badge variant="warning">YES</Badge> : <Badge variant="secondary">NO</Badge>}</TableCell>
+                        <TableCell className="flex items-center gap-2">
+                          {c.serviceItem ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-2"
+                              onClick={() => {
+                                setPickedSvc(c.serviceItem || null);
+                                setQty(String(c.quantity ?? 1));
+                                setIsIncluded(Boolean(c.isIncluded));
+                                setRulesText(c.condition ? JSON.stringify(c.condition, null, 2) : "");
+                              }}
+                            >
+                              <Wrench className="h-4 w-4" />
+                              Edit
+                            </Button>
+                          ) : null}
+                          {c.serviceItemId ? (
+                            <Button variant="outline" size="sm" className="gap-2" onClick={() => removeComponent(c.serviceItemId as string)}>
+                              <Trash2 className="h-4 w-4" />
+                              Remove
+                            </Button>
+                          ) : null}
                         </TableCell>
                       </TableRow>
                     ))
@@ -1563,7 +1374,7 @@ function PackageItemsDrawer({
             </div>
 
             <div className="text-xs text-zc-muted">
-              Note: Charge unit & tax enforcement is validated by billing + FixIt/GoLive rules. Keep package items clean and consistent.
+              Note: use Service ↔ Charge Mapping to ensure every service in the package has a valid billing mapping.
             </div>
           </div>
 
@@ -1577,5 +1388,3 @@ function PackageItemsDrawer({
     </Dialog>
   );
 }
-
-

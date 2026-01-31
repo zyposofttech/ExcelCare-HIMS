@@ -20,6 +20,13 @@ export class GoLiveController {
     return this.svc.runGoLive(this.principal(req), { persist: false }, branchId ?? null);
   }
 
+  // Backward-compatible route for UI: /infra/golive/checks?branchId=...
+  @Get("golive/checks")
+  @Permissions(PERM.INFRA_GOLIVE_READ)
+  async goLiveChecks(@Req() req: any, @Query("branchId") branchId?: string) {
+    return this.svc.runGoLive(this.principal(req), { persist: false }, branchId ?? null);
+  }
+
   @Post("branch/go-live")
   @Permissions(PERM.INFRA_GOLIVE_RUN)
   async goLiveRun(@Req() req: any, @Body() dto: RunGoLiveDto, @Query("branchId") branchId?: string) {

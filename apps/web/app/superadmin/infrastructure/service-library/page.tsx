@@ -38,14 +38,18 @@ import { cn } from "@/lib/cn";
 
 import {
   AlertTriangle,
+  BookMarked,
   ClipboardList,
   ExternalLink,
   Filter,
+  Link2,
   MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
   ShieldCheck,
+  Star,
+  Trash2,
   Wrench,
 } from "lucide-react";
 
@@ -55,34 +59,55 @@ import {
 
 type BranchRow = { id: string; code: string; name: string; city: string };
 
-type ChargeMasterItemRow = {
+type StandardCodeSetRow = {
   id: string;
   code: string;
   name: string;
-  isActive?: boolean;
-};
-
-type ServiceChargeMappingRow = {
-  id: string;
-  serviceItemId: string;
-  chargeMasterItemId: string;
-  effectiveFrom: string;
-  effectiveTo?: string | null;
-  chargeMasterItem?: ChargeMasterItemRow | null;
-};
-
-type ServiceItemRow = {
-  id: string;
-  branchId: string;
-  code: string;
-  name: string;
-  category: string;
-  unit?: string | null;
-  isOrderable: boolean;
+  description?: string | null;
+  system?: string | null;
   isActive: boolean;
   createdAt?: string;
   updatedAt?: string;
-  mappings?: ServiceChargeMappingRow[];
+};
+
+type StandardCodeEntryRow = {
+  id: string;
+  codeSetId: string;
+  code: string;
+  display: string;
+  attributes?: any;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type ServiceItemMiniRow = {
+  id: string;
+  code: string;
+  name: string;
+  category?: string | null;
+  isActive?: boolean;
+};
+
+type ServiceItemStandardMappingRow = {
+  id: string;
+  branchId: string;
+  serviceItemId: string;
+  entryId: string;
+  isPrimary: boolean;
+  createdAt?: string;
+  entry: {
+    id: string;
+    code: string;
+    display: string;
+    codeSet: StandardCodeSetRow;
+  };
+  serviceItem: {
+    id: string;
+    code: string;
+    name: string;
+    category?: string | null;
+  };
 };
 
 /* -------------------------------------------------------------------------- */
@@ -172,8 +197,15 @@ function ModalHeader({
   );
 }
 
-type MappingStatusFilter = "all" | "mapped" | "missing";
-type OrderableFilter = "all" | "yes" | "no";
+function safeParseJson(text: string) {
+  const t = (text ?? "").trim();
+  if (!t) return undefined;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return "__INVALID__";
+  }
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                   Page                                     */
@@ -182,9 +214,7 @@ type OrderableFilter = "all" | "yes" | "no";
 export default function SuperAdminServiceLibraryPage() {
   const { toast } = useToast();
 
-  const [activeTab, setActiveTab] = React.useState<"services" | "guide">("services");
-  const [showFilters, setShowFilters] = React.useState(false);
-
+  const [activeTab, setActiveTab] = React.useState<"codeSets" | "mappings" | "guide">("codeSets");
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
@@ -192,53 +222,36 @@ export default function SuperAdminServiceLibraryPage() {
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
   const [branchId, setBranchId] = React.useState<string>("");
 
-  const [allRows, setAllRows] = React.useState<ServiceItemRow[]>([]);
+  // Code sets
+  const [codeSets, setCodeSets] = React.useState<StandardCodeSetRow[]>([]);
+  const [csQ, setCsQ] = React.useState("");
+  const [csIncludeInactive, setCsIncludeInactive] = React.useState(false);
 
-  // filters
-  const [q, setQ] = React.useState("");
-  const [includeInactive, setIncludeInactive] = React.useState(false);
-  const [category, setCategory] = React.useState<string | "all">("all");
-  const [mappingStatus, setMappingStatus] = React.useState<MappingStatusFilter>("all");
-  const [orderable, setOrderable] = React.useState<OrderableFilter>("all");
+  // Mappings
+  const [mappings, setMappings] = React.useState<ServiceItemStandardMappingRow[]>([]);
+  const [mapQ, setMapQ] = React.useState("");
+  const [mapCodeSetId, setMapCodeSetId] = React.useState<string | "all">("all");
 
-  // pagination (client-side)
-  const [page, setPage] = React.useState(1);
-  const [pageSize, setPageSize] = React.useState(50);
+  // Pagination (client-side)
+  const [csPage, setCsPage] = React.useState(1);
+  const [csPageSize, setCsPageSize] = React.useState(50);
+
+  const [mapPage, setMapPage] = React.useState(1);
+  const [mapPageSize, setMapPageSize] = React.useState(50);
 
   // dialogs
-  const [svcDialogOpen, setSvcDialogOpen] = React.useState(false);
-  const [editing, setEditing] = React.useState<ServiceItemRow | null>(null);
+  const [codeSetDialogOpen, setCodeSetDialogOpen] = React.useState(false);
+  const [editingCodeSet, setEditingCodeSet] = React.useState<StandardCodeSetRow | null>(null);
+
+  const [manageOpen, setManageOpen] = React.useState(false);
+  const [manageCodeSet, setManageCodeSet] = React.useState<StandardCodeSetRow | null>(null);
+
+  const [entryDialogOpen, setEntryDialogOpen] = React.useState(false);
+  const [editingEntry, setEditingEntry] = React.useState<StandardCodeEntryRow | null>(null);
+
+  const [addMappingOpen, setAddMappingOpen] = React.useState(false);
 
   const mustSelectBranch = !branchId;
-
-  const categoryOptions = React.useMemo(() => {
-    const set = new Set<string>();
-    (allRows || []).forEach((r) => {
-      const c = (r.category || "").trim();
-      if (c) set.add(c);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [allRows]);
-
-  function currentMapping(r: ServiceItemRow): ServiceChargeMappingRow | null {
-    const ms = r.mappings || [];
-    // Prefer open mapping (effectiveTo null); else latest (already sorted desc effectiveFrom by backend)
-    const open = ms.find((m) => m && (m.effectiveTo === null || m.effectiveTo === undefined));
-    return open || ms[0] || null;
-  }
-
-  function isMapped(r: ServiceItemRow) {
-    const m = currentMapping(r);
-    return Boolean(m?.chargeMasterItemId && (m.effectiveTo === null || m.effectiveTo === undefined));
-  }
-
-  function mappingBadge(r: ServiceItemRow) {
-    const m = currentMapping(r);
-    if (!m || !m.chargeMasterItemId) return <Badge variant="destructive">MAPPING MISSING</Badge>;
-    if (m.effectiveTo) return <Badge variant="secondary">MAPPING CLOSED</Badge>;
-    const cmCode = m.chargeMasterItem?.code || "CHARGE";
-    return <Badge variant="ok">MAPPED • {cmCode}</Badge>;
-  }
 
   async function loadBranches(): Promise<string | null> {
     const list = (await apiFetch<BranchRow[]>("/api/branches")) || [];
@@ -252,27 +265,37 @@ export default function SuperAdminServiceLibraryPage() {
     return next;
   }
 
-  async function loadServices(showToast = false) {
+  async function loadCodeSets(showToast = false) {
     if (!branchId) return;
-    setErr(null);
-    setLoading(true);
     try {
-      const resp = await apiFetch<ServiceItemRow[]>(
-        `/api/infrastructure/services?${buildQS({
+      const resp = await apiFetch<StandardCodeSetRow[]>(
+        `/api/infrastructure/service-library/code-sets?${buildQS({
           branchId,
-          q: q.trim() || undefined,
-          includeInactive: includeInactive ? "true" : undefined,
+          q: csQ.trim() || undefined,
+          includeInactive: csIncludeInactive ? "true" : undefined,
         })}`,
       );
-      setAllRows(resp || []);
-      if (showToast) toast({ title: "Service library refreshed", description: "Loaded latest service items." });
+      setCodeSets(resp || []);
+      if (showToast) toast({ title: "Service Library refreshed", description: "Code sets loaded." });
     } catch (e: any) {
-      const msg = e?.message || "Failed to load service items";
-      setErr(msg);
-      setAllRows([]);
-      if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
-    } finally {
-      setLoading(false);
+      throw new Error(e?.message || "Failed to load code sets");
+    }
+  }
+
+  async function loadMappings(showToast = false) {
+    if (!branchId) return;
+    try {
+      const resp = await apiFetch<ServiceItemStandardMappingRow[]>(
+        `/api/infrastructure/service-library/mappings?${buildQS({
+          branchId,
+          q: mapQ.trim() || undefined,
+          codeSetId: mapCodeSetId !== "all" ? mapCodeSetId : undefined,
+        })}`,
+      );
+      setMappings(resp || []);
+      if (showToast) toast({ title: "Mappings loaded", description: "Service ↔ Standard code mappings updated." });
+    } catch (e: any) {
+      throw new Error(e?.message || "Failed to load mappings");
     }
   }
 
@@ -285,12 +308,11 @@ export default function SuperAdminServiceLibraryPage() {
         setLoading(false);
         return;
       }
-      await loadServices(false);
-      if (showToast) toast({ title: "Service Library ready", description: "Branch scope and service items are up to date." });
+      await Promise.all([loadCodeSets(false), loadMappings(false)]);
+      if (showToast) toast({ title: "Service Library ready", description: "Branch scope and library data are up to date." });
     } catch (e: any) {
-      const msg = e?.message || "Refresh failed";
-      setErr(msg);
-      if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
+      setErr(e?.message || "Refresh failed");
+      if (showToast) toast({ title: "Refresh failed", description: e?.message || "Request failed", variant: "destructive" as any });
     } finally {
       setLoading(false);
     }
@@ -303,94 +325,94 @@ export default function SuperAdminServiceLibraryPage() {
 
   React.useEffect(() => {
     if (!branchId) return;
-    setPage(1);
-    void loadServices(false);
+    setCsPage(1);
+    setMapPage(1);
+    void refreshAll(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId, includeInactive]);
+  }, [branchId]);
 
   React.useEffect(() => {
     if (!branchId) return;
-    setPage(1);
-    const t = setTimeout(() => void loadServices(false), 250);
+    setCsPage(1);
+    const t = setTimeout(() => void loadCodeSets(false), 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  }, [csQ, csIncludeInactive]);
+
+  React.useEffect(() => {
+    if (!branchId) return;
+    setMapPage(1);
+    const t = setTimeout(() => void loadMappings(false), 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapQ, mapCodeSetId]);
 
   async function onBranchChange(nextId: string) {
     setBranchId(nextId);
     writeLS(LS_BRANCH, nextId);
 
-    // reset filters
-    setQ("");
-    setIncludeInactive(false);
-    setCategory("all");
-    setMappingStatus("all");
-    setOrderable("all");
-    setPage(1);
-
     setErr(null);
     setLoading(true);
     try {
-      await loadServices(false);
-      toast({ title: "Branch scope changed", description: "Loaded service items for selected branch." });
+      await Promise.all([loadCodeSets(false), loadMappings(false)]);
+      toast({ title: "Branch scope changed", description: "Service Library loaded for selected branch context." });
     } catch (e: any) {
-      const msg = e?.message || "Failed to load branch scope";
-      setErr(msg);
-      toast({ variant: "destructive", title: "Load failed", description: msg });
+      setErr(e?.message || "Failed to load branch scope");
+      toast({ variant: "destructive", title: "Load failed", description: e?.message || "Request failed" });
     } finally {
       setLoading(false);
     }
   }
 
-  function openCreate() {
-    setEditing(null);
-    setSvcDialogOpen(true);
+  function openCreateCodeSet() {
+    setEditingCodeSet(null);
+    setCodeSetDialogOpen(true);
   }
 
-  function openEdit(r: ServiceItemRow) {
-    setEditing(r);
-    setSvcDialogOpen(true);
+  function openEditCodeSet(cs: StandardCodeSetRow) {
+    setEditingCodeSet(cs);
+    setCodeSetDialogOpen(true);
   }
 
-  const filtered = React.useMemo(() => {
-    let rows = [...(allRows || [])];
+  function openManage(cs: StandardCodeSetRow) {
+    setManageCodeSet(cs);
+    setManageOpen(true);
+  }
 
-    if (category !== "all") {
-      rows = rows.filter((r) => (r.category || "").trim() === category);
-    }
-    if (mappingStatus === "mapped") {
-      rows = rows.filter((r) => isMapped(r));
-    }
-    if (mappingStatus === "missing") {
-      rows = rows.filter((r) => !isMapped(r));
-    }
-    if (orderable === "yes") {
-      rows = rows.filter((r) => Boolean(r.isOrderable));
-    }
-    if (orderable === "no") {
-      rows = rows.filter((r) => !r.isOrderable);
-    }
-
-    return rows;
-  }, [allRows, category, mappingStatus, orderable]);
+  function openAddEntry(entry?: StandardCodeEntryRow | null) {
+    setEditingEntry(entry || null);
+    setEntryDialogOpen(true);
+  }
 
   const totals = React.useMemo(() => {
-    const total = allRows.length;
-    const inactive = allRows.filter((r) => !r.isActive).length;
-    const notOrderable = allRows.filter((r) => !r.isOrderable).length;
-    const missingMap = allRows.filter((r) => !isMapped(r)).length;
-    return { total, inactive, notOrderable, missingMap };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allRows]);
+    const totalCodeSets = codeSets.length;
+    const inactiveCodeSets = codeSets.filter((x) => !x.isActive).length;
+    const totalMappings = mappings.length;
+    const primaryMappings = mappings.filter((m) => m.isPrimary).length;
+    return { totalCodeSets, inactiveCodeSets, totalMappings, primaryMappings };
+  }, [codeSets, mappings]);
 
-  const totalPages = React.useMemo(() => {
-    return Math.max(1, Math.ceil(filtered.length / pageSize));
-  }, [filtered.length, pageSize]);
+  const filteredCodeSets = React.useMemo(() => {
+    // backend already filters by q/includeInactive; keep stable sort in UI
+    return [...(codeSets || [])].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [codeSets]);
 
-  const pageRows = React.useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, page, pageSize]);
+  const csTotalPages = React.useMemo(() => Math.max(1, Math.ceil(filteredCodeSets.length / csPageSize)), [filteredCodeSets.length, csPageSize]);
+  const csPageRows = React.useMemo(() => {
+    const start = (csPage - 1) * csPageSize;
+    return filteredCodeSets.slice(start, start + csPageSize);
+  }, [filteredCodeSets, csPage, csPageSize]);
+
+  const filteredMappings = React.useMemo(() => {
+    // backend already filters by q and codeSetId; keep as-is
+    return [...(mappings || [])];
+  }, [mappings]);
+
+  const mapTotalPages = React.useMemo(() => Math.max(1, Math.ceil(filteredMappings.length / mapPageSize)), [filteredMappings.length, mapPageSize]);
+  const mapPageRows = React.useMemo(() => {
+    const start = (mapPage - 1) * mapPageSize;
+    return filteredMappings.slice(start, start + mapPageSize);
+  }, [filteredMappings, mapPage, mapPageSize]);
 
   return (
     <AppShell title="Infrastructure • Service Library">
@@ -404,7 +426,7 @@ export default function SuperAdminServiceLibraryPage() {
             <div className="min-w-0">
               <div className="text-3xl font-semibold tracking-tight">Service Library</div>
               <div className="mt-1 text-sm text-zc-muted">
-                Define the hospital’s orderable services (Lab/Radiology/Procedure/etc.) for the selected branch.
+                Maintain standard code sets (LOINC/CPT/internal), code entries, and map them to branch service items.
               </div>
             </div>
           </div>
@@ -415,10 +437,19 @@ export default function SuperAdminServiceLibraryPage() {
               Refresh
             </Button>
 
-            <Button variant="primary" className="px-5 gap-2" onClick={openCreate} disabled={mustSelectBranch || busy}>
-              <Plus className="h-4 w-4" />
-              New Service
-            </Button>
+            {activeTab === "codeSets" ? (
+              <Button variant="primary" className="px-5 gap-2" onClick={openCreateCodeSet} disabled={mustSelectBranch || busy}>
+                <Plus className="h-4 w-4" />
+                New Code Set
+              </Button>
+            ) : null}
+
+            {activeTab === "mappings" ? (
+              <Button variant="primary" className="px-5 gap-2" onClick={() => setAddMappingOpen(true)} disabled={mustSelectBranch || busy}>
+                <Plus className="h-4 w-4" />
+                New Mapping
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -428,7 +459,7 @@ export default function SuperAdminServiceLibraryPage() {
               <div className="flex items-start gap-3">
                 <AlertTriangle className="mt-0.5 h-4 w-4 text-zc-danger" />
                 <div>
-                  <CardTitle className="text-base">Could not load services</CardTitle>
+                  <CardTitle className="text-base">Could not load service library</CardTitle>
                   <CardDescription className="mt-1">{err}</CardDescription>
                 </div>
               </div>
@@ -441,7 +472,7 @@ export default function SuperAdminServiceLibraryPage() {
           <CardHeader className="pb-4">
             <CardTitle className="text-base">Overview</CardTitle>
             <CardDescription className="text-sm">
-              Pick a branch, search services, and fix missing charge mappings as you go.
+              Select a branch, manage code sets & entries, then map codes to services for clean interoperability.
             </CardDescription>
           </CardHeader>
 
@@ -464,66 +495,27 @@ export default function SuperAdminServiceLibraryPage() {
 
             <div className="grid gap-3 md:grid-cols-4">
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900/50 dark:bg-blue-900/10">
-                <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Total Services</div>
-                <div className="mt-1 text-lg font-bold text-blue-700 dark:text-blue-300">{totals.total}</div>
+                <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Code Sets</div>
+                <div className="mt-1 text-lg font-bold text-blue-700 dark:text-blue-300">{totals.totalCodeSets}</div>
               </div>
               <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3 dark:border-rose-900/50 dark:bg-rose-900/10">
-                <div className="text-xs font-medium text-rose-600 dark:text-rose-400">Missing Charge Mapping</div>
-                <div className="mt-1 text-lg font-bold text-rose-700 dark:text-rose-300">{totals.missingMap}</div>
+                <div className="text-xs font-medium text-rose-600 dark:text-rose-400">Inactive Code Sets</div>
+                <div className="mt-1 text-lg font-bold text-rose-700 dark:text-rose-300">{totals.inactiveCodeSets}</div>
               </div>
               <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3 dark:border-violet-900/50 dark:bg-violet-900/10">
-                <div className="text-xs font-medium text-violet-600 dark:text-violet-400">Inactive</div>
-                <div className="mt-1 text-lg font-bold text-violet-700 dark:text-violet-300">{totals.inactive}</div>
+                <div className="text-xs font-medium text-violet-600 dark:text-violet-400">Mappings</div>
+                <div className="mt-1 text-lg font-bold text-violet-700 dark:text-violet-300">{totals.totalMappings}</div>
               </div>
               <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/50 dark:bg-amber-900/10">
-                <div className="text-xs font-medium text-amber-600 dark:text-amber-400">Not Orderable</div>
-                <div className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-300">{totals.notOrderable}</div>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="relative w-full lg:max-w-md">
-                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
-                <Input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search by code, name, or category..."
-                  className="pl-10"
-                  disabled={mustSelectBranch}
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
-                  <Switch checked={includeInactive} onCheckedChange={setIncludeInactive} disabled={mustSelectBranch} />
-                  <div className="text-sm">
-                    <div className="font-semibold text-zc-text">Include inactive</div>
-                    <div className="text-xs text-zc-muted">Show inactive service items too</div>
-                  </div>
-                </div>
-
-                {activeTab === "services" ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2"
-                    onClick={() => setShowFilters((s) => !s)}
-                    disabled={mustSelectBranch}
-                  >
-                    <Filter className="h-4 w-4" />
-                    {showFilters ? "Hide Filters" : "Show Filters"}
-                  </Button>
-                ) : null}
+                <div className="text-xs font-medium text-amber-600 dark:text-amber-400">Primary Mappings</div>
+                <div className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-300">{totals.primaryMappings}</div>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">Branch scoped</Badge>
-              <Badge variant={totals.missingMap > 0 ? "destructive" : "ok"}>
-                Missing mapping: {totals.missingMap}
-              </Badge>
-              <Badge variant={totals.inactive > 0 ? "warning" : "secondary"}>Inactive: {totals.inactive}</Badge>
-              <Badge variant={totals.notOrderable > 0 ? "accent" : "secondary"}>Not orderable: {totals.notOrderable}</Badge>
+              <Badge variant="secondary">Branch scoped access</Badge>
+              <Badge variant="ok">Standard codes ready</Badge>
+              <Badge variant="accent">Map for integrations</Badge>
             </div>
           </CardContent>
         </Card>
@@ -533,26 +525,29 @@ export default function SuperAdminServiceLibraryPage() {
           <CardHeader className="py-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <CardTitle className="text-base">Manage Services</CardTitle>
-                <CardDescription>Create services, keep them orderable, and maintain charge mappings.</CardDescription>
+                <CardTitle className="text-base">Manage Service Library</CardTitle>
+                <CardDescription>Code sets, entries, and mappings to service items.</CardDescription>
               </div>
 
               <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
                 <TabsList className={cn("h-10 rounded-2xl border border-zc-border bg-zc-panel/20 p-1")}>
                   <TabsTrigger
-                    value="services"
-                    className={cn(
-                      "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
-                    )}
+                    value="codeSets"
+                    className={cn("rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm")}
                   >
-                    <ClipboardList className="mr-2 h-4 w-4" />
-                    Services
+                    <BookMarked className="mr-2 h-4 w-4" />
+                    Code Sets
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="mappings"
+                    className={cn("rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm")}
+                  >
+                    <Link2 className="mr-2 h-4 w-4" />
+                    Mappings
                   </TabsTrigger>
                   <TabsTrigger
                     value="guide"
-                    className={cn(
-                      "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
-                    )}
+                    className={cn("rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm")}
                   >
                     <Wrench className="mr-2 h-4 w-4" />
                     Quick Guide
@@ -564,250 +559,168 @@ export default function SuperAdminServiceLibraryPage() {
 
           <CardContent className="pb-6">
             <Tabs value={activeTab}>
-              <TabsContent value="services" className="mt-0">
+              {/* --------------------------- Code Sets Tab --------------------------- */}
+              <TabsContent value="codeSets" className="mt-0">
                 <div className="grid gap-4">
-                  {/* Filters */}
-                  {showFilters ? (
-                    <div className="grid gap-3 rounded-xl border border-zc-border bg-zc-panel/20 p-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                        <Filter className="h-4 w-4 text-zc-accent" />
-                        Filters
+                  <div className="grid gap-3 rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                      <Filter className="h-4 w-4 text-zc-accent" />
+                      Filters
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-12">
+                      <div className="md:col-span-6">
+                        <Label className="text-xs text-zc-muted">Search Code Sets</Label>
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
+                          <Input
+                            value={csQ}
+                            onChange={(e) => setCsQ(e.target.value)}
+                            placeholder="Search by code, name, description..."
+                            className="pl-10"
+                            disabled={mustSelectBranch}
+                          />
+                        </div>
                       </div>
 
-                      <div className="grid gap-3 md:grid-cols-12">
-                        <div className="md:col-span-4">
-                          <Label className="text-xs text-zc-muted">Category</Label>
-                          <Select
-                            value={category}
-                            onValueChange={(v) => {
-                              setPage(1);
-                              setCategory(v as any);
-                            }}
-                            disabled={mustSelectBranch}
-                          >
-                            <SelectTrigger className="h-10">
-                              <SelectValue placeholder="Category" />
-                            </SelectTrigger>
-                            <SelectContent className="max-h-[320px] overflow-y-auto">
-                              <SelectItem value="all">All</SelectItem>
-                              {categoryOptions.length === 0 ? (
-                                <SelectItem value="__none" disabled>
-                                  No categories
-                                </SelectItem>
-                              ) : (
-                                categoryOptions.map((c) => (
-                                  <SelectItem key={c} value={c}>
-                                    {c}
-                                  </SelectItem>
-                                ))
-                              )}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="md:col-span-4">
-                          <Label className="text-xs text-zc-muted">Charge Mapping</Label>
-                          <Select
-                            value={mappingStatus}
-                            onValueChange={(v) => {
-                              setPage(1);
-                              setMappingStatus(v as any);
-                            }}
-                            disabled={mustSelectBranch}
-                          >
-                            <SelectTrigger className="h-10">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All</SelectItem>
-                              <SelectItem value="mapped">Mapped</SelectItem>
-                              <SelectItem value="missing">Missing mapping</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="md:col-span-4">
-                          <Label className="text-xs text-zc-muted">Orderable</Label>
-                          <Select
-                            value={orderable}
-                            onValueChange={(v) => {
-                              setPage(1);
-                              setOrderable(v as any);
-                            }}
-                            disabled={mustSelectBranch}
-                          >
-                            <SelectTrigger className="h-10">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All</SelectItem>
-                              <SelectItem value="yes">Orderable</SelectItem>
-                              <SelectItem value="no">Not orderable</SelectItem>
-                            </SelectContent>
-                          </Select>
+                      <div className="md:col-span-6 flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/10 px-3 py-2">
+                        <Switch checked={csIncludeInactive} onCheckedChange={setCsIncludeInactive} disabled={mustSelectBranch} />
+                        <div className="text-sm">
+                          <div className="font-semibold text-zc-text">Include inactive</div>
+                          <div className="text-xs text-zc-muted">Show retired code sets too</div>
                         </div>
                       </div>
                     </div>
-                  ) : null}
+                  </div>
 
-                  {/* Table */}
                   <div className="rounded-xl border border-zc-border">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="w-[170px]">Code</TableHead>
+                          <TableHead className="w-[220px]">Code</TableHead>
                           <TableHead>Name</TableHead>
-                          <TableHead className="w-[190px]">Category</TableHead>
-                          <TableHead className="w-[120px]">Unit</TableHead>
-                          <TableHead className="w-[120px]">Orderable</TableHead>
+                          <TableHead className="w-[360px]">Description</TableHead>
                           <TableHead className="w-[120px]">Active</TableHead>
-                          <TableHead className="w-[240px]">Charge Mapping</TableHead>
                           <TableHead className="w-[180px]">Updated</TableHead>
                           <TableHead className="w-[70px]"></TableHead>
                         </TableRow>
                       </TableHeader>
-
                       <TableBody>
                         {loading ? (
                           Array.from({ length: 8 }).map((_, i) => (
                             <TableRow key={i}>
-                              <TableCell colSpan={9}>
+                              <TableCell colSpan={6}>
                                 <Skeleton className="h-6 w-full" />
                               </TableCell>
                             </TableRow>
                           ))
-                        ) : pageRows.length === 0 ? (
+                        ) : csPageRows.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={9}>
+                            <TableCell colSpan={6}>
                               <div className="flex items-center justify-center gap-3 py-10 text-sm text-zc-muted">
-                                <ClipboardList className="h-4 w-4" />
-                                No services found for the current filters.
+                                <BookMarked className="h-4 w-4" />
+                                No code sets found.
                               </div>
                             </TableCell>
                           </TableRow>
                         ) : (
-                          pageRows.map((r) => {
-                            const m = currentMapping(r);
-                            const cm = m?.chargeMasterItem;
-                            return (
-                              <TableRow key={r.id}>
-                                <TableCell className="font-mono text-xs">
-                                  <div className="flex flex-col gap-1">
-                                    <span className="font-semibold text-zc-text">{r.code}</span>
-                                    <span className="text-[11px] text-zc-muted">{String(r.id).slice(0, 8)}…</span>
-                                  </div>
-                                </TableCell>
+                          csPageRows.map((cs) => (
+                            <TableRow key={cs.id}>
+                              <TableCell className="font-mono text-xs">
+                                <div className="flex flex-col gap-1">
+                                  <span className="font-semibold text-zc-text">{cs.code}</span>
+                                  <span className="text-[11px] text-zc-muted">{String(cs.id).slice(0, 8)}…</span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <span className="font-semibold text-zc-text">{cs.name}</span>
+                                  <span className="text-xs text-zc-muted">{cs.system || "INTERNAL"}</span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm text-zc-muted">
+                                <span className="line-clamp-2">{cs.description || "—"}</span>
+                              </TableCell>
+                              <TableCell>
+                                {cs.isActive ? <Badge variant="success">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
+                              </TableCell>
+                              <TableCell className="text-sm text-zc-muted">{fmtDateTime(cs.updatedAt || cs.createdAt || null)}</TableCell>
+                              <TableCell className="text-right">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8" disabled={busy}>
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-[260px]">
+                                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
 
-                                <TableCell>
-                                  <div className="flex flex-col gap-1">
-                                    <span className="font-semibold text-zc-text">{r.name}</span>
-                                    <span className="text-xs text-zc-muted">
-                                      {r.isOrderable ? "Orderable in clinical screens" : "Hidden from ordering"}
-                                    </span>
-                                  </div>
-                                </TableCell>
+                                    <DropdownMenuItem onClick={() => openManage(cs)}>
+                                      <ClipboardList className="mr-2 h-4 w-4" />
+                                      Manage entries
+                                    </DropdownMenuItem>
 
-                                <TableCell>
-                                  <div className="flex flex-col gap-1">
-                                    <span className="text-sm text-zc-text">{r.category}</span>
-                                  </div>
-                                </TableCell>
+                                    <DropdownMenuItem onClick={() => openEditCodeSet(cs)}>
+                                      <Wrench className="mr-2 h-4 w-4" />
+                                      Edit code set
+                                    </DropdownMenuItem>
 
-                                <TableCell>
-                                  <Badge variant="secondary">{r.unit || "—"}</Badge>
-                                </TableCell>
+                                    <DropdownMenuSeparator />
 
-                                <TableCell>
-                                  {r.isOrderable ? <Badge variant="ok">Yes</Badge> : <Badge variant="secondary">No</Badge>}
-                                </TableCell>
+                                    <DropdownMenuItem
+                                      onClick={async () => {
+                                        setBusy(true);
+                                        try {
+                                          await apiFetch(`/api/infrastructure/service-library/code-sets/${encodeURIComponent(cs.id)}?${buildQS({ branchId })}`, {
+                                            method: "PATCH",
+                                            body: JSON.stringify({ isActive: !cs.isActive }),
+                                          });
+                                          toast({ title: "Updated", description: `Code set marked ${!cs.isActive ? "Active" : "Inactive"}.` });
+                                          await loadCodeSets(false);
+                                        } catch (e: any) {
+                                          toast({ title: "Update failed", description: e?.message || "Request failed", variant: "destructive" as any });
+                                        } finally {
+                                          setBusy(false);
+                                        }
+                                      }}
+                                    >
+                                      <Filter className="mr-2 h-4 w-4" />
+                                      {cs.isActive ? "Set inactive" : "Set active"}
+                                    </DropdownMenuItem>
 
-                                <TableCell>
-                                  {r.isActive ? <Badge variant="success">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
-                                </TableCell>
+                                    <DropdownMenuSeparator />
 
-                                <TableCell>
-                                  <div className="flex flex-col gap-1">
-                                    <div>{mappingBadge(r)}</div>
-                                    {cm?.code || cm?.name ? (
-                                      <div className="text-xs text-zc-muted">
-                                        {cm?.code ? <span className="font-mono">{cm.code}</span> : null}
-                                        {cm?.name ? <span>{cm?.code ? ` • ${cm.name}` : cm.name}</span> : null}
-                                      </div>
-                                    ) : !isMapped(r) ? (
-                                      <div className="text-xs text-zc-muted">
-                                        <Link
-                                          href={`/superadmin/infrastructure/service-mapping?serviceItemId=${encodeURIComponent(r.id)}`}
-                                          className="inline-flex items-center gap-1 text-zc-accent hover:underline"
-                                        >
-                                          Fix mapping <ExternalLink className="h-3 w-3" />
-                                        </Link>
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                </TableCell>
-
-                                <TableCell className="text-sm text-zc-muted">
-                                  {fmtDateTime(r.updatedAt || r.createdAt || null)}
-                                </TableCell>
-
-                                <TableCell className="text-right">
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button variant="ghost" size="icon" className="h-8 w-8" disabled={busy}>
-                                        <MoreHorizontal className="h-4 w-4" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-[240px]">
-                                      <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                      <DropdownMenuItem onClick={() => openEdit(r)}>
-                                        <Wrench className="mr-2 h-4 w-4" />
-                                        Edit
-                                      </DropdownMenuItem>
-
-                                      <DropdownMenuItem asChild>
-                                        <Link href={`/superadmin/infrastructure/service-mapping?serviceItemId=${encodeURIComponent(r.id)}`}>
-                                          <ExternalLink className="mr-2 h-4 w-4" />
-                                          Open mapping
-                                        </Link>
-                                      </DropdownMenuItem>
-
-                                      <DropdownMenuSeparator />
-
-                                      <DropdownMenuItem
-                                        onClick={() => {
-                                          const text = `${r.code} • ${r.name}\nCategory: ${r.category}\nOrderable: ${
-                                            r.isOrderable ? "Yes" : "No"
-                                          }\nActive: ${r.isActive ? "Yes" : "No"}\nMapped: ${isMapped(r) ? "Yes" : "No"}`;
-                                          navigator.clipboard?.writeText(text).then(
-                                            () => toast({ title: "Copied", description: "Service summary copied to clipboard." }),
-                                            () => toast({ title: "Copy failed", description: "Could not access clipboard." }),
-                                          );
-                                        }}
-                                      >
-                                        Copy summary
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        navigator.clipboard?.writeText(cs.id).then(
+                                          () => toast({ title: "Copied", description: "Code set id copied to clipboard." }),
+                                          () => toast({ title: "Copy failed", description: "Could not access clipboard." }),
+                                        );
+                                      }}
+                                    >
+                                      Copy id
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableCell>
+                            </TableRow>
+                          ))
                         )}
                       </TableBody>
                     </Table>
 
                     <div className="flex flex-col gap-3 border-t border-zc-border p-4 md:flex-row md:items-center md:justify-between">
                       <div className="text-sm text-zc-muted">
-                        Showing <span className="font-semibold text-zc-text">{pageRows.length}</span> of{" "}
-                        <span className="font-semibold text-zc-text">{filtered.length}</span>
+                        Showing <span className="font-semibold text-zc-text">{csPageRows.length}</span> of{" "}
+                        <span className="font-semibold text-zc-text">{filteredCodeSets.length}</span>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
                         <Select
-                          value={String(pageSize)}
+                          value={String(csPageSize)}
                           onValueChange={(v) => {
-                            setPage(1);
-                            setPageSize(Number(v));
+                            setCsPage(1);
+                            setCsPageSize(Number(v));
                           }}
                           disabled={mustSelectBranch}
                         >
@@ -823,25 +736,15 @@ export default function SuperAdminServiceLibraryPage() {
                           </SelectContent>
                         </Select>
 
-                        <Button
-                          variant="outline"
-                          className="h-9"
-                          disabled={mustSelectBranch || page <= 1}
-                          onClick={() => setPage((p) => Math.max(1, p - 1))}
-                        >
+                        <Button variant="outline" className="h-9" disabled={mustSelectBranch || csPage <= 1} onClick={() => setCsPage((p) => Math.max(1, p - 1))}>
                           Prev
                         </Button>
-                        <Button
-                          variant="outline"
-                          className="h-9"
-                          disabled={mustSelectBranch || page >= totalPages}
-                          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                        >
+                        <Button variant="outline" className="h-9" disabled={mustSelectBranch || csPage >= csTotalPages} onClick={() => setCsPage((p) => Math.min(csTotalPages, p + 1))}>
                           Next
                         </Button>
 
                         <Badge variant="secondary">
-                          Page {page} / {totalPages}
+                          Page {csPage} / {csTotalPages}
                         </Badge>
                       </div>
                     </div>
@@ -849,71 +752,278 @@ export default function SuperAdminServiceLibraryPage() {
                 </div>
               </TabsContent>
 
+              {/* --------------------------- Mappings Tab --------------------------- */}
+              <TabsContent value="mappings" className="mt-0">
+                <div className="grid gap-4">
+                  <div className="grid gap-3 rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                      <Filter className="h-4 w-4 text-zc-accent" />
+                      Filters
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-12">
+                      <div className="md:col-span-6">
+                        <Label className="text-xs text-zc-muted">Search Mappings</Label>
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
+                          <Input
+                            value={mapQ}
+                            onChange={(e) => setMapQ(e.target.value)}
+                            placeholder="Search service code/name or entry code/display..."
+                            className="pl-10"
+                            disabled={mustSelectBranch}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="md:col-span-6">
+                        <Label className="text-xs text-zc-muted">Code Set</Label>
+                        <Select value={mapCodeSetId} onValueChange={(v) => setMapCodeSetId(v as any)} disabled={mustSelectBranch}>
+                          <SelectTrigger className="h-10">
+                            <SelectValue placeholder="All code sets" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-[320px] overflow-y-auto">
+                            <SelectItem value="all">All</SelectItem>
+                            {codeSets.map((cs) => (
+                              <SelectItem key={cs.id} value={cs.id}>
+                                {cs.code} • {cs.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-zc-border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[260px]">Service</TableHead>
+                          <TableHead className="w-[220px]">Code Set</TableHead>
+                          <TableHead>Entry</TableHead>
+                          <TableHead className="w-[140px]">Primary</TableHead>
+                          <TableHead className="w-[180px]">Created</TableHead>
+                          <TableHead className="w-[70px]"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {loading ? (
+                          Array.from({ length: 8 }).map((_, i) => (
+                            <TableRow key={i}>
+                              <TableCell colSpan={6}>
+                                <Skeleton className="h-6 w-full" />
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        ) : mapPageRows.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={6}>
+                              <div className="flex items-center justify-center gap-3 py-10 text-sm text-zc-muted">
+                                <Link2 className="h-4 w-4" />
+                                No mappings found.
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          mapPageRows.map((m) => (
+                            <TableRow key={m.id}>
+                              <TableCell>
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="secondary" className="font-mono">{m.serviceItem.code}</Badge>
+                                    <span className="font-semibold text-zc-text">{m.serviceItem.name}</span>
+                                  </div>
+                                  <div className="text-xs text-zc-muted">{m.serviceItem.category || "—"}</div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <span className="font-semibold text-zc-text">{m.entry.codeSet.code}</span>
+                                  <span className="text-xs text-zc-muted">{m.entry.codeSet.name}</span>
+                                </div>
+                              </TableCell>
+
+                              <TableCell>
+                                <div className="flex flex-col gap-1">
+                                  <span className="font-mono text-xs font-semibold text-zc-text">{m.entry.code}</span>
+                                  <span className="text-xs text-zc-muted line-clamp-1">{m.entry.display}</span>
+                                </div>
+                              </TableCell>
+
+                              <TableCell>
+                                {m.isPrimary ? (
+                                  <Badge variant="ok" className="gap-1"><Star className="h-3 w-3" /> Primary</Badge>
+                                ) : (
+                                  <Badge variant="secondary">No</Badge>
+                                )}
+                              </TableCell>
+
+                              <TableCell className="text-sm text-zc-muted">{fmtDateTime(m.createdAt || null)}</TableCell>
+
+                              <TableCell className="text-right">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8" disabled={busy}>
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-[260px]">
+                                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
+
+                                    <DropdownMenuItem
+                                      onClick={async () => {
+                                        setBusy(true);
+                                        try {
+                                          await apiFetch(`/api/infrastructure/service-library/mappings?${buildQS({ branchId })}`, {
+                                            method: "POST",
+                                            body: JSON.stringify({
+                                              serviceItemId: m.serviceItemId,
+                                              codeEntryId: m.entryId,
+                                              isPrimary: true,
+                                            }),
+                                          });
+                                          toast({ title: "Updated", description: "Marked as primary mapping." });
+                                          await loadMappings(false);
+                                        } catch (e: any) {
+                                          toast({ title: "Update failed", description: e?.message || "Request failed", variant: "destructive" as any });
+                                        } finally {
+                                          setBusy(false);
+                                        }
+                                      }}
+                                    >
+                                      <Star className="mr-2 h-4 w-4" />
+                                      Make primary
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuSeparator />
+
+                                    <DropdownMenuItem
+                                      className="text-zc-danger focus:text-zc-danger"
+                                      onClick={async () => {
+                                        if (!confirm("Delete this mapping?")) return;
+                                        setBusy(true);
+                                        try {
+                                          await apiFetch(`/api/infrastructure/service-library/mappings/${encodeURIComponent(m.id)}?${buildQS({ branchId })}`, {
+                                            method: "DELETE",
+                                          });
+                                          toast({ title: "Deleted", description: "Mapping removed." });
+                                          await loadMappings(false);
+                                        } catch (e: any) {
+                                          toast({ title: "Delete failed", description: e?.message || "Request failed", variant: "destructive" as any });
+                                        } finally {
+                                          setBusy(false);
+                                        }
+                                      }}
+                                    >
+                                      <Trash2 className="mr-2 h-4 w-4" />
+                                      Delete mapping
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuSeparator />
+
+                                    <DropdownMenuItem asChild>
+                                      <Link href={`/superadmin/infrastructure/service-items`}>
+                                        <ExternalLink className="mr-2 h-4 w-4" />
+                                        Open Service Items
+                                      </Link>
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+
+                    <div className="flex flex-col gap-3 border-t border-zc-border p-4 md:flex-row md:items-center md:justify-between">
+                      <div className="text-sm text-zc-muted">
+                        Showing <span className="font-semibold text-zc-text">{mapPageRows.length}</span> of{" "}
+                        <span className="font-semibold text-zc-text">{filteredMappings.length}</span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Select
+                          value={String(mapPageSize)}
+                          onValueChange={(v) => {
+                            setMapPage(1);
+                            setMapPageSize(Number(v));
+                          }}
+                          disabled={mustSelectBranch}
+                        >
+                          <SelectTrigger className="h-9 w-[140px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {[25, 50, 100, 200].map((n) => (
+                              <SelectItem key={n} value={String(n)}>
+                                Page size: {n}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        <Button variant="outline" className="h-9" disabled={mustSelectBranch || mapPage <= 1} onClick={() => setMapPage((p) => Math.max(1, p - 1))}>
+                          Prev
+                        </Button>
+                        <Button variant="outline" className="h-9" disabled={mustSelectBranch || mapPage >= mapTotalPages} onClick={() => setMapPage((p) => Math.min(mapTotalPages, p + 1))}>
+                          Next
+                        </Button>
+
+                        <Badge variant="secondary">
+                          Page {mapPage} / {mapTotalPages}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* --------------------------- Guide Tab --------------------------- */}
               <TabsContent value="guide" className="mt-0">
                 <div className="grid gap-4">
                   <Card className="border-zc-border">
                     <CardHeader className="py-4">
-                      <CardTitle className="text-base">How to configure (recommended order)</CardTitle>
-                      <CardDescription>
-                        Follow this sequence to avoid getting lost during infra setup.
-                      </CardDescription>
+                      <CardTitle className="text-base">Recommended usage</CardTitle>
+                      <CardDescription>Keep interoperability clean and consistent.</CardDescription>
                     </CardHeader>
                     <CardContent className="grid gap-4">
                       <div className="grid gap-3 md:grid-cols-2">
                         <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                           <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                            <Badge variant="ok">1</Badge> Create Service Items
+                            <Badge variant="ok">1</Badge> Create Code Sets
                           </div>
                           <div className="mt-1 text-sm text-zc-muted">
-                            Define services with correct category and whether they are orderable/active.
+                            Create internal or standard code sets (e.g., LOINC/CPT/internal catalog).
                           </div>
                         </div>
 
                         <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                           <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                            <Badge variant="ok">2</Badge> Map to Charge Master
+                            <Badge variant="ok">2</Badge> Add Code Entries
                           </div>
                           <div className="mt-1 text-sm text-zc-muted">
-                            Each billable service should map to a ChargeMasterItem (FixIt opens if missing).
-                          </div>
-                          <div className="mt-3">
-                            <Button variant="outline" asChild className="gap-2">
-                              <Link href="/superadmin/infrastructure/service-mapping">
-                                Open Service Mapping <ExternalLink className="h-4 w-4" />
-                              </Link>
-                            </Button>
+                            Add entries (code + display). Keep codes stable so integrations remain consistent.
                           </div>
                         </div>
 
                         <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                           <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                            <Badge variant="ok">3</Badge> Tariff Rates (Branch Price List)
+                            <Badge variant="ok">3</Badge> Map to Service Items
                           </div>
                           <div className="mt-1 text-sm text-zc-muted">
-                            Add rates per ChargeMasterItem in the active Tariff Plan for this branch.
-                          </div>
-                          <div className="mt-3">
-                            <Button variant="outline" asChild className="gap-2">
-                              <Link href="/superadmin/infrastructure/tariff-plans">
-                                Open Tariff Plans <ExternalLink className="h-4 w-4" />
-                              </Link>
-                            </Button>
+                            Map entries to branch Service Items. Mark one mapping primary per service item where needed.
                           </div>
                         </div>
 
                         <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                           <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                            <Badge variant="ok">4</Badge> Scheduling (if appointment-based)
+                            <Badge variant="ok">4</Badge> Use in integrations
                           </div>
                           <div className="mt-1 text-sm text-zc-muted">
-                            For services that need scheduling, define availability rules so GoLive passes.
-                          </div>
-                          <div className="mt-3">
-                            <Button variant="outline" asChild className="gap-2">
-                              <Link href="/superadmin/infrastructure/service-availability">
-                                Open Availability <ExternalLink className="h-4 w-4" />
-                              </Link>
-                            </Button>
+                            Standard mappings help downstream billing, analytics, and external data exchange.
                           </div>
                         </div>
                       </div>
@@ -923,12 +1033,20 @@ export default function SuperAdminServiceLibraryPage() {
                       <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
                         <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
                           <AlertTriangle className="h-4 w-4 text-zc-warn" />
-                          Tip: Fix missing mappings immediately
+                          Tip: Keep mapping “Primary” meaningful
                         </div>
                         <div className="mt-1 text-sm text-zc-muted">
-                          If you create a service without a charge mapping, the backend opens a FixIt. In this page,
-                          you’ll also see a <span className="font-semibold">MAPPING MISSING</span> badge so you can jump to mapping.
+                          If a service can map to multiple standards, mark the one most important for reporting/integration as Primary.
                         </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" onClick={() => setActiveTab("codeSets")} className="gap-2">
+                          <BookMarked className="h-4 w-4" /> Go to Code Sets
+                        </Button>
+                        <Button variant="outline" onClick={() => setActiveTab("mappings")} className="gap-2">
+                          <Link2 className="h-4 w-4" /> Go to Mappings
+                        </Button>
                       </div>
                     </CardContent>
                   </Card>
@@ -939,15 +1057,53 @@ export default function SuperAdminServiceLibraryPage() {
         </Card>
       </div>
 
-      {/* Create/Edit dialog */}
-      <ServiceItemDialog
-        open={svcDialogOpen}
-        onOpenChange={setSvcDialogOpen}
+      {/* CodeSet create/edit */}
+      <CodeSetDialog
+        open={codeSetDialogOpen}
+        onOpenChange={setCodeSetDialogOpen}
         branchId={branchId}
-        editing={editing}
+        editing={editingCodeSet}
         onSaved={async () => {
-          toast({ title: editing ? "Service updated" : "Service created", description: "Saved successfully." });
-          await loadServices(false);
+          toast({ title: editingCodeSet ? "Code set updated" : "Code set created", description: "Saved successfully." });
+          await loadCodeSets(false);
+        }}
+      />
+
+      {/* Manage CodeSet (drawer) */}
+      <CodeSetManageDrawer
+        open={manageOpen}
+        onOpenChange={setManageOpen}
+        branchId={branchId}
+        codeSet={manageCodeSet}
+        onAddEntry={() => openAddEntry(null)}
+        onEditEntry={(e) => openAddEntry(e)}
+        onUpdated={async () => {
+          await Promise.all([loadCodeSets(false), loadMappings(false)]);
+        }}
+      />
+
+      {/* Entry create/edit */}
+      <EntryDialog
+        open={entryDialogOpen}
+        onOpenChange={setEntryDialogOpen}
+        branchId={branchId}
+        codeSetId={manageCodeSet?.id || ""}
+        editing={editingEntry}
+        onSaved={async () => {
+          toast({ title: editingEntry ? "Entry updated" : "Entry saved", description: "Saved successfully." });
+          // Drawer will reload its list itself via key refresh, but also refresh code sets/mappings if needed
+        }}
+      />
+
+      {/* New Mapping */}
+      <AddMappingDialog
+        open={addMappingOpen}
+        onOpenChange={setAddMappingOpen}
+        branchId={branchId}
+        codeSets={codeSets}
+        onSaved={async () => {
+          toast({ title: "Mapping saved", description: "Service ↔ standard code mapping created." });
+          await loadMappings(false);
         }}
       />
     </AppShell>
@@ -955,10 +1111,10 @@ export default function SuperAdminServiceLibraryPage() {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                             Create/Edit Dialog                              */
+/*                          Code Set Create/Edit Dialog                        */
 /* -------------------------------------------------------------------------- */
 
-function ServiceItemDialog({
+function CodeSetDialog({
   open,
   onOpenChange,
   branchId,
@@ -968,30 +1124,17 @@ function ServiceItemDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   branchId: string;
-  editing: ServiceItemRow | null;
+  editing: StandardCodeSetRow | null;
   onSaved: () => void;
 }) {
   const { toast } = useToast();
   const [saving, setSaving] = React.useState(false);
 
-  const [form, setForm] = React.useState<{
-    code: string;
-    name: string;
-    category: string;
-    unit: string;
-    isOrderable: boolean;
-    isActive: boolean;
-    chargeMasterCode: string;
-    notes: string;
-  }>({
+  const [form, setForm] = React.useState<{ code: string; name: string; description: string; isActive: boolean }>({
     code: "",
     name: "",
-    category: "",
-    unit: "",
-    isOrderable: true,
+    description: "",
     isActive: true,
-    chargeMasterCode: "",
-    notes: "",
   });
 
   React.useEffect(() => {
@@ -999,12 +1142,8 @@ function ServiceItemDialog({
     setForm({
       code: editing?.code || "",
       name: editing?.name || "",
-      category: editing?.category || "",
-      unit: editing?.unit || "",
-      isOrderable: Boolean(editing?.isOrderable ?? true),
+      description: editing?.description || "",
       isActive: Boolean(editing?.isActive ?? true),
-      chargeMasterCode: "", // create-only convenience; backend ignores on update
-      notes: "",
     });
   }, [open, editing]);
 
@@ -1012,38 +1151,30 @@ function ServiceItemDialog({
     setForm((prev) => ({ ...prev, ...p }));
   }
 
-  function normalizePayload() {
+  async function save() {
+    if (!branchId) return;
+
     const payload: any = {
       code: String(form.code || "").trim(),
       name: String(form.name || "").trim(),
-      category: String(form.category || "").trim(),
-      unit: form.unit?.trim() ? String(form.unit).trim() : null,
-      isOrderable: Boolean(form.isOrderable),
-      isActive: Boolean(form.isActive),
+      description: form.description?.trim() ? String(form.description).trim() : null,
+      ...(editing ? { isActive: Boolean(form.isActive) } : {}),
     };
 
-    // Only send chargeMasterCode on create; update ignores it in current backend.
-    if (!editing && form.chargeMasterCode.trim()) payload.chargeMasterCode = form.chargeMasterCode.trim();
-    return payload;
-  }
-
-  async function save() {
-    if (!branchId) return;
-    const payload = normalizePayload();
-    if (!payload.code || !payload.name || !payload.category) {
-      toast({ title: "Missing fields", description: "Code, Name and Category are required." });
+    if (!payload.code || !payload.name) {
+      toast({ title: "Missing fields", description: "Code and Name are required." });
       return;
     }
 
     setSaving(true);
     try {
       if (editing) {
-        await apiFetch(`/api/infrastructure/services/${encodeURIComponent(editing.id)}`, {
+        await apiFetch(`/api/infrastructure/service-library/code-sets/${encodeURIComponent(editing.id)}?${buildQS({ branchId })}`, {
           method: "PATCH",
           body: JSON.stringify(payload),
         });
       } else {
-        await apiFetch(`/api/infrastructure/services?branchId=${encodeURIComponent(branchId)}`, {
+        await apiFetch(`/api/infrastructure/service-library/code-sets?${buildQS({ branchId })}`, {
           method: "POST",
           body: JSON.stringify(payload),
         });
@@ -1058,145 +1189,284 @@ function ServiceItemDialog({
     }
   }
 
-  const mappings = editing?.mappings || [];
-  const latest = mappings[0] || null;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("max-w-[720px]")}>
+        <ModalHeader
+          title={editing ? "Edit Code Set" : "New Code Set"}
+          description="Create a standard code set used to tag services (e.g., LOINC/CPT/Internal)."
+          icon={<BookMarked className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
+        />
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-2">
+            <Label>Code</Label>
+            <Input value={form.code} onChange={(e) => patch({ code: e.target.value })} placeholder="e.g., LOINC, CPT, INTERNAL" />
+            <div className="text-xs text-zc-muted min-h-[16px]">Keep stable (used in audit/integrations).</div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Name</Label>
+            <Input value={form.name} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g., LOINC Codes" />
+            <div className="text-xs text-zc-muted min-h-[16px] invisible" aria-hidden="true">
+              Placeholder helper
+            </div>
+          </div>
+
+          <div className="md:col-span-2 grid gap-2">
+            <Label>Description (optional)</Label>
+            <Textarea value={form.description} onChange={(e) => patch({ description: e.target.value })} placeholder="What is this code set used for?" className="min-h-[90px]" />
+          </div>
+
+          {editing ? (
+            <div className="md:col-span-2 flex items-start gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+              <Switch checked={form.isActive} onCheckedChange={(v) => patch({ isActive: v })} />
+              <div>
+                <div className="text-sm font-semibold text-zc-text">Active</div>
+                <div className="text-sm text-zc-muted">Inactive code sets stay for history but will be hidden by default.</div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                          Code Set Manage Drawer                             */
+/* -------------------------------------------------------------------------- */
+
+function CodeSetManageDrawer({
+  open,
+  onOpenChange,
+  branchId,
+  codeSet,
+  onAddEntry,
+  onEditEntry,
+  onUpdated,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  codeSet: StandardCodeSetRow | null;
+  onAddEntry: () => void;
+  onEditEntry: (e: StandardCodeEntryRow) => void;
+  onUpdated: () => void;
+}) {
+  const { toast } = useToast();
+  const [tab, setTab] = React.useState<"entries" | "mappings">("entries");
+
+  const [loading, setLoading] = React.useState(false);
+  const [entries, setEntries] = React.useState<StandardCodeEntryRow[]>([]);
+  const [entryQ, setEntryQ] = React.useState("");
+
+  const [mapLoading, setMapLoading] = React.useState(false);
+  const [codeSetMappings, setCodeSetMappings] = React.useState<ServiceItemStandardMappingRow[]>([]);
+  const [mapQ, setMapQ] = React.useState("");
+
+  async function loadEntries() {
+    if (!branchId || !codeSet?.id) return;
+    setLoading(true);
+    try {
+      const resp = await apiFetch<StandardCodeEntryRow[]>(
+        `/api/infrastructure/service-library/code-sets/${encodeURIComponent(codeSet.id)}/entries?${buildQS({
+          branchId,
+          q: entryQ.trim() || undefined,
+        })}`,
+      );
+      setEntries(resp || []);
+    } catch (e: any) {
+      toast({ title: "Failed to load entries", description: e?.message || "Request failed", variant: "destructive" as any });
+      setEntries([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadMappings() {
+    if (!branchId || !codeSet?.id) return;
+    setMapLoading(true);
+    try {
+      const resp = await apiFetch<ServiceItemStandardMappingRow[]>(
+        `/api/infrastructure/service-library/mappings?${buildQS({
+          branchId,
+          codeSetId: codeSet.id,
+          q: mapQ.trim() || undefined,
+        })}`,
+      );
+      setCodeSetMappings(resp || []);
+    } catch (e: any) {
+      toast({ title: "Failed to load mappings", description: e?.message || "Request failed", variant: "destructive" as any });
+      setCodeSetMappings([]);
+    } finally {
+      setMapLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    if (!open) return;
+    setTab("entries");
+    setEntryQ("");
+    setMapQ("");
+    void loadEntries();
+    void loadMappings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, codeSet?.id]);
+
+  React.useEffect(() => {
+    if (!open || tab !== "entries") return;
+    const t = setTimeout(() => void loadEntries(), 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entryQ, tab]);
+
+  React.useEffect(() => {
+    if (!open || tab !== "mappings") return;
+    const t = setTimeout(() => void loadMappings(), 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapQ, tab]);
+
+  async function deleteEntry(e: StandardCodeEntryRow) {
+    if (!codeSet?.id) return;
+    if (!confirm(`Retire entry "${e.code}"?`)) return;
+
+    try {
+      await apiFetch(
+        `/api/infrastructure/service-library/code-sets/${encodeURIComponent(codeSet.id)}/entries/${encodeURIComponent(e.code)}?${buildQS({
+          branchId,
+        })}`,
+        { method: "DELETE" },
+      );
+      toast({ title: "Entry retired", description: "Entry marked inactive." });
+      await loadEntries();
+      onUpdated();
+    } catch (err: any) {
+      toast({ title: "Delete failed", description: err?.message || "Request failed", variant: "destructive" as any });
+    }
+  }
+
+  if (!codeSet) return null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={drawerClassName()}>
         <ModalHeader
-          title={editing ? "Edit Service Item" : "New Service Item"}
-          description="Define an orderable service. Optionally map it to a ChargeMaster code during create."
-          icon={<ClipboardList className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
+          title={`Manage: ${codeSet.code}`}
+          description={`${codeSet.name} • Add entries and see mapped services.`}
+          icon={<BookMarked className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
         />
 
-        <div className="grid gap-6">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="grid gap-2">
-              <Label>Code</Label>
-              <Input
-                value={form.code}
-                onChange={(e) => patch({ code: e.target.value })}
-                placeholder="e.g., CBC, XRAY-CHEST, CONSULT-GEN"
-              />
-              <div className="text-xs text-zc-muted min-h-[16px]">
-                Keep code stable. Used in audits and integrations.
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Name</Label>
-              <Input value={form.name} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g., Complete Blood Count" />
-              <div className="text-xs text-zc-muted min-h-[16px] invisible" aria-hidden="true">
-                Placeholder helper
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Category</Label>
-              <Input value={form.category} onChange={(e) => patch({ category: e.target.value })} placeholder="e.g., LAB, RADIOLOGY, PROCEDURE" />
-              <div className="text-xs text-zc-muted min-h-[16px]">
-                Category drives grouping in catalogues and ordering UI.
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Unit (optional)</Label>
-              <Input value={form.unit} onChange={(e) => patch({ unit: e.target.value })} placeholder="e.g., Test, Scan, Session" />
-              <div className="text-xs text-zc-muted min-h-[16px] invisible" aria-hidden="true">
-                Placeholder helper
-              </div>
-            </div>
+        <div className="grid gap-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={codeSet.isActive ? "success" : "secondary"}>{codeSet.isActive ? "Active" : "Inactive"}</Badge>
+            <Badge variant="secondary">System: {codeSet.system || "INTERNAL"}</Badge>
+            {codeSet.description ? <Badge variant="accent" className="max-w-[540px] truncate">{codeSet.description}</Badge> : null}
           </div>
 
-          <Separator />
+          <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
+            <TabsList className={cn("h-10 rounded-2xl border border-zc-border bg-zc-panel/20 p-1")}>
+              <TabsTrigger
+                value="entries"
+                className={cn("rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white")}
+              >
+                <ClipboardList className="mr-2 h-4 w-4" />
+                Entries
+              </TabsTrigger>
+              <TabsTrigger
+                value="mappings"
+                className={cn("rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white")}
+              >
+                <Link2 className="mr-2 h-4 w-4" />
+                Mappings
+              </TabsTrigger>
+            </TabsList>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="flex items-start gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-              <Switch checked={form.isOrderable} onCheckedChange={(v) => patch({ isOrderable: v })} />
-              <div>
-                <div className="text-sm font-semibold text-zc-text">Orderable</div>
-                <div className="text-sm text-zc-muted">
-                  If disabled, this item won’t appear in ordering screens (kept for history).
+            <TabsContent value="entries" className="mt-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="relative w-full md:max-w-md">
+                  <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
+                  <Input value={entryQ} onChange={(e) => setEntryQ(e.target.value)} placeholder="Search entries..." className="pl-10" />
                 </div>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-              <Switch checked={form.isActive} onCheckedChange={(v) => patch({ isActive: v })} />
-              <div>
-                <div className="text-sm font-semibold text-zc-text">Active</div>
-                <div className="text-sm text-zc-muted">
-                  Use inactive for retired services. You can still keep them non-orderable.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          {!editing ? (
-            <div className="grid gap-2">
-              <Label>ChargeMaster Code (optional)</Label>
-              <Input
-                value={form.chargeMasterCode}
-                onChange={(e) => patch({ chargeMasterCode: e.target.value })}
-                placeholder="e.g., CM-CBC (if provided, mapping will be created)"
-              />
-              <div className="text-xs text-zc-muted">
-                If blank, backend opens a FixIt for missing mapping. You can also map later from the Mapping screen.
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-zc-text">Charge Mapping</div>
-                  <div className="text-sm text-zc-muted">
-                    Mapping is managed in <span className="font-semibold">Service ↔ Charge Mapping</span>.
-                  </div>
-                </div>
-                <Button variant="outline" asChild className="gap-2">
-                  <Link href={`/superadmin/infrastructure/service-mapping?serviceItemId=${encodeURIComponent(editing.id)}`}>
-                    Open mapping <ExternalLink className="h-4 w-4" />
-                  </Link>
+                <Button variant="primary" className="gap-2" onClick={onAddEntry}>
+                  <Plus className="h-4 w-4" />
+                  Add entry
                 </Button>
               </div>
 
-              <Separator className="my-4" />
-
-              <div className="rounded-xl border border-zc-border">
+              <div className="mt-3 rounded-xl border border-zc-border">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[220px]">Charge Master</TableHead>
-                      <TableHead className="w-[200px]">Effective From</TableHead>
-                      <TableHead className="w-[200px]">Effective To</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead className="w-[220px]">Code</TableHead>
+                      <TableHead>Display</TableHead>
+                      <TableHead className="w-[220px]">Attributes</TableHead>
+                      <TableHead className="w-[180px]">Updated</TableHead>
+                      <TableHead className="w-[70px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {mappings.length === 0 ? (
+                    {loading ? (
+                      Array.from({ length: 6 }).map((_, i) => (
+                        <TableRow key={i}>
+                          <TableCell colSpan={5}>
+                            <Skeleton className="h-6 w-full" />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : entries.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4}>
-                          <div className="flex items-center justify-center gap-2 py-8 text-sm text-zc-muted">
-                            <AlertTriangle className="h-4 w-4 text-zc-warn" /> No mapping history found.
+                        <TableCell colSpan={5}>
+                          <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
+                            <ClipboardList className="h-4 w-4" /> No entries found.
                           </div>
                         </TableCell>
                       </TableRow>
                     ) : (
-                      mappings.slice(0, 5).map((m) => (
-                        <TableRow key={m.id}>
+                      entries.map((e) => (
+                        <TableRow key={e.id}>
                           <TableCell className="font-mono text-xs">
                             <div className="flex flex-col gap-1">
-                              <span className="font-semibold text-zc-text">{m.chargeMasterItem?.code || "—"}</span>
-                              <span className="text-[11px] text-zc-muted">{m.chargeMasterItem?.name || ""}</span>
+                              <span className="font-semibold text-zc-text">{e.code}</span>
+                              <span className="text-[11px] text-zc-muted">{String(e.id).slice(0, 8)}…</span>
                             </div>
                           </TableCell>
-                          <TableCell className="text-sm text-zc-muted">{fmtDateTime(m.effectiveFrom)}</TableCell>
-                          <TableCell className="text-sm text-zc-muted">{fmtDateTime(m.effectiveTo || null)}</TableCell>
-                          <TableCell>
-                            {m.effectiveTo ? <Badge variant="secondary">CLOSED</Badge> : <Badge variant="ok">ACTIVE</Badge>}
+                          <TableCell className="text-sm">
+                            <span className="font-semibold text-zc-text">{e.display}</span>
+                          </TableCell>
+                          <TableCell className="text-xs text-zc-muted">
+                            {e.attributes ? <span className="line-clamp-2">{JSON.stringify(e.attributes)}</span> : "—"}
+                          </TableCell>
+                          <TableCell className="text-sm text-zc-muted">{fmtDateTime(e.updatedAt || e.createdAt || null)}</TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-[220px]">
+                                <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                <DropdownMenuItem onClick={() => onEditEntry(e)}>
+                                  <Wrench className="mr-2 h-4 w-4" /> Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem className="text-zc-danger focus:text-zc-danger" onClick={() => void deleteEntry(e)}>
+                                  <Trash2 className="mr-2 h-4 w-4" /> Retire
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
                       ))
@@ -1204,24 +1474,230 @@ function ServiceItemDialog({
                   </TableBody>
                 </Table>
               </div>
+            </TabsContent>
 
-              {latest && !latest.effectiveTo ? (
-                <div className="mt-3 text-xs text-zc-muted">
-                  Current mapping:{" "}
-                  <span className="font-mono font-semibold text-zc-text">{latest.chargeMasterItem?.code || "—"}</span>
+            <TabsContent value="mappings" className="mt-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="relative w-full md:max-w-md">
+                  <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
+                  <Input value={mapQ} onChange={(e) => setMapQ(e.target.value)} placeholder="Search mapped services..." className="pl-10" />
                 </div>
-              ) : null}
-            </div>
-          )}
+                <Button variant="outline" asChild className="gap-2">
+                  <Link href={`/superadmin/infrastructure/service-library`}>
+                    Open full mappings <ExternalLink className="h-4 w-4" />
+                  </Link>
+                </Button>
+              </div>
+
+              <div className="mt-3 rounded-xl border border-zc-border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[260px]">Service</TableHead>
+                      <TableHead>Entry</TableHead>
+                      <TableHead className="w-[140px]">Primary</TableHead>
+                      <TableHead className="w-[180px]">Created</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {mapLoading ? (
+                      Array.from({ length: 6 }).map((_, i) => (
+                        <TableRow key={i}>
+                          <TableCell colSpan={4}>
+                            <Skeleton className="h-6 w-full" />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : codeSetMappings.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4}>
+                          <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
+                            <Link2 className="h-4 w-4" /> No mappings for this code set.
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      codeSetMappings.map((m) => (
+                        <TableRow key={m.id}>
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="secondary" className="font-mono">{m.serviceItem.code}</Badge>
+                                <span className="font-semibold text-zc-text">{m.serviceItem.name}</span>
+                              </div>
+                              <div className="text-xs text-zc-muted">{m.serviceItem.category || "—"}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              <span className="font-mono text-xs font-semibold text-zc-text">{m.entry.code}</span>
+                              <span className="text-xs text-zc-muted line-clamp-1">{m.entry.display}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {m.isPrimary ? (
+                              <Badge variant="ok" className="gap-1"><Star className="h-3 w-3" /> Primary</Badge>
+                            ) : (
+                              <Badge variant="secondary">No</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-sm text-zc-muted">{fmtDateTime(m.createdAt || null)}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Entry Upsert Dialog                            */
+/* -------------------------------------------------------------------------- */
+
+function EntryDialog({
+  open,
+  onOpenChange,
+  branchId,
+  codeSetId,
+  editing,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  codeSetId: string;
+  editing: StandardCodeEntryRow | null;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = React.useState(false);
+
+  const [form, setForm] = React.useState<{ code: string; display: string; description: string; status: string; metaJson: string }>({
+    code: "",
+    display: "",
+    description: "",
+    status: "",
+    metaJson: "",
+  });
+
+  React.useEffect(() => {
+    if (!open) return;
+    const attrs = editing?.attributes || {};
+    setForm({
+      code: editing?.code || "",
+      display: editing?.display || "",
+      description: (attrs?.description as any) || "",
+      status: (attrs?.status as any) || "",
+      metaJson: attrs && Object.keys(attrs || {}).length ? JSON.stringify(attrs, null, 2) : "",
+    });
+  }, [open, editing]);
+
+  function patch(p: Partial<typeof form>) {
+    setForm((prev) => ({ ...prev, ...p }));
+  }
+
+  async function save() {
+    if (!branchId || !codeSetId) return;
+
+    const payload: any = {
+      code: String(form.code || "").trim(),
+      display: String(form.display || "").trim(),
+    };
+
+    if (!payload.code || !payload.display) {
+      toast({ title: "Missing fields", description: "Code and Display are required." });
+      return;
+    }
+
+    // Optional helpers: description/status/meta
+    const meta = safeParseJson(form.metaJson);
+    if (meta === "__INVALID__") {
+      toast({ title: "Invalid JSON", description: "Meta JSON is not valid. Fix it or clear the box." });
+      return;
+    }
+
+    // If user filled specific fields, send them too
+    if (String(form.description || "").trim()) payload.description = String(form.description).trim();
+    if (String(form.status || "").trim()) payload.status = String(form.status).trim();
+    if (meta && meta !== "__INVALID__") payload.meta = meta;
+
+    setSaving(true);
+    try {
+      await apiFetch(
+        `/api/infrastructure/service-library/code-sets/${encodeURIComponent(codeSetId)}/entries?${buildQS({
+          branchId,
+        })}`,
+        { method: "POST", body: JSON.stringify(payload) },
+      );
+
+      onOpenChange(false);
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={modalClassName("max-w-[860px]")}>
+        <ModalHeader
+          title={editing ? "Edit Code Entry" : "New Code Entry"}
+          description="Upsert entry into the selected code set."
+          icon={<ClipboardList className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
+        />
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-2">
+            <Label>Code</Label>
+            <Input
+              value={form.code}
+              onChange={(e) => patch({ code: e.target.value })}
+              placeholder="e.g., 4548-4"
+              disabled={Boolean(editing)} // safest: don't change code on edit
+            />
+            {editing ? (
+              <div className="text-xs text-zc-muted">Code is fixed on edit (keeps history stable).</div>
+            ) : (
+              <div className="text-xs text-zc-muted">Keep stable for interoperability.</div>
+            )}
+          </div>
 
           <div className="grid gap-2">
-            <Label>Notes (optional)</Label>
-            <Textarea
-              value={form.notes}
-              onChange={(e) => patch({ notes: e.target.value })}
-              placeholder="Internal notes about this service item..."
-              className="min-h-[90px]"
-            />
+            <Label>Display</Label>
+            <Input value={form.display} onChange={(e) => patch({ display: e.target.value })} placeholder="e.g., Hemoglobin [Mass/volume] in Blood" />
+            <div className="text-xs text-zc-muted min-h-[16px] invisible" aria-hidden="true">
+              Placeholder helper
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Description (optional)</Label>
+            <Input value={form.description} onChange={(e) => patch({ description: e.target.value })} placeholder="Optional description" />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Status (optional)</Label>
+            <Input value={form.status} onChange={(e) => patch({ status: e.target.value })} placeholder="e.g., active, retired, draft" />
+          </div>
+
+          <div className="md:col-span-2 grid gap-2">
+            <Label>Meta JSON (optional)</Label>
+            <Textarea value={form.metaJson} onChange={(e) => patch({ metaJson: e.target.value })} placeholder='{"source":"loinc","note":"..." }' className="min-h-[140px] font-mono text-xs" />
+            <div className="text-xs text-zc-muted">If provided, must be valid JSON.</div>
           </div>
         </div>
 
@@ -1232,6 +1708,318 @@ function ServiceItemDialog({
           <Button onClick={save} disabled={saving}>
             {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
             Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Add Mapping Dialog                             */
+/* -------------------------------------------------------------------------- */
+
+function AddMappingDialog({
+  open,
+  onOpenChange,
+  branchId,
+  codeSets,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  branchId: string;
+  codeSets: StandardCodeSetRow[];
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = React.useState(false);
+
+  const [svcQ, setSvcQ] = React.useState("");
+  const [svcLoading, setSvcLoading] = React.useState(false);
+  const [services, setServices] = React.useState<ServiceItemMiniRow[]>([]);
+  const [serviceItemId, setServiceItemId] = React.useState<string>("");
+
+  const [codeSetId, setCodeSetId] = React.useState<string>("");
+  const [entryQ, setEntryQ] = React.useState("");
+  const [entryLoading, setEntryLoading] = React.useState(false);
+  const [entries, setEntries] = React.useState<StandardCodeEntryRow[]>([]);
+  const [entryId, setEntryId] = React.useState<string>("");
+
+  const [isPrimary, setIsPrimary] = React.useState(true);
+
+  async function loadServices(q?: string) {
+    if (!branchId) return;
+    setSvcLoading(true);
+    try {
+      const resp = await apiFetch<ServiceItemMiniRow[]>(
+        `/api/infrastructure/services?${buildQS({ branchId, q: (q ?? "").trim() || undefined, includeInactive: "true" })}`,
+      );
+      setServices(resp || []);
+    } catch (e: any) {
+      toast({ title: "Failed to load services", description: e?.message || "Request failed", variant: "destructive" as any });
+      setServices([]);
+    } finally {
+      setSvcLoading(false);
+    }
+  }
+
+  async function loadEntries(codeSetIdParam: string, q?: string) {
+    if (!branchId || !codeSetIdParam) return;
+    setEntryLoading(true);
+    try {
+      const resp = await apiFetch<StandardCodeEntryRow[]>(
+        `/api/infrastructure/service-library/code-sets/${encodeURIComponent(codeSetIdParam)}/entries?${buildQS({
+          branchId,
+          q: (q ?? "").trim() || undefined,
+        })}`,
+      );
+      setEntries(resp || []);
+    } catch (e: any) {
+      toast({ title: "Failed to load entries", description: e?.message || "Request failed", variant: "destructive" as any });
+      setEntries([]);
+    } finally {
+      setEntryLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    if (!open) return;
+    setSvcQ("");
+    setServices([]);
+    setServiceItemId("");
+    setCodeSetId("");
+    setEntryQ("");
+    setEntries([]);
+    setEntryId("");
+    setIsPrimary(true);
+
+    void loadServices("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => void loadServices(svcQ), 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [svcQ, open]);
+
+  React.useEffect(() => {
+    if (!open || !codeSetId) return;
+    setEntryId("");
+    void loadEntries(codeSetId, "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codeSetId, open]);
+
+  React.useEffect(() => {
+    if (!open || !codeSetId) return;
+    const t = setTimeout(() => void loadEntries(codeSetId, entryQ), 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entryQ, codeSetId, open]);
+
+  async function save() {
+    if (!branchId) return;
+    if (!serviceItemId || !entryId) {
+      toast({ title: "Missing selection", description: "Select a Service and an Entry." });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await apiFetch(`/api/infrastructure/service-library/mappings?${buildQS({ branchId })}`, {
+        method: "POST",
+        body: JSON.stringify({ serviceItemId, codeEntryId: entryId, isPrimary }),
+      });
+      onOpenChange(false);
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={drawerClassName()}>
+        <ModalHeader
+          title="New Mapping"
+          description="Map a Service Item to a Standard Code Entry (and optionally mark it primary)."
+          icon={<Link2 className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
+        />
+
+        <div className="grid gap-6">
+          <div className="grid gap-2">
+            <Label>Service search</Label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
+              <Input value={svcQ} onChange={(e) => setSvcQ(e.target.value)} placeholder="Search service code/name..." className="pl-10" />
+            </div>
+
+            <div className="rounded-xl border border-zc-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[200px]">Code</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="w-[180px]">Category</TableHead>
+                    <TableHead className="w-[120px]">Pick</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {svcLoading ? (
+                    Array.from({ length: 5 }).map((_, i) => (
+                      <TableRow key={i}>
+                        <TableCell colSpan={4}>
+                          <Skeleton className="h-6 w-full" />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : services.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4}>
+                        <div className="flex items-center justify-center gap-2 py-8 text-sm text-zc-muted">
+                          <ClipboardList className="h-4 w-4" /> No services found.
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    services.slice(0, 80).map((s) => {
+                      const selected = s.id === serviceItemId;
+                      return (
+                        <TableRow key={s.id} className={selected ? "bg-zc-panel/20" : ""}>
+                          <TableCell className="font-mono text-xs">
+                            <span className={cn("font-semibold", selected ? "text-zc-accent" : "text-zc-text")}>{s.code}</span>
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            <span className="font-semibold text-zc-text">{s.name}</span>
+                          </TableCell>
+                          <TableCell className="text-sm text-zc-muted">{s.category || "—"}</TableCell>
+                          <TableCell>
+                            <Button variant={selected ? "primary" : "outline"} size="sm" onClick={() => setServiceItemId(s.id)}>
+                              {selected ? "Selected" : "Select"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="text-xs text-zc-muted">Tip: if you have many services, search by code prefix.</div>
+          </div>
+
+          <Separator />
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Code Set</Label>
+              <Select value={codeSetId} onValueChange={setCodeSetId}>
+                <SelectTrigger className="h-10">
+                  <SelectValue placeholder="Select code set..." />
+                </SelectTrigger>
+                <SelectContent className="max-h-[320px] overflow-y-auto">
+                  {codeSets.filter((x) => x.isActive).map((cs) => (
+                    <SelectItem key={cs.id} value={cs.id}>
+                      {cs.code} • {cs.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-start gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+              <Switch checked={isPrimary} onCheckedChange={setIsPrimary} />
+              <div>
+                <div className="text-sm font-semibold text-zc-text">Primary mapping</div>
+                <div className="text-sm text-zc-muted">If enabled, this becomes the primary code for that service item.</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Entry search</Label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
+              <Input
+                value={entryQ}
+                onChange={(e) => setEntryQ(e.target.value)}
+                placeholder={codeSetId ? "Search entry code/display..." : "Select a code set first"}
+                className="pl-10"
+                disabled={!codeSetId}
+              />
+            </div>
+
+            <div className="rounded-xl border border-zc-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[220px]">Code</TableHead>
+                    <TableHead>Display</TableHead>
+                    <TableHead className="w-[120px]">Pick</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {!codeSetId ? (
+                    <TableRow>
+                      <TableCell colSpan={3}>
+                        <div className="flex items-center justify-center gap-2 py-8 text-sm text-zc-muted">
+                          <AlertTriangle className="h-4 w-4 text-zc-warn" /> Select a code set to load entries.
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : entryLoading ? (
+                    Array.from({ length: 5 }).map((_, i) => (
+                      <TableRow key={i}>
+                        <TableCell colSpan={3}>
+                          <Skeleton className="h-6 w-full" />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : entries.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={3}>
+                        <div className="flex items-center justify-center gap-2 py-8 text-sm text-zc-muted">
+                          <ClipboardList className="h-4 w-4" /> No entries found.
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    entries.slice(0, 120).map((e) => {
+                      const selected = e.id === entryId;
+                      return (
+                        <TableRow key={e.id} className={selected ? "bg-zc-panel/20" : ""}>
+                          <TableCell className="font-mono text-xs">
+                            <span className={cn("font-semibold", selected ? "text-zc-accent" : "text-zc-text")}>{e.code}</span>
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            <span className="text-zc-text">{e.display}</span>
+                          </TableCell>
+                          <TableCell>
+                            <Button variant={selected ? "primary" : "outline"} size="sm" onClick={() => setEntryId(e.id)}>
+                              {selected ? "Selected" : "Select"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Save mapping
           </Button>
         </DialogFooter>
       </DialogContent>

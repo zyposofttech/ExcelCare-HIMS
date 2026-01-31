@@ -28,7 +28,6 @@ import {
   ExternalLink,
   Filter,
   Link2,
-  MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
@@ -53,11 +52,12 @@ type ChargeMasterItemRow = {
 
 type ServiceChargeMappingRow = {
   id: string;
-  branchId?: string;
+  branchId: string;
   serviceItemId: string;
   chargeMasterItemId: string;
   effectiveFrom: string;
   effectiveTo?: string | null;
+  version?: number;
   createdAt?: string;
   chargeMasterItem?: ChargeMasterItemRow | null;
 };
@@ -69,16 +69,12 @@ type ServiceItemRow = {
   name: string;
   category?: string | null;
 
-  // common fields you likely have
   isActive?: boolean;
   isOrderable?: boolean;
   isBillable?: boolean;
   lifecycleStatus?: string | null; // DRAFT / SUBMITTED / APPROVED / PUBLISHED etc.
   chargeUnit?: string | null;
   requiresAppointment?: boolean;
-
-  // optional mapping expansion
-  mappings?: ServiceChargeMappingRow[];
 
   updatedAt?: string;
   createdAt?: string;
@@ -118,9 +114,9 @@ function buildQS(params: Record<string, any>) {
 }
 
 function fmtDateTime(v?: string | null) {
-  if (!v) return "—";
+  if (!v) return "--";
   const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return "--";
   return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
 
@@ -168,6 +164,33 @@ function ModalHeader({
 
 type MappingFilter = "all" | "missing" | "mapped" | "mismatch";
 
+function isPublished(s: ServiceItemRow) {
+  if (s.lifecycleStatus === undefined) return true;
+  return String(s.lifecycleStatus || "").toUpperCase() === "PUBLISHED";
+}
+
+function isBillable(s: ServiceItemRow) {
+  if (s.isBillable === undefined) return true;
+  return Boolean(s.isBillable);
+}
+
+function unitMismatch(serviceUnit?: string | null, cmUnit?: string | null) {
+  if (!serviceUnit || !cmUnit) return false;
+  return String(serviceUnit) !== String(cmUnit);
+}
+
+async function runWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
+  const q = [...items];
+  const workers = Array.from({ length: Math.max(1, limit) }).map(async () => {
+    while (q.length) {
+      const next = q.shift();
+      if (!next) break;
+      await fn(next);
+    }
+  });
+  await Promise.all(workers);
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                   Page                                     */
 /* -------------------------------------------------------------------------- */
@@ -190,6 +213,12 @@ export default function SuperAdminServiceMappingPage() {
   const [allServices, setAllServices] = React.useState<ServiceItemRow[]>([]);
   const [selectedId, setSelectedId] = React.useState<string>("");
 
+  // mapping cache: undefined = not checked yet, null = confirmed missing, row = current/open mapping
+  const [mappingByServiceId, setMappingByServiceId] = React.useState<Record<string, ServiceChargeMappingRow | null | undefined>>(
+    {},
+  );
+  const [mappingScanTruncated, setMappingScanTruncated] = React.useState(false);
+
   // filters
   const [q, setQ] = React.useState("");
   const [includeInactive, setIncludeInactive] = React.useState(false);
@@ -201,9 +230,11 @@ export default function SuperAdminServiceMappingPage() {
 
   // details
   const [selected, setSelected] = React.useState<ServiceItemRow | null>(null);
+  const [selectedHistory, setSelectedHistory] = React.useState<ServiceChargeMappingRow[]>([]);
 
   // modals
   const [mapOpen, setMapOpen] = React.useState(false);
+  const initialAutoSelectRef = React.useRef(false);
 
   const mustSelectBranch = !branchId;
 
@@ -214,31 +245,23 @@ export default function SuperAdminServiceMappingPage() {
     router.replace(`/superadmin/infrastructure/service-mapping?${params.toString()}`);
   }
 
-  function currentMapping(svc: ServiceItemRow): ServiceChargeMappingRow | null {
-    const ms = svc.mappings || [];
-    const open = ms.find((m) => m && (m.effectiveTo === null || m.effectiveTo === undefined));
-    return open || ms[0] || null;
-  }
-
-  function isMapped(svc: ServiceItemRow): boolean {
-    const m = currentMapping(svc);
-    return Boolean(m?.chargeMasterItemId && (m.effectiveTo === null || m.effectiveTo === undefined));
+  function currentMappingForId(serviceItemId: string) {
+    return mappingByServiceId[serviceItemId];
   }
 
   function isMismatch(svc: ServiceItemRow): boolean {
-    const m = currentMapping(svc);
-    const cm = m?.chargeMasterItem;
-    if (!m || !cm) return false;
+    const m = currentMappingForId(svc.id);
+    if (!m) return false;
     if (m.effectiveTo) return false;
-    if (!svc.chargeUnit || !cm.chargeUnit) return false;
-    return String(svc.chargeUnit) !== String(cm.chargeUnit);
+    return unitMismatch(svc.chargeUnit ?? null, m.chargeMasterItem?.chargeUnit ?? null);
   }
 
   function mappingBadge(svc: ServiceItemRow) {
-    const m = currentMapping(svc);
-    if (!m || !m.chargeMasterItemId) return <Badge variant="destructive">MAPPING MISSING</Badge>;
+    const m = currentMappingForId(svc.id);
+    if (m === undefined) return <Badge variant="secondary">CHECKING...</Badge>;
+    if (m === null) return <Badge variant="destructive">MAPPING MISSING</Badge>;
     if (m.effectiveTo) return <Badge variant="secondary">MAPPING CLOSED</Badge>;
-    if (isMismatch(svc)) return <Badge variant="warning">MAPPED • UNIT MISMATCH</Badge>;
+    if (isMismatch(svc)) return <Badge variant="warning">MAPPED  -  UNIT MISMATCH</Badge>;
     return <Badge variant="ok">MAPPED</Badge>;
   }
 
@@ -267,17 +290,10 @@ export default function SuperAdminServiceMappingPage() {
             branchId: bid,
             q: q.trim() || undefined,
             includeInactive: includeInactive ? "true" : undefined,
-            includeMappings: "true", // backend may ignore safely
           })}`,
         )) || [];
 
-      const filtered = rows.filter((r) => {
-        const billableOk = r.isBillable === undefined ? true : Boolean(r.isBillable);
-        const publishedOk =
-          r.lifecycleStatus === undefined ? true : String(r.lifecycleStatus || "").toUpperCase() === "PUBLISHED";
-        return billableOk && publishedOk;
-      });
-
+      const filtered = rows.filter((r) => isBillable(r) && isPublished(r));
       setAllServices(filtered);
 
       if (showToast) toast({ title: "Services refreshed", description: "Loaded latest billable published services." });
@@ -291,6 +307,75 @@ export default function SuperAdminServiceMappingPage() {
     }
   }
 
+  async function loadCurrentMappings(forBranchId?: string) {
+    const bid = forBranchId || branchId;
+    if (!bid) return;
+
+    // reset cache before scan so badges show CHECKING
+    setMappingByServiceId({});
+    setMappingScanTruncated(false);
+
+    try {
+      const rows =
+        (await apiFetch<ServiceChargeMappingRow[]>(
+          `/api/infrastructure/service-charge-mappings?${buildQS({
+            branchId: bid,
+            includeHistory: "false",
+            includeRefs: "true",
+            take: 500,
+          })}`,
+        )) || [];
+
+      const map: Record<string, ServiceChargeMappingRow> = {};
+      rows.forEach((r) => {
+        if (r?.serviceItemId) map[r.serviceItemId] = r;
+      });
+
+      setMappingByServiceId((prev) => ({ ...prev, ...map }));
+
+      // Backend caps at 500. If we hit 500, mapping scan may be truncated.
+      setMappingScanTruncated(rows.length >= 500);
+    } catch {
+      // do not hard fail page if mapping scan fails; badges will be resolved per-row via current endpoint
+      setMappingByServiceId({});
+      setMappingScanTruncated(false);
+    }
+  }
+
+  async function ensureCurrentMappingForService(serviceItemId: string) {
+    if (!serviceItemId) return;
+
+    // already known (including confirmed missing)
+    if (mappingByServiceId[serviceItemId] !== undefined) return;
+
+    try {
+      const row = await apiFetch<ServiceChargeMappingRow | null>(
+        `/api/infrastructure/service-charge-mappings/current/${encodeURIComponent(serviceItemId)}?${buildQS({
+          includeRefs: "true",
+        })}`,
+      );
+
+      setMappingByServiceId((prev) => ({
+        ...prev,
+        [serviceItemId]: row ? row : null,
+      }));
+    } catch {
+      // if request failed, keep unknown and let retry happen later
+    }
+  }
+
+  async function ensureMappingsForVisible(visible: ServiceItemRow[]) {
+    const targets = visible
+      .map((s) => s.id)
+      .filter((id) => mappingByServiceId[id] === undefined);
+
+    if (targets.length === 0) return;
+
+    await runWithConcurrency(targets, 8, async (id) => {
+      await ensureCurrentMappingForService(id);
+    });
+  }
+
   async function loadServiceDetail(id: string, forBranchId?: string) {
     const bid = forBranchId || branchId;
     if (!bid || !id) return;
@@ -298,12 +383,42 @@ export default function SuperAdminServiceMappingPage() {
     setBusy(true);
     try {
       const detail = await apiFetch<ServiceItemRow>(
-        `/api/infrastructure/services/${encodeURIComponent(id)}?${buildQS({ branchId: bid, includeMappings: "true" })}`,
+        `/api/infrastructure/services/${encodeURIComponent(id)}?${buildQS({ branchId: bid })}`,
       );
       setSelected(detail || null);
     } catch {
       const row = allServices.find((x) => x.id === id) || null;
       setSelected(row);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadMappingHistory(serviceItemId: string, forBranchId?: string) {
+    const bid = forBranchId || branchId;
+    if (!bid || !serviceItemId) return;
+
+    setBusy(true);
+    try {
+      const rows =
+        (await apiFetch<ServiceChargeMappingRow[]>(
+          `/api/infrastructure/service-charge-mappings?${buildQS({
+            branchId: bid,
+            serviceItemId,
+            includeHistory: "true",
+            includeRefs: "true",
+            take: 200,
+          })}`,
+        )) || [];
+
+      const sorted = [...rows].sort((a, b) => (b.version ?? 0) - (a.version ?? 0));
+      setSelectedHistory(sorted);
+
+      // update current mapping cache for this service
+      const current = sorted.find((m) => !m.effectiveTo) || null;
+      setMappingByServiceId((prev) => ({ ...prev, [serviceItemId]: current ? current : null }));
+    } catch {
+      setSelectedHistory([]);
     } finally {
       setBusy(false);
     }
@@ -316,17 +431,19 @@ export default function SuperAdminServiceMappingPage() {
       const bid = branchId || (await loadBranches());
       if (!bid) return;
 
-      // ✅ ensure first-load fetch happens even before state finishes updating
       await loadServices(bid, false);
+      await loadCurrentMappings(bid);
 
       const urlId = sp?.get("serviceItemId") || "";
       const nextId = urlId || selectedId || "";
       if (nextId) {
         setSelectedId(nextId);
+        await ensureCurrentMappingForService(nextId);
         await loadServiceDetail(nextId, bid);
+        await loadMappingHistory(nextId, bid);
       }
 
-      if (showToast) toast({ title: "Service mapping ready", description: "Branch scope and services are up to date." });
+      if (showToast) toast({ title: "Service mapping ready", description: "Branch scope, services and mappings are up to date." });
     } catch (e: any) {
       const msg = e?.message || "Refresh failed";
       setErr(msg);
@@ -335,7 +452,6 @@ export default function SuperAdminServiceMappingPage() {
       setLoading(false);
     }
   }
-
 
   React.useEffect(() => {
     void refreshAll(false);
@@ -354,8 +470,13 @@ export default function SuperAdminServiceMappingPage() {
     if (!branchId) return;
     setPage(1);
     void loadServices(branchId, false);
+    void loadCurrentMappings(branchId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId, includeInactive]);
+
+  React.useEffect(() => {
+    initialAutoSelectRef.current = false;
+  }, [branchId]);
 
   React.useEffect(() => {
     if (!branchId) return;
@@ -369,11 +490,15 @@ export default function SuperAdminServiceMappingPage() {
     if (!branchId) return;
     if (!selectedId) {
       setSelected(null);
+      setSelectedHistory([]);
       return;
     }
+    void ensureCurrentMappingForService(selectedId);
     void loadServiceDetail(selectedId, branchId);
+    void loadMappingHistory(selectedId, branchId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, branchId]);
+
   async function onBranchChange(nextId: string) {
     setBranchId(nextId);
     writeLS(LS_BRANCH, nextId);
@@ -384,53 +509,107 @@ export default function SuperAdminServiceMappingPage() {
     setPage(1);
     setSelectedId("");
     setSelected(null);
+    setSelectedHistory([]);
     setUrlServiceId("");
 
     setErr(null);
     setLoading(true);
     try {
-      // ✅ do not rely on state update timing
       await loadServices(nextId, false);
-      toast({ title: "Branch scope changed", description: "Loaded billable published services for selected branch." });
+      await loadCurrentMappings(nextId);
+      toast({ title: "Branch scope changed", description: "Loaded billable published services and their mappings." });
     } catch (e: any) {
       const msg = e?.message || "Failed to load branch scope";
       setErr(msg);
-      toast({ variant: "destructive", title: "Load failed", description: msg });
+      toast({ variant: "destructive", title: "Load failed", description: msg } as any);
     } finally {
       setLoading(false);
     }
   }
 
-
   const filteredServices = React.useMemo(() => {
     let rows = [...(allServices || [])];
 
-    if (mappingFilter === "missing") rows = rows.filter((r) => !isMapped(r));
-    if (mappingFilter === "mapped") rows = rows.filter((r) => isMapped(r));
-    if (mappingFilter === "mismatch") rows = rows.filter((r) => isMismatch(r));
+    if (mappingFilter === "missing") {
+      // show items missing mapping OR not checked yet (will resolve when visible)
+      rows = rows.filter((r) => {
+        const m = mappingByServiceId[r.id];
+        return m === null || m === undefined;
+      });
+    }
+
+    if (mappingFilter === "mapped")
+      rows = rows.filter((r) => {
+        const m = mappingByServiceId[r.id];
+        return Boolean(m && !m.effectiveTo);
+      });
+
+    if (mappingFilter === "mismatch")
+      rows = rows.filter((r) => {
+        const m = mappingByServiceId[r.id];
+        return Boolean(m && !m.effectiveTo && unitMismatch(r.chargeUnit ?? null, m.chargeMasterItem?.chargeUnit ?? null));
+      });
 
     return rows;
+  }, [allServices, mappingFilter, mappingByServiceId]);
+
+  const totalPages = React.useMemo(() => Math.max(1, Math.ceil(filteredServices.length / pageSize)), [filteredServices.length, pageSize]);
+
+  const pageRows = React.useMemo(
+    () => filteredServices.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize),
+    [filteredServices, page, pageSize],
+  );
+
+  React.useEffect(() => {
+    if (!branchId) return;
+    if (pageRows.length === 0) return;
+    void ensureMappingsForVisible(pageRows);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allServices, mappingFilter]);
+  }, [branchId, page, pageSize, mappingFilter, filteredServices.length]);
+
+  React.useEffect(() => {
+    if (!branchId || loading) return;
+    if (initialAutoSelectRef.current) return;
+    if (!filteredServices.length) return;
+    const hasSelected = selectedId && filteredServices.some((s) => s.id === selectedId);
+    if (!hasSelected) {
+      pickService(filteredServices[0].id);
+    }
+    initialAutoSelectRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchId, loading, filteredServices.length, selectedId]);
 
   const totals = React.useMemo(() => {
     const total = allServices.length;
-    const missing = allServices.filter((s) => !isMapped(s)).length;
-    const mismatch = allServices.filter((s) => isMismatch(s)).length;
-    return { total, missing, mismatch };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allServices]);
+    let missing = 0;
+    let mismatch = 0;
+    let unknown = 0;
 
-  const totalPages = React.useMemo(() => Math.max(1, Math.ceil(filteredServices.length / pageSize)), [filteredServices.length, pageSize]);
-  const pageRows = React.useMemo(() => filteredServices.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize), [filteredServices, page, pageSize]);
+    for (const s of allServices) {
+      const m = mappingByServiceId[s.id];
+      if (m === undefined) unknown += 1;
+      else if (m === null) missing += 1;
+      else if (m && !m.effectiveTo && unitMismatch(s.chargeUnit ?? null, m.chargeMasterItem?.chargeUnit ?? null)) mismatch += 1;
+    }
+
+    return { total, missing, mismatch, unknown };
+  }, [allServices, mappingByServiceId]);
 
   function pickService(id: string) {
     setSelectedId(id);
     setUrlServiceId(id);
   }
 
+  const selectedCurrent = React.useMemo(() => {
+    if (!selectedId) return null;
+    const m = mappingByServiceId[selectedId];
+    if (m && !m.effectiveTo) return m;
+    const fromHistory = selectedHistory.find((x) => !x.effectiveTo) || null;
+    return fromHistory;
+  }, [selectedId, mappingByServiceId, selectedHistory]);
+
   return (
-    <AppShell title="Infrastructure • Service Mapping">
+    <AppShell title="Infrastructure  -  Service Mapping">
       <div className="grid gap-6">
         {/* Header */}
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -439,7 +618,7 @@ export default function SuperAdminServiceMappingPage() {
               <ShieldCheck className="h-5 w-5 text-zc-accent" />
             </span>
             <div className="min-w-0">
-              <div className="text-3xl font-semibold tracking-tight">Service ↔ Charge Mapping</div>
+              <div className="text-3xl font-semibold tracking-tight">Service {"<->"} Charge Mapping</div>
               <div className="mt-1 text-sm text-zc-muted">
                 Map each <span className="font-semibold">billable published</span> service to a Charge Master item for tariff pricing.
               </div>
@@ -484,9 +663,7 @@ export default function SuperAdminServiceMappingPage() {
         <Card className="overflow-hidden">
           <CardHeader className="pb-4">
             <CardTitle className="text-base">Overview</CardTitle>
-            <CardDescription className="text-sm">
-              Select branch → pick a service → map it to Charge Master. Missing mappings and unit mismatches show as blockers.
-            </CardDescription>
+            <CardDescription className="text-sm">Select branch {"->"} pick a service {"->"} map it to Charge Master.</CardDescription>
           </CardHeader>
 
           <CardContent className="grid gap-4">
@@ -497,16 +674,18 @@ export default function SuperAdminServiceMappingPage() {
                   <SelectValue placeholder="Select branch..." />
                 </SelectTrigger>
                 <SelectContent className="max-h-[320px] overflow-y-auto">
-                  {branches.filter((b) => b.id).map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.code} - {b.name} {b.city ? `(${b.city})` : ""}
-                    </SelectItem>
-                  ))}
+                  {branches
+                    .filter((b) => b.id)
+                    .map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.code} - {b.name} {b.city ? `(${b.city})` : ""}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-4">
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900/50 dark:bg-blue-900/10">
                 <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Billable Published Services</div>
                 <div className="mt-1 text-lg font-bold text-blue-700 dark:text-blue-300">{totals.total}</div>
@@ -519,7 +698,17 @@ export default function SuperAdminServiceMappingPage() {
                 <div className="text-xs font-medium text-amber-600 dark:text-amber-400">Charge Unit Mismatch</div>
                 <div className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-300">{totals.mismatch}</div>
               </div>
+              <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                <div className="text-xs font-medium text-zc-muted">Not checked yet</div>
+                <div className="mt-1 text-lg font-bold text-zc-text">{totals.unknown}</div>
+              </div>
             </div>
+
+            {mappingScanTruncated ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/10 dark:text-amber-200">
+                Mapping scan hit backend cap (500 rows). For services beyond that, mapping status will resolve on-demand when you view the page.
+              </div>
+            ) : null}
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="relative w-full lg:max-w-md">
@@ -527,7 +716,7 @@ export default function SuperAdminServiceMappingPage() {
                 <Input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search services by code/name/category…"
+                  placeholder="Search services by code/name/category..."
                   className="pl-10"
                   disabled={mustSelectBranch}
                 />
@@ -542,13 +731,7 @@ export default function SuperAdminServiceMappingPage() {
                   </div>
                 </div>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  onClick={() => setShowFilters((s) => !s)}
-                  disabled={mustSelectBranch}
-                >
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowFilters((s) => !s)} disabled={mustSelectBranch}>
                   <Filter className="h-4 w-4" />
                   {showFilters ? "Hide Filters" : "Show Filters"}
                 </Button>
@@ -559,6 +742,7 @@ export default function SuperAdminServiceMappingPage() {
               <Badge variant="secondary">Branch scoped</Badge>
               <Badge variant={totals.missing > 0 ? "destructive" : "ok"}>Missing mapping: {totals.missing}</Badge>
               <Badge variant={totals.mismatch > 0 ? "warning" : "secondary"}>Unit mismatch: {totals.mismatch}</Badge>
+              {totals.unknown > 0 ? <Badge variant="secondary">Checking: {totals.unknown}</Badge> : null}
             </div>
           </CardContent>
         </Card>
@@ -670,7 +854,7 @@ export default function SuperAdminServiceMappingPage() {
                                   <TableCell className="font-mono text-xs">
                                     <div className="flex flex-col gap-1">
                                       <span className="font-semibold text-zc-text">{s.code}</span>
-                                      <span className="text-[11px] text-zc-muted">{String(s.id).slice(0, 8)}…</span>
+                                      <span className="text-[11px] text-zc-muted">{String(s.id).slice(0, 8)}...</span>
                                     </div>
                                   </TableCell>
                                   <TableCell>
@@ -707,24 +891,21 @@ export default function SuperAdminServiceMappingPage() {
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {[25, 50, 100, 200].map((n) => (
-                                  <SelectItem key={n} value={String(n)}>
-                                    Page size: {n}
-                                  </SelectItem>
-                                ))}
+                                <SelectItem value="25">25 / page</SelectItem>
+                                <SelectItem value="50">50 / page</SelectItem>
+                                <SelectItem value="100">100 / page</SelectItem>
                               </SelectContent>
                             </Select>
 
-                            <Button variant="outline" className="h-9" disabled={mustSelectBranch || page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
                               Prev
                             </Button>
-                            <Button variant="outline" className="h-9" disabled={mustSelectBranch || page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
-                              Next
-                            </Button>
-
-                            <Badge variant="secondary">
+                            <Badge variant="secondary" className="px-3">
                               Page {page} / {totalPages}
                             </Badge>
+                            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
+                              Next
+                            </Button>
                           </div>
                         </div>
                       </div>
@@ -736,11 +917,11 @@ export default function SuperAdminServiceMappingPage() {
                         <Card className="border-zc-border">
                           <CardHeader className="py-4">
                             <CardTitle className="text-base">Select a service</CardTitle>
-                            <CardDescription>Pick a service from the left list to view mapping details and apply mapping.</CardDescription>
+                            <CardDescription>Pick a service from the left to review mapping details.</CardDescription>
                           </CardHeader>
                           <CardContent>
                             <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 text-sm text-zc-muted">
-                              Tip: start with <span className="font-semibold">Missing mapping</span> filter to clear blockers faster.
+                              Tip: Use filters {"->"} <span className="font-semibold">Missing mapping</span> to map everything quickly.
                             </div>
                           </CardContent>
                         </Card>
@@ -748,13 +929,15 @@ export default function SuperAdminServiceMappingPage() {
                         <ServiceMappingDetail
                           branchId={branchId}
                           svc={selected}
+                          mappings={selectedHistory}
+                          current={selectedCurrent}
                           busy={busy}
                           onMap={() => setMapOpen(true)}
                           onAfterChange={async () => {
-                            await loadServices(branchId, false);
-                            if (selectedId) await loadServiceDetail(selectedId, branchId);
-
-                            await loadServiceDetail(selectedId);
+                            if (!branchId || !selectedId) return;
+                            await ensureCurrentMappingForService(selectedId);
+                            await loadMappingHistory(selectedId, branchId);
+                            await loadCurrentMappings(branchId);
                           }}
                         />
                       )}
@@ -765,9 +948,9 @@ export default function SuperAdminServiceMappingPage() {
 
               <TabsContent value="guide" className="mt-0">
                 <Card className="border-zc-border">
-                  <CardHeader className="py-4">
-                    <CardTitle className="text-base">How this fits billing readiness</CardTitle>
-                    <CardDescription>Mapping is the bridge between clinical ordering and billing tariffs.</CardDescription>
+                  <CardHeader>
+                    <CardTitle className="text-base">How to use this screen</CardTitle>
+                    <CardDescription>Recommended order to avoid billing gaps during GoLive.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-4">
                     <div className="grid gap-3 md:grid-cols-2">
@@ -801,7 +984,7 @@ export default function SuperAdminServiceMappingPage() {
                           <Badge variant="ok">3</Badge> Align charge units
                         </div>
                         <div className="mt-1 text-sm text-zc-muted">
-                          If Service chargeUnit differs from ChargeMasterItem chargeUnit, backend opens a FixIt blocker.
+                          If Service chargeUnit differs from ChargeMasterItem chargeUnit, backend will open a FixIt blocker.
                         </div>
                         <div className="mt-3">
                           <Button variant="outline" asChild className="gap-2">
@@ -837,7 +1020,7 @@ export default function SuperAdminServiceMappingPage() {
                         Best workflow
                       </div>
                       <div className="mt-1 text-sm text-zc-muted">
-                        Filter <span className="font-semibold">Missing mapping</span> → map everything → then go to tariff plans and fill missing rates.
+                        Filter <span className="font-semibold">Missing mapping</span> {"->"} map everything {"->"} then go to tariff plans and fill missing rates.
                       </div>
                     </div>
                   </CardContent>
@@ -854,11 +1037,14 @@ export default function SuperAdminServiceMappingPage() {
         onOpenChange={setMapOpen}
         branchId={branchId}
         service={selected}
+        current={selectedCurrent}
         onSaved={async () => {
           toast({ title: "Mapping saved", description: "Service is now mapped to Charge Master." });
-          await loadServices(branchId, false);
-          if (selectedId) await loadServiceDetail(selectedId, branchId);
-
+          if (selectedId) {
+            await ensureCurrentMappingForService(selectedId);
+            await loadMappingHistory(selectedId, branchId);
+          }
+          await loadCurrentMappings(branchId);
         }}
       />
     </AppShell>
@@ -866,50 +1052,43 @@ export default function SuperAdminServiceMappingPage() {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                             Detail Component                                */
+/*                             Detail Component                               */
 /* -------------------------------------------------------------------------- */
 
 function ServiceMappingDetail({
   branchId,
   svc,
+  mappings,
+  current,
   busy,
   onMap,
   onAfterChange,
 }: {
   branchId: string;
   svc: ServiceItemRow | null;
+  mappings: ServiceChargeMappingRow[];
+  current: ServiceChargeMappingRow | null;
   busy: boolean;
   onMap: () => void;
   onAfterChange: () => void;
 }) {
   const { toast } = useToast();
 
-  const current = React.useMemo(() => {
-    const ms = svc?.mappings || [];
-    const open = ms.find((m) => m && (m.effectiveTo === null || m.effectiveTo === undefined));
-    return open || ms[0] || null;
-  }, [svc]);
-
   const mismatch = React.useMemo(() => {
     if (!svc || !current || current.effectiveTo) return false;
     const cm = current.chargeMasterItem;
-    if (!cm?.chargeUnit || !svc.chargeUnit) return false;
-    return String(cm.chargeUnit) !== String(svc.chargeUnit);
+    return unitMismatch(svc.chargeUnit ?? null, cm?.chargeUnit ?? null);
   }, [svc, current]);
 
   async function closeCurrent() {
     if (!svc || !current || current.effectiveTo) return;
-    const ok = window.confirm(`Close current mapping for ${svc.code}? This will set effectiveTo now.`);
+    const ok = window.confirm(`Close current mapping for ${svc.code}? This will set effectiveTo to now.`);
     if (!ok) return;
 
     try {
-      await apiFetch(`/api/infrastructure/service-charge-mappings/close?${buildQS({ branchId })}`, {
+      await apiFetch(`/api/infrastructure/service-charge-mappings/${encodeURIComponent(current.id)}/close`, {
         method: "POST",
-        body: JSON.stringify({
-          serviceItemId: svc.id,
-          mappingId: current.id, // if backend supports
-          effectiveTo: new Date().toISOString(),
-        }),
+        body: JSON.stringify({ effectiveTo: new Date().toISOString() }),
       });
       toast({ title: "Mapping closed", description: "Current mapping closed with effectiveTo." });
       onAfterChange();
@@ -925,13 +1104,13 @@ function ServiceMappingDetail({
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
               <CardTitle className="text-base">
-                {svc?.code} • {svc?.name}
+                {svc?.code} {" - "} {svc?.name}
               </CardTitle>
               <CardDescription>
-                Charge unit: <span className="font-semibold">{svc?.chargeUnit || "—"}</span>{" "}
+                Charge unit: <span className="font-semibold">{svc?.chargeUnit || "--"}</span>{" "}
                 {svc?.category ? (
                   <>
-                    • Category: <span className="font-semibold">{svc.category}</span>
+                    {" - "}Category: <span className="font-semibold">{svc.category}</span>
                   </>
                 ) : null}
               </CardDescription>
@@ -961,7 +1140,7 @@ function ServiceMappingDetail({
                     <span className="font-mono font-semibold text-zc-text">
                       {current.chargeMasterItem?.code || current.chargeMasterItemId}
                     </span>{" "}
-                    {current.chargeMasterItem?.name ? <span>• {current.chargeMasterItem.name}</span> : null}
+                    {current.chargeMasterItem?.name ? <span>{" - "} {current.chargeMasterItem.name}</span> : null}
                   </div>
                   <div className="mt-1 text-xs text-zc-muted">
                     Effective from: <span className="font-semibold">{fmtDateTime(current.effectiveFrom)}</span>
@@ -994,7 +1173,7 @@ function ServiceMappingDetail({
                 <div>
                   <div className="text-sm font-semibold text-zc-text">Mapping missing</div>
                   <div className="mt-1 text-sm text-zc-muted">
-                    This service cannot be priced until it’s mapped to a Charge Master item. Click <span className="font-semibold">Map / Change</span>.
+                    This service cannot be priced until it's mapped to a Charge Master item. Click <span className="font-semibold">Map / Change</span>.
                   </div>
                 </div>
               </div>
@@ -1032,7 +1211,7 @@ function ServiceMappingDetail({
                         </TableCell>
                       </TableRow>
                     ))
-                  ) : (svc?.mappings || []).length === 0 ? (
+                  ) : (mappings || []).length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={4}>
                         <div className="flex items-center justify-center gap-2 py-8 text-sm text-zc-muted">
@@ -1041,11 +1220,11 @@ function ServiceMappingDetail({
                       </TableCell>
                     </TableRow>
                   ) : (
-                    (svc?.mappings || []).slice(0, 10).map((m) => (
+                    (mappings || []).slice(0, 10).map((m) => (
                       <TableRow key={m.id}>
                         <TableCell className="font-mono text-xs">
                           <div className="flex flex-col gap-1">
-                            <span className="font-semibold text-zc-text">{m.chargeMasterItem?.code || "—"}</span>
+                            <span className="font-semibold text-zc-text">{m.chargeMasterItem?.code || "--"}</span>
                             <span className="text-[11px] text-zc-muted">{m.chargeMasterItem?.name || ""}</span>
                           </div>
                         </TableCell>
@@ -1074,12 +1253,14 @@ function MapServiceModal({
   onOpenChange,
   branchId,
   service,
+  current,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   branchId: string;
   service: ServiceItemRow | null;
+  current: ServiceChargeMappingRow | null;
   onSaved: () => void;
 }) {
   const { toast } = useToast();
@@ -1092,7 +1273,6 @@ function MapServiceModal({
 
   const [effectiveFrom, setEffectiveFrom] = React.useState<string>(() => {
     const d = new Date();
-    // datetime-local expects "YYYY-MM-DDTHH:mm"
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   });
@@ -1136,11 +1316,6 @@ function MapServiceModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmQ, open]);
 
-  function mismatch(serviceUnit?: string | null, cmUnit?: string | null) {
-    if (!serviceUnit || !cmUnit) return false;
-    return String(serviceUnit) !== String(cmUnit);
-  }
-
   async function save() {
     if (!branchId || !service?.id) return;
 
@@ -1149,28 +1324,34 @@ function MapServiceModal({
       return;
     }
 
-    const isMismatch = mismatch(service.chargeUnit || null, pickedCm.chargeUnit || null);
-
-    const ok = isMismatch
+    const mismatchDetected = unitMismatch(service.chargeUnit ?? null, pickedCm.chargeUnit ?? null);
+    const ok = mismatchDetected
       ? window.confirm(
-        `Charge unit mismatch detected:\nService = ${service.chargeUnit || "—"}\nChargeMaster = ${pickedCm.chargeUnit || "—"
-        }\n\nProceed? (This will open a FixIt blocker until corrected.)`,
-      )
+          `Charge unit mismatch detected:\nService = ${service.chargeUnit || "--"}\nChargeMaster = ${pickedCm.chargeUnit || "--"}\n\nProceed? (FixIt may be opened until corrected.)`,
+        )
       : true;
 
     if (!ok) return;
 
     setSaving(true);
     try {
-      const iso = new Date(effectiveFrom).toISOString();
+      const effectiveFromIso = new Date(effectiveFrom).toISOString();
+
+      // Backend rejects overlaps: close current mapping exactly at effectiveFrom before creating new mapping.
+      if (current?.id && !current.effectiveTo) {
+        await apiFetch(`/api/infrastructure/service-charge-mappings/${encodeURIComponent(current.id)}/close`, {
+          method: "POST",
+          body: JSON.stringify({ effectiveTo: effectiveFromIso }),
+        });
+      }
 
       await apiFetch(`/api/infrastructure/service-charge-mappings?${buildQS({ branchId })}`, {
         method: "POST",
         body: JSON.stringify({
           serviceItemId: service.id,
           chargeMasterItemId: pickedCm.id,
-          effectiveFrom: iso,
-          notes: notes?.trim() ? notes.trim() : undefined,
+          effectiveFrom: effectiveFromIso,
+          ...(notes?.trim() ? { notes: notes.trim() } : {}),
         }),
       });
 
@@ -1188,7 +1369,7 @@ function MapServiceModal({
       <DialogContent className={drawerClassName()}>
         <ModalHeader
           title="Map Service to Charge Master"
-          description="Select a Charge Master item and set effectiveFrom. Backend will close overlaps and handle FixIts."
+          description="Select a Charge Master item and set effectiveFrom. If a current mapping exists, UI will close it at effectiveFrom to avoid overlap."
           icon={<Link2 className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
         />
 
@@ -1197,18 +1378,23 @@ function MapServiceModal({
             <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
               <div className="text-sm font-semibold text-zc-text">Selected Service</div>
               <div className="mt-1 text-sm text-zc-muted">
-                <span className="font-mono font-semibold text-zc-text">{service?.code || "—"}</span> • {service?.name || "—"}
+                <span className="font-mono font-semibold text-zc-text">{service?.code || "--"}</span> {" - "} {service?.name || "--"}
               </div>
               <div className="mt-1 text-xs text-zc-muted">
-                Charge unit: <span className="font-semibold">{service?.chargeUnit || "—"}</span>
+                Charge unit: <span className="font-semibold">{service?.chargeUnit || "--"}</span>
               </div>
+              {current?.id && !current.effectiveTo ? (
+                <div className="mt-2 text-xs text-zc-muted">
+                  Current mapping will be closed at <span className="font-semibold">effectiveFrom</span> before creating the new mapping.
+                </div>
+              ) : null}
             </div>
 
             <div className="grid gap-2">
               <Label>Find Charge Master</Label>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zc-muted" />
-                <Input value={cmQ} onChange={(e) => setCmQ(e.target.value)} placeholder="Search by code/name…" className="pl-10" />
+                <Input value={cmQ} onChange={(e) => setCmQ(e.target.value)} placeholder="Search by code/name..." className="pl-10" />
               </div>
               <div className="rounded-xl border border-zc-border">
                 <Table>
@@ -1240,23 +1426,27 @@ function MapServiceModal({
                     ) : (
                       cmRows.map((cm) => {
                         const picked = pickedCm?.id === cm.id;
-                        const isMismatch = mismatch(service?.chargeUnit || null, cm.chargeUnit || null);
+                        const mm = unitMismatch(service?.chargeUnit ?? null, cm.chargeUnit ?? null);
                         return (
                           <TableRow key={cm.id} className={picked ? "bg-zc-panel/30" : ""}>
                             <TableCell className="font-mono text-xs">
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-zc-text">{cm.code}</span>
-                                <span className="text-[11px] text-zc-muted">{String(cm.id).slice(0, 8)}…</span>
+                                <span className="text-[11px] text-zc-muted">{String(cm.id).slice(0, 8)}...</span>
                               </div>
                             </TableCell>
                             <TableCell>
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-zc-text">{cm.name}</span>
-                                {isMismatch ? <Badge variant="warning" className="w-fit">Unit mismatch</Badge> : null}
+                                {mm ? (
+                                  <Badge variant="warning" className="w-fit">
+                                    Unit mismatch
+                                  </Badge>
+                                ) : null}
                               </div>
                             </TableCell>
                             <TableCell>
-                              <Badge variant="secondary">{cm.chargeUnit || "—"}</Badge>
+                              <Badge variant="secondary">{cm.chargeUnit || "--"}</Badge>
                             </TableCell>
                             <TableCell>
                               <Button variant={picked ? "primary" : "outline"} size="sm" onClick={() => setPickedCm(cm)}>
@@ -1283,12 +1473,12 @@ function MapServiceModal({
               <div className="grid gap-2">
                 <Label>Effective From</Label>
                 <Input type="datetime-local" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
-                <div className="text-xs text-zc-muted">Backend will close overlaps and keep only one active mapping.</div>
+                <div className="text-xs text-zc-muted">If a current mapping exists, it will be closed at this timestamp.</div>
               </div>
 
               <div className="grid gap-2">
                 <Label>Notes (optional)</Label>
-                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Internal reason for mapping change…" className="min-h-[42px]" />
+                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Internal reason for mapping change..." className="min-h-[42px]" />
               </div>
             </div>
 
@@ -1298,21 +1488,16 @@ function MapServiceModal({
                   <div>
                     <div className="text-sm font-semibold text-zc-text">Selected Charge Master</div>
                     <div className="mt-1 text-sm text-zc-muted">
-                      <span className="font-mono font-semibold text-zc-text">{pickedCm.code}</span> • {pickedCm.name}
+                      <span className="font-mono font-semibold text-zc-text">{pickedCm.code}</span> {" - "} {pickedCm.name}
                     </div>
                     <div className="mt-1 text-xs text-zc-muted">
-                      Charge unit: <span className="font-semibold">{pickedCm.chargeUnit || "—"}</span>
+                      Charge unit: <span className="font-semibold">{pickedCm.chargeUnit || "--"}</span>
                     </div>
                   </div>
-
-                  {mismatch(service?.chargeUnit || null, pickedCm.chargeUnit || null) ? (
-                    <Badge variant="warning" className="mt-1">
-                      Unit mismatch (FixIt)
-                    </Badge>
+                  {unitMismatch(service?.chargeUnit ?? null, pickedCm.chargeUnit ?? null) ? (
+                    <Badge variant="warning">Unit mismatch</Badge>
                   ) : (
-                    <Badge variant="ok" className="mt-1">
-                      Unit aligned
-                    </Badge>
+                    <Badge variant="ok">Unit OK</Badge>
                   )}
                 </div>
               </div>
@@ -1324,9 +1509,8 @@ function MapServiceModal({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={saving || !pickedCm || !service}>
-            {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Save Mapping
+          <Button variant="primary" onClick={save} disabled={saving || !pickedCm?.id || !service?.id}>
+            {saving ? "Saving..." : "Save Mapping"}
           </Button>
         </DialogFooter>
       </DialogContent>

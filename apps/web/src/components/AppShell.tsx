@@ -77,7 +77,7 @@ const NAV_WORKSPACES: NavNode[] = [
       { label: "Overview", href: "/superadmin/dashboard" },
       { label: "Branches", href: "/superadmin/branches" },
       { label: "Policy Governance", href: "/superadmin/policy" },
-      { label: "Policy Presets", href: "/superadmin/policy/presets"},
+      { label: "Policy Presets", href: "/superadmin/policy/presets" },
       { label: "Policies", href: "/superadmin/policy/policies" },
       { label: "Approvals", href: "/superadmin/policy/approvals" },
       { label: "Audit Trail", href: "/superadmin/policy/audit" },
@@ -91,6 +91,14 @@ const NAV_WORKSPACES: NavNode[] = [
     children: [
 
       { label: "Overview", href: "/superadmin/infrastructure" },
+      {
+        type: "group",
+        label: "Org & Clinical Structure",
+        children: [
+          { label: "Facilities", href: "/superadmin/infrastructure/facilities" },
+          { label: "Departments", href: "/superadmin/infrastructure/departments" },
+        ],
+      },
       {
         type: "group",
         label: "Infra Core",
@@ -112,7 +120,7 @@ const NAV_WORKSPACES: NavNode[] = [
           { label: "Equipment Register", href: "/superadmin/infrastructure/equipment" },
         ],
       },
-       {
+      {
         type: "group",
         label: "Billing Setup",
         children: [
@@ -134,7 +142,7 @@ const NAV_WORKSPACES: NavNode[] = [
           { label: "Service Availability", href: "/superadmin/infrastructure/service-availability" },
         ],
       },
-     
+
       {
         type: "group",
         label: "Readiness & Ops",
@@ -144,7 +152,7 @@ const NAV_WORKSPACES: NavNode[] = [
           { label: "Bulk Import (CSV/XLS)", href: "/superadmin/infrastructure/import" },
         ],
       },
-      
+
     ],
   },
   {
@@ -385,14 +393,14 @@ const ALL_NAV_ITEMS = NAV_GROUPS.flatMap((group) =>
       type: "Parent" | "Child";
       parent?: string;
     }[] = [
-      {
-        label: item.label,
-        href: item.href,
-        icon: item.icon,
-        group: group.title,
-        type: "Parent",
-      },
-    ];
+        {
+          label: item.label,
+          href: item.href,
+          icon: item.icon,
+          group: group.title,
+          type: "Parent",
+        },
+      ];
 
     const childLinks = flattenChildLinks(item.children);
     if (childLinks.length) {
@@ -503,7 +511,7 @@ export function AppShell({
   const [openMap, setOpenMap] = React.useState<Record<string, boolean>>({});
   const [groupOpenMap, setGroupOpenMap] = React.useState<Record<string, boolean>>({});
   const [navQuery, setNavQuery] = React.useState("");
-  
+
   // Command Center State
   const [commandOpen, setCommandOpen] = React.useState(false);
   const [commandQuery, setCommandQuery] = React.useState("");
@@ -920,7 +928,7 @@ export function AppShell({
                         const hasActiveChild = flattenChildLinks(node.children).some(({ link }) =>
                           isActivePath(pathname, link.href)
                         );
-                        const open = !collapsed && ((openMap[node.href] ?? true) || hasActiveChild);
+                        const open = !collapsed && (openMap[node.href] ?? true);
 
                         const linkBase = cn(
                           "group flex min-w-0 items-center gap-3 rounded-lg",

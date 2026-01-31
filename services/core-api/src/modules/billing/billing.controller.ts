@@ -3,14 +3,8 @@ import { ApiTags } from "@nestjs/swagger";
 import { Roles } from "../auth/roles.decorator";
 import type { Principal } from "../auth/access-policy.service";
 import { BillingService } from "./billing.service";
-import {
-  ActivateTariffPlanDto,
-  CreateTariffPlanDto,
-  UpdateTariffPlanDto,
-  UpsertTariffRateDto,
-  CreateTaxCodeDto,
-  UpdateTaxCodeDto,
-} from "./dto";
+import { ActivateTariffPlanDto, CreateTariffPlanDto, UpdateTariffPlanDto, UpsertTariffRateDto, UpdateTariffRateDto, CreateTaxCodeDto, UpdateTaxCodeDto,SetDefaultTariffPlanDto  } from "./dto";
+
 
 @ApiTags("billing")
 @Controller("billing")
@@ -30,8 +24,20 @@ export class BillingController {
     @Query("branchId") branchId?: string,
     @Query("kind") kind?: string,
     @Query("status") status?: string,
+    @Query("q") q?: string,
+    @Query("includeInactive") includeInactive?: string,
+    @Query("includeRefs") includeRefs?: string,
+    @Query("take") take?: string,
   ) {
-    return this.svc.listTariffPlans(this.principal(req), { branchId: branchId ?? null, kind, status });
+    return this.svc.listTariffPlans(this.principal(req), {
+      branchId: branchId ?? null,
+      kind,
+      status,
+      q,
+      includeInactive: includeInactive === "true",
+      includeRefs: includeRefs === "true",
+      take: take ? Number(take) : undefined,
+    });
   }
 
   @Get("tariff-plans/:id")
@@ -58,7 +64,10 @@ export class BillingController {
   retire(@Req() req: any, @Param("id") id: string) {
     return this.svc.retireTariffPlan(this.principal(req), id);
   }
-
+   @Post("tariff-plans/:id/default")
+  setDefaultPlan(@Req() req: any, @Param("id") id: string, @Body() dto: SetDefaultTariffPlanDto) {
+    return this.svc.setTariffPlanDefault(this.principal(req), id, dto);
+  }
   // -------- Tariff Rates
 
   @Get("tariff-plans/:tariffPlanId/rates")
@@ -88,7 +97,44 @@ export class BillingController {
   ) {
     return this.svc.closeCurrentTariffRate(this.principal(req), tariffPlanId, chargeMasterItemId, effectiveTo);
   }
+  @Get("tariff-rates")
+  listRatesDirect(
+    @Req() req: any,
+    @Query("tariffPlanId") tariffPlanId: string,
+    @Query("chargeMasterItemId") chargeMasterItemId?: string,
+    @Query("includeHistory") includeHistory?: string,
+    @Query("includeRefs") includeRefs?: string,
+  ) {
+    return this.svc.listTariffRates(this.principal(req), tariffPlanId, {
+      chargeMasterItemId,
+      includeHistory: includeHistory === "true",
+      includeRefs: includeRefs === "true",
+    });
+  }
 
+  @Post("tariff-rates")
+  upsertRateDirect(@Req() req: any, @Body() dto: UpsertTariffRateDto) {
+    return this.svc.upsertTariffRate(this.principal(req), dto, dto.tariffPlanId);
+  }
+
+  @Patch("tariff-rates/:id")
+  updateRateById(@Req() req: any, @Param("id") id: string, @Body() dto: UpdateTariffRateDto) {
+    return this.svc.updateTariffRateById(this.principal(req), id, dto);
+  }
+
+  @Post("tariff-rates/:id/close")
+  closeRateById(
+    @Req() req: any,
+    @Param("id") id: string,
+    @Query("effectiveTo") effectiveTo: string,
+  ) {
+    return this.svc.closeTariffRateById(this.principal(req), id, effectiveTo);
+  }
+
+  @Delete("tariff-rates/:id")
+  deactivateRateById(@Req() req: any, @Param("id") id: string) {
+    return this.svc.deactivateTariffRateById(this.principal(req), id);
+  }
   // -------- Legacy aliases (keeps your UI from breaking if it used older endpoints)
   @Get("tariffs")
   listPlansAlias(@Req() req: any, @Query("branchId") branchId?: string) {

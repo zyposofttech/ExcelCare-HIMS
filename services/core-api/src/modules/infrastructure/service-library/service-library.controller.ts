@@ -68,34 +68,49 @@ export class ServiceLibraryController {
     });
   }
 
+  // ✅ FIX: accept branchId
   @Get("code-sets/:id")
   @Permissions(PERM.INFRA_CODE_SET_READ)
-  async getCodeSet(@Req() req: any, @Param("id") id: string) {
-    return this.svc.getCodeSet(this.principal(req), id);
+  async getCodeSet(@Req() req: any, @Param("id") id: string, @Query("branchId") branchId?: string) {
+    return this.svc.getCodeSet(this.principal(req), id, branchId ?? null);
   }
 
+  // ✅ FIX: accept branchId
   @Patch("code-sets/:id")
   @Permissions(PERM.INFRA_CODE_SET_UPDATE)
-  async updateCodeSet(@Req() req: any, @Param("id") id: string, @Body() dto: UpdateCodeSetDto) {
-    return this.svc.updateCodeSet(this.principal(req), id, dto);
+  async updateCodeSet(
+    @Req() req: any,
+    @Param("id") id: string,
+    @Body() dto: UpdateCodeSetDto,
+    @Query("branchId") branchId?: string,
+  ) {
+    return this.svc.updateCodeSet(this.principal(req), id, dto, branchId ?? null);
   }
 
   // ---- Entries
+  // ✅ FIX: accept branchId
   @Get("code-sets/:id/entries")
   @Permissions(PERM.INFRA_CODE_SET_READ)
-  async listEntries(@Req() req: any, @Param("id") id: string, @Query("q") q?: string) {
-    return this.svc.listEntries(this.principal(req), id, q);
+  async listEntries(@Req() req: any, @Param("id") id: string, @Query("q") q?: string, @Query("branchId") branchId?: string) {
+    return this.svc.listEntries(this.principal(req), id, q, branchId ?? null);
   }
 
+  // ✅ FIX: accept branchId
   @Post("code-sets/:id/entries")
   @Permissions(PERM.INFRA_CODE_SET_UPDATE)
-  async upsertEntry(@Req() req: any, @Param("id") id: string, @Body() dto: UpsertCodeEntryDto) {
-    return this.svc.upsertEntry(this.principal(req), id, dto);
+  async upsertEntry(@Req() req: any, @Param("id") id: string, @Body() dto: UpsertCodeEntryDto, @Query("branchId") branchId?: string) {
+    return this.svc.upsertEntry(this.principal(req), id, dto, branchId ?? null);
   }
 
+  // ✅ FIX: accept branchId
   @Delete("code-sets/:id/entries/:code")
   @Permissions(PERM.INFRA_CODE_SET_UPDATE)
-  async deleteEntry(@Req() req: any, @Param("id") id: string, @Param("code") code: string) {
-    return this.svc.deleteEntry(this.principal(req), id, code);
+  async deleteEntry(
+    @Req() req: any,
+    @Param("id") id: string,
+    @Param("code") code: string,
+    @Query("branchId") branchId?: string,
+  ) {
+    return this.svc.deleteEntry(this.principal(req), id, code, branchId ?? null);
   }
 }

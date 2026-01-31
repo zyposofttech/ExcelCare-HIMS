@@ -182,7 +182,8 @@ async function apiTry<T>(primary: string, fallback: string, init?: RequestInit):
   try {
     return await apiFetch<T>(primary, init as any);
   } catch (e: any) {
-    if (e instanceof ApiError && e.status === 404) {
+    // Fallback for legacy endpoints / permission differences
+    if (e instanceof ApiError && (e.status === 404 || e.status === 403)) {
       return await apiFetch<T>(fallback, init as any);
     }
     throw e;
@@ -251,11 +252,10 @@ export default function SuperAdminTaxCodesPage() {
         includeCounts: "true",
       });
 
-      // Primary: /api/billing/tax-codes
-      // Fallback: /api/infrastructure/tax-codes
+      // Prefer infra endpoints (matches this module). Keep billing fallback for legacy compatibility.
       const res = await apiTry<any>(
-        `/api/billing/tax-codes?${qs}`,
         `/api/infrastructure/tax-codes?${qs}`,
+        `/api/billing/tax-codes?${qs}`,
       );
 
       const list: TaxCodeRow[] = Array.isArray(res) ? res : (res?.rows || []);
@@ -393,8 +393,8 @@ export default function SuperAdminTaxCodesPage() {
     setBusy(true);
     try {
       await apiTry(
-        `/api/billing/tax-codes/${encodeURIComponent(row.id)}`,
         `/api/infrastructure/tax-codes/${encodeURIComponent(row.id)}`,
+        `/api/billing/tax-codes/${encodeURIComponent(row.id)}`,
         { method: "PATCH", body: JSON.stringify({ isActive: nextActive }) },
       );
       toast({ title: "Updated", description: `Tax code is now ${nextActive ? "ACTIVE" : "INACTIVE"}.` });
@@ -414,8 +414,8 @@ export default function SuperAdminTaxCodesPage() {
     setBusy(true);
     try {
       await apiTry(
-        `/api/billing/tax-codes/${encodeURIComponent(row.id)}`,
         `/api/infrastructure/tax-codes/${encodeURIComponent(row.id)}`,
+        `/api/billing/tax-codes/${encodeURIComponent(row.id)}`,
         { method: "DELETE" },
       );
       toast({ title: "Deleted", description: "Tax code deleted." });
@@ -1097,11 +1097,11 @@ function TaxCodeEditModal({
     }
 
     const payload: any = {
-      branchId,
       code,
       name,
       taxType: (form.taxType || "GST") as TaxType,
-      ratePercent: rateStr, // keep precision; backend can store Decimal
+      // Backend DTO expects number (ValidationPipe does not do implicit conversion)
+      ratePercent: rateNum,
       hsnSac: String(form.hsnSac || "").trim() || null,
       isActive: Boolean(form.isActive),
       components,
@@ -1110,16 +1110,17 @@ function TaxCodeEditModal({
     setSaving(true);
     try {
       if (mode === "create") {
+        const qs = buildQS({ branchId });
         await apiTry(
-          `/api/billing/tax-codes`,
-          `/api/infrastructure/tax-codes`,
+          `/api/infrastructure/tax-codes?${qs}`,
+          `/api/billing/tax-codes?${qs}`,
           { method: "POST", body: JSON.stringify(payload) },
         );
       } else {
         if (!editing?.id) throw new Error("Invalid editing row");
         await apiTry(
-          `/api/billing/tax-codes/${encodeURIComponent(editing.id)}`,
           `/api/infrastructure/tax-codes/${encodeURIComponent(editing.id)}`,
+          `/api/billing/tax-codes/${encodeURIComponent(editing.id)}`,
           { method: "PATCH", body: JSON.stringify(payload) },
         );
       }

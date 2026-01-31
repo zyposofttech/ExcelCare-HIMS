@@ -280,7 +280,10 @@ export class ServiceItemsService {
     return created;
   }
 
-  async listServiceItems(principal: Principal, q: { branchId?: string | null; q?: string; includeInactive?: boolean }) {
+  async listServiceItems(
+    principal: Principal,
+    q: { branchId?: string | null; q?: string; includeInactive?: boolean; includeCounts?: boolean },
+  ) {
     const branchId = this.ctx.resolveBranchId(principal, q.branchId ?? null);
     const where: any = { branchId };
     if (!q.includeInactive) where.isActive = true;
@@ -293,7 +296,7 @@ export class ServiceItemsService {
       ];
     }
 
-    return this.ctx.prisma.serviceItem.findMany({
+    const items = await this.ctx.prisma.serviceItem.findMany({
       where,
       orderBy: [{ category: "asc" }, { name: "asc" }],
       include: {
@@ -301,6 +304,55 @@ export class ServiceItemsService {
       },
       take: 500,
     });
+
+    if (!q.includeCounts) return items;
+
+    const serviceItemIds = items.map((item) => item.id);
+    if (!serviceItemIds.length) return items;
+
+    const calendars = await this.ctx.prisma.serviceAvailabilityCalendar.findMany({
+      where: { serviceItemId: { in: serviceItemIds } },
+      select: { id: true, serviceItemId: true },
+    });
+
+    if (!calendars.length) {
+      return items.map((item) => ({
+        ...item,
+        _count: { availabilityRules: 0, availabilityExceptions: 0 },
+      }));
+    }
+
+    const calendarIds = calendars.map((c) => c.id);
+
+    const [rulesCounts, blackoutCounts] = await Promise.all([
+      this.ctx.prisma.serviceAvailabilityRule.groupBy({
+        by: ["calendarId"],
+        _count: { _all: true },
+        where: { calendarId: { in: calendarIds } },
+      }),
+      this.ctx.prisma.serviceBlackout.groupBy({
+        by: ["calendarId"],
+        _count: { _all: true },
+        where: { calendarId: { in: calendarIds } },
+      }),
+    ]);
+
+    const rulesByCalendar = new Map(rulesCounts.map((row) => [row.calendarId, row._count._all]));
+    const blackoutsByCalendar = new Map(blackoutCounts.map((row) => [row.calendarId, row._count._all]));
+
+    const countsByService = new Map<string, { availabilityRules: number; availabilityExceptions: number }>();
+    for (const cal of calendars) {
+      const current =
+        countsByService.get(cal.serviceItemId) ?? { availabilityRules: 0, availabilityExceptions: 0 };
+      current.availabilityRules += rulesByCalendar.get(cal.id) ?? 0;
+      current.availabilityExceptions += blackoutsByCalendar.get(cal.id) ?? 0;
+      countsByService.set(cal.serviceItemId, current);
+    }
+
+    return items.map((item) => ({
+      ...item,
+      _count: countsByService.get(item.id) ?? { availabilityRules: 0, availabilityExceptions: 0 },
+    }));
   }
 
   async getServiceItem(principal: Principal, id: string) {

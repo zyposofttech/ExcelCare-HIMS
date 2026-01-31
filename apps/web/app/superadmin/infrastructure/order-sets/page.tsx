@@ -5,32 +5,18 @@ import { AppLink as Link } from "@/components/app-link";
 
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 
 import { apiFetch } from "@/lib/api";
@@ -38,21 +24,20 @@ import { cn } from "@/lib/cn";
 
 import {
   AlertTriangle,
-  ClipboardList,
+  Archive,
+  CheckCircle2,
   ExternalLink,
+  Eye,
   Filter,
+  Layers,
   MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
-  Wrench,
-  Eye,
-  Trash2,
-  CheckCircle2,
   Send,
   UploadCloud,
-  Archive,
-  Layers,
+  Wrench,
+  X,
 } from "lucide-react";
 
 /* -------------------------------------------------------------------------- */
@@ -60,10 +45,15 @@ import {
 /* -------------------------------------------------------------------------- */
 
 type BranchRow = { id: string; code: string; name: string; city: string };
-type DepartmentRow = { id: string; code: string; name: string };
 
 type OrderSetStatus = "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED" | "RETIRED";
-type CareContext = "OPD" | "IPD" | "ER" | "OT" | "DAYCARE" | "TELECONSULT" | "HOMECARE";
+
+/**
+ * Backend expects Prisma enum: CatalogueChannel
+ * In your app this is used across Service Catalogue + Order Sets.
+ * Keep these as the UI defaults (and we also merge any channels seen from API).
+ */
+const DEFAULT_CHANNELS = ["DEFAULT", "QUICK_ORDER", "ORDER_SET", "OT_PICKLIST"] as const;
 
 type ServiceItemRow = {
   id: string;
@@ -72,20 +62,32 @@ type ServiceItemRow = {
   name: string;
   isActive?: boolean;
   isBillable?: boolean;
-  lifecycleStatus?: string | null; // typically PUBLISHED
+  lifecycleStatus?: string | null;
   chargeUnit?: string | null;
   type?: string | null;
 };
 
+type DiagnosticItemLite = { id: string; code: string; name: string };
+type PackageLite = { id: string; code: string; name: string };
+
 type OrderSetItemRow = {
   id: string;
   orderSetId: string;
-  serviceItemId: string;
-  quantity: number;
-  notes?: string | null;
+
+  itemType: "SERVICE_ITEM" | "DIAGNOSTIC_ITEM" | "PACKAGE" | string;
+
+  serviceItemId?: string | null;
+  diagnosticItemId?: string | null;
+  pkgId?: string | null;
+
   sortOrder: number;
+  quantity?: number; // DB has it; UI doesn't edit it
   isActive: boolean;
-  serviceItem?: ServiceItemRow;
+
+  serviceItem?: ServiceItemRow | null;
+  diagnosticItem?: DiagnosticItemLite | null;
+  pkg?: PackageLite | null;
+
   createdAt?: string;
   updatedAt?: string;
 };
@@ -93,19 +95,16 @@ type OrderSetItemRow = {
 type OrderSetRow = {
   id: string;
   branchId: string;
+
   code: string;
   name: string;
   description?: string | null;
 
-  departmentId?: string | null;
-  department?: DepartmentRow | null;
-
-  context?: CareContext | null;
-
+  channel: string; // CatalogueChannel (string)
   status: OrderSetStatus;
   version: number;
 
-  effectiveFrom?: string;
+  effectiveFrom?: string | null;
   effectiveTo?: string | null;
 
   createdAt?: string;
@@ -118,9 +117,8 @@ type OrderSetVersionRow = {
   id: string;
   orderSetId: string;
   version: number;
-  status: OrderSetStatus;
-  snapshot: any;
-  effectiveFrom: string;
+  status?: string | null;
+  effectiveFrom?: string | null;
   effectiveTo?: string | null;
   createdAt?: string;
 };
@@ -169,6 +167,22 @@ function Skeleton({ className }: { className?: string }) {
   return <div className={cn("animate-pulse rounded-md bg-zc-panel/30", className)} />;
 }
 
+function statusBadge(s: OrderSetStatus) {
+  switch (s) {
+    case "PUBLISHED":
+      return <Badge variant="ok">PUBLISHED</Badge>;
+    case "IN_REVIEW":
+      return <Badge variant="warning">IN REVIEW</Badge>;
+    case "RETIRED":
+      return <Badge variant="destructive">RETIRED</Badge>;
+    case "APPROVED":
+      return <Badge variant="secondary">APPROVED</Badge>;
+    case "DRAFT":
+    default:
+      return <Badge variant="secondary">DRAFT</Badge>;
+  }
+}
+
 function drawerClassName(extra?: string) {
   return cn(
     "left-auto right-0 top-0 h-screen w-[95vw] max-w-[980px] translate-x-0 translate-y-0",
@@ -180,53 +194,25 @@ function drawerClassName(extra?: string) {
   );
 }
 
-function statusBadge(status: OrderSetStatus) {
-  switch (status) {
-    case "PUBLISHED":
-      return <Badge variant="ok">PUBLISHED</Badge>;
-    case "APPROVED":
-      return <Badge variant="secondary">APPROVED</Badge>;
-    case "IN_REVIEW":
-      return <Badge variant="warning">IN REVIEW</Badge>;
-    case "RETIRED":
-      return <Badge variant="destructive">RETIRED</Badge>;
-    default:
-      return <Badge variant="secondary">DRAFT</Badge>;
-  }
+function itemLabel(it: OrderSetItemRow) {
+  const code = it.serviceItem?.code || it.diagnosticItem?.code || it.pkg?.code || "—";
+  const name = it.serviceItem?.name || it.diagnosticItem?.name || it.pkg?.name || "—";
+  return { code, name };
 }
 
-function ModalHeader({
-  title,
-  description,
-  onClose,
-}: {
-  title: string;
-  description?: string;
-  onClose: () => void;
-}) {
-  void onClose;
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-3 text-indigo-700 dark:text-indigo-400">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/30">
-            <Wrench className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-          </div>
-          {title}
-        </DialogTitle>
-        {description ? <DialogDescription>{description}</DialogDescription> : null}
-      </DialogHeader>
+function uniq<T>(arr: T[]) {
+  return Array.from(new Set(arr));
+}
 
-      <Separator className="my-4" />
-    </>
-  );
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === "string" && v.trim().length > 0;
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                   Page                                     */
+/*                             Page: Order Sets                                */
 /* -------------------------------------------------------------------------- */
 
-export default function SuperAdminOrderSetsPage() {
+export default function Page() {
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = React.useState<"orderSets" | "guide">("orderSets");
@@ -239,30 +225,44 @@ export default function SuperAdminOrderSetsPage() {
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
   const [branchId, setBranchId] = React.useState<string>("");
 
-  const [departments, setDepartments] = React.useState<DepartmentRow[]>([]);
   const [rows, setRows] = React.useState<OrderSetRow[]>([]);
   const [selectedId, setSelectedId] = React.useState<string>("");
   const [selected, setSelected] = React.useState<OrderSetRow | null>(null);
 
-  // filters
   const [q, setQ] = React.useState("");
   const [status, setStatus] = React.useState<OrderSetStatus | "all">("all");
-  const [context, setContext] = React.useState<CareContext | "all">("all");
+  const [channel, setChannel] = React.useState<string | "all">("all");
   const [includeInactive, setIncludeInactive] = React.useState(false);
 
-  // modals
-  const [editOpen, setEditOpen] = React.useState(false);
-  const [editMode, setEditMode] = React.useState<"create" | "edit">("create");
-  const [editing, setEditing] = React.useState<OrderSetRow | null>(null);
-
+  const [editorOpen, setEditorOpen] = React.useState(false);
   const [itemsOpen, setItemsOpen] = React.useState(false);
-
   const [versionsOpen, setVersionsOpen] = React.useState(false);
-  const [versions, setVersions] = React.useState<OrderSetVersionRow[]>([]);
-  const [snapshotOpen, setSnapshotOpen] = React.useState(false);
-  const [snapshotPayload, setSnapshotPayload] = React.useState<any>(null);
+
+  const [editing, setEditing] = React.useState<OrderSetRow | null>(null);
+  const [versionsFor, setVersionsFor] = React.useState<OrderSetRow | null>(null);
 
   const mustSelectBranch = !branchId;
+
+  const channelOptions = React.useMemo<string[]>(() => {
+    const seen = rows.map((r) => r.channel).filter(isNonEmptyString);
+    const base: string[] = [...DEFAULT_CHANNELS, ...seen];
+    return uniq(base).filter(isNonEmptyString);
+  }, [rows]);
+
+  const stats = React.useMemo(() => {
+    const total = rows.length;
+    const byStatus = rows.reduce<Record<string, number>>((acc, r) => {
+      acc[r.status] = (acc[r.status] || 0) + 1;
+      return acc;
+    }, {});
+    const published = byStatus.PUBLISHED || 0;
+    const draft = byStatus.DRAFT || 0;
+    const review = byStatus.IN_REVIEW || 0;
+    const approved = byStatus.APPROVED || 0;
+    const retired = byStatus.RETIRED || 0;
+    const totalItems = rows.reduce((n, r) => n + (r.items || []).filter((it) => it.isActive !== false).length, 0);
+    return { total, published, draft, review, approved, retired, totalItems };
+  }, [rows]);
 
   async function loadBranches(): Promise<string | null> {
     const list = (await apiFetch<BranchRow[]>("/api/branches")) || [];
@@ -277,48 +277,32 @@ export default function SuperAdminOrderSetsPage() {
     return next;
   }
 
-  async function loadDepartments() {
-    if (!branchId) return;
-    try {
-      const deps =
-        (await apiFetch<DepartmentRow[]>(
-          `/api/infrastructure/departments?${buildQS({ branchId })}`,
-        )) || [];
-      setDepartments(deps);
-    } catch {
-      setDepartments([]);
-    }
-  }
-
-  async function loadOrderSets(showToast = false) {
-    if (!branchId) return;
+  async function loadOrderSets(showToast = false, targetBranchId?: string) {
+    const bid = targetBranchId || branchId;
+    if (!bid) return;
     setErr(null);
     setLoading(true);
     try {
-      const res = (await apiFetch<OrderSetRow[]>(
-        `/api/infrastructure/order-sets?${buildQS({
-          branchId,
-          q: q.trim() || undefined,
-          status: status !== "all" ? status : undefined,
-          context: context !== "all" ? context : undefined,
-          includeInactive: includeInactive ? "true" : undefined,
-        })}`,
-      )) as any;
+      const list =
+        (await apiFetch<OrderSetRow[]>(
+          `/api/infrastructure/order-sets?${buildQS({
+            branchId: bid,
+            q: q.trim() || undefined,
+            status: status !== "all" ? status : undefined,
+          })}`,
+        )) || [];
 
-      const list: OrderSetRow[] = Array.isArray(res) ? res : (res?.rows || []);
-      setRows(list);
+      let visible = list;
+      if (!includeInactive) visible = visible.filter((r) => r.status !== "RETIRED");
+      if (channel !== "all") visible = visible.filter((r) => String(r.channel) === String(channel));
 
-      const nextSelected =
-        selectedId && list.some((x) => x.id === selectedId) ? selectedId : list[0]?.id || "";
+      setRows(visible);
+
+      const nextSelected = selectedId && visible.some((x) => x.id === selectedId) ? selectedId : visible[0]?.id || "";
       setSelectedId(nextSelected);
-      setSelected(nextSelected ? list.find((x) => x.id === nextSelected) || null : null);
+      setSelected(nextSelected ? visible.find((x) => x.id === nextSelected) || null : null);
 
-      if (showToast) {
-        toast({
-          title: "Order Sets refreshed",
-          description: "Loaded latest order sets for this branch.",
-        });
-      }
+      if (showToast) toast({ title: "Order sets refreshed", description: "Loaded latest order sets for this branch." });
     } catch (e: any) {
       const msg = e?.message || "Failed to load order sets";
       setErr(msg);
@@ -340,7 +324,7 @@ export default function SuperAdminOrderSetsPage() {
         setLoading(false);
         return;
       }
-      await Promise.all([loadDepartments(), loadOrderSets(false)]);
+      await loadOrderSets(false, bid);
       if (showToast) toast({ title: "Ready", description: "Branch scope and order sets are up to date." });
     } catch (e: any) {
       const msg = e?.message || "Refresh failed";
@@ -358,12 +342,6 @@ export default function SuperAdminOrderSetsPage() {
 
   React.useEffect(() => {
     if (!branchId) return;
-    void loadDepartments();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId]);
-
-  React.useEffect(() => {
-    if (!branchId) return;
     setSelectedId("");
     setSelected(null);
     void loadOrderSets(false);
@@ -375,7 +353,7 @@ export default function SuperAdminOrderSetsPage() {
     const t = setTimeout(() => void loadOrderSets(false), 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, status, context]);
+  }, [q, status, channel]);
 
   React.useEffect(() => {
     if (!selectedId) {
@@ -392,7 +370,7 @@ export default function SuperAdminOrderSetsPage() {
 
     setQ("");
     setStatus("all");
-    setContext("all");
+    setChannel("all");
     setIncludeInactive(false);
     setSelectedId("");
     setSelected(null);
@@ -400,7 +378,7 @@ export default function SuperAdminOrderSetsPage() {
     setErr(null);
     setLoading(true);
     try {
-      await Promise.all([loadDepartments(), loadOrderSets(false)]);
+      await loadOrderSets(false, nextId);
       toast({ title: "Branch scope changed", description: "Loaded order sets for selected branch." });
     } catch (e: any) {
       toast({ title: "Load failed", description: e?.message || "Request failed", variant: "destructive" as any });
@@ -409,48 +387,25 @@ export default function SuperAdminOrderSetsPage() {
     }
   }
 
-  const stats = React.useMemo(() => {
-    const total = rows.length;
-    const byStatus = rows.reduce<Record<string, number>>((acc, r) => {
-      acc[r.status] = (acc[r.status] || 0) + 1;
-      return acc;
-    }, {});
-    const published = byStatus.PUBLISHED || 0;
-    const draft = byStatus.DRAFT || 0;
-    const review = byStatus.IN_REVIEW || 0;
-    const approved = byStatus.APPROVED || 0;
-    const retired = byStatus.RETIRED || 0;
-
-    const totalItems = rows.reduce((n, r) => n + (r.items?.length || 0), 0);
-    return { total, published, draft, review, approved, retired, totalItems };
-  }, [rows]);
-
   function openCreate() {
-    setEditMode("create");
     setEditing(null);
-    setEditOpen(true);
+    setEditorOpen(true);
   }
 
   function openEdit(row: OrderSetRow) {
-    setEditMode("edit");
     setEditing(row);
-    setEditOpen(true);
+    setEditorOpen(true);
   }
 
-  async function openVersions(row: OrderSetRow) {
+  function openItems(row: OrderSetRow) {
+    setSelected(row);
+    setSelectedId(row.id);
+    setItemsOpen(true);
+  }
+
+  function openVersions(row: OrderSetRow) {
+    setVersionsFor(row);
     setVersionsOpen(true);
-    setVersions([]);
-    if (!row?.id) return;
-    try {
-      const v =
-        (await apiFetch<OrderSetVersionRow[]>(
-          `/api/infrastructure/order-sets/${encodeURIComponent(row.id)}/versions`,
-        )) || [];
-      setVersions(v);
-    } catch (e: any) {
-      toast({ title: "Failed to load versions", description: e?.message || "Request failed", variant: "destructive" as any });
-      setVersions([]);
-    }
   }
 
   async function workflow(row: OrderSetRow, action: "submit" | "approve" | "publish" | "retire") {
@@ -472,7 +427,7 @@ export default function SuperAdminOrderSetsPage() {
   }
 
   return (
-    <AppShell title="Infrastructure • Order Sets">
+    <AppShell title="Infrastructure ??? Order Sets">
       <div className="grid gap-6">
         {/* Header */}
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -482,36 +437,24 @@ export default function SuperAdminOrderSetsPage() {
             </span>
             <div className="min-w-0">
               <div className="text-3xl font-semibold tracking-tight">Order Sets</div>
-              <div className="mt-1 text-sm text-zc-muted">
-                Build curated “bundles” of service items for quick ordering (OPD/IPD/ER/OT).
-              </div>
+              <div className="mt-1 text-sm text-zc-muted">Create order sets and manage their service items.</div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-nowrap overflow-x-auto">
-            <Button
-              variant="outline"
-              className="px-5 gap-2 whitespace-nowrap shrink-0"
-              onClick={() => refreshAll(true)}
-              disabled={loading || busy}
-            >
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" className="px-5 gap-2" onClick={() => refreshAll(true)} disabled={loading || busy}>
               <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
               Refresh
             </Button>
 
-            <Button variant="outline" asChild className="px-5 gap-2 whitespace-nowrap shrink-0">
+            <Button variant="outline" asChild className="px-5 gap-2">
               <Link href="/superadmin/infrastructure/fixit">
                 <Wrench className="h-4 w-4" />
                 FixIt Inbox
               </Link>
             </Button>
 
-            <Button
-              variant="primary"
-              className="px-5 gap-2 whitespace-nowrap shrink-0"
-              onClick={openCreate}
-              disabled={mustSelectBranch}
-            >
+            <Button variant="primary" className="px-5 gap-2" onClick={openCreate} disabled={mustSelectBranch}>
               <Plus className="h-4 w-4" />
               New Order Set
             </Button>
@@ -537,8 +480,7 @@ export default function SuperAdminOrderSetsPage() {
           <CardHeader className="pb-4">
             <CardTitle className="text-base">Overview</CardTitle>
             <CardDescription className="text-sm">
-              Pick a branch → create order set → add service items with quantities → publish.
-              Published order sets should be consumable in ordering screens.
+              Pick a branch {"->"} create order set {"->"} add service items {"->"} publish. Order sets should stay lean for quick ordering.
             </CardDescription>
           </CardHeader>
 
@@ -550,11 +492,13 @@ export default function SuperAdminOrderSetsPage() {
                   <SelectValue placeholder="Select branch..." />
                 </SelectTrigger>
                 <SelectContent className="max-h-[320px] overflow-y-auto">
-                  {branches.filter((b) => b.id).map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.code} - {b.name} ({b.city})
-                    </SelectItem>
-                  ))}
+                  {branches
+                    .filter((b) => b.id)
+                    .map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.code} - {b.name} ({b.city})
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -569,7 +513,7 @@ export default function SuperAdminOrderSetsPage() {
                 <div className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-300">{stats.published}</div>
               </div>
               <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-900/50 dark:bg-indigo-900/10">
-                <div className="text-xs font-medium text-indigo-600 dark:text-indigo-400">Total Items</div>
+                <div className="text-xs font-medium text-indigo-600 dark:text-indigo-400">Total Set Items</div>
                 <div className="mt-1 text-lg font-bold text-indigo-700 dark:text-indigo-300">{stats.totalItems}</div>
               </div>
             </div>
@@ -580,7 +524,7 @@ export default function SuperAdminOrderSetsPage() {
                 <Input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search by code/name…"
+                  placeholder="Search by code/name..."
                   className="pl-10"
                   disabled={mustSelectBranch}
                 />
@@ -590,7 +534,7 @@ export default function SuperAdminOrderSetsPage() {
                 <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
                   <Switch checked={includeInactive} onCheckedChange={setIncludeInactive} disabled={mustSelectBranch} />
                   <div className="text-sm">
-                    <div className="font-semibold text-zc-text">Include inactive</div>
+                    <div className="font-semibold text-zc-text">Include retired</div>
                     <div className="text-xs text-zc-muted">Usually keep off</div>
                   </div>
                 </div>
@@ -634,20 +578,18 @@ export default function SuperAdminOrderSetsPage() {
                   </div>
 
                   <div className="md:col-span-4">
-                    <Label className="text-xs text-zc-muted">Context</Label>
-                    <Select value={context} onValueChange={(v) => setContext(v as any)} disabled={mustSelectBranch}>
+                    <Label className="text-xs text-zc-muted">Channel</Label>
+                    <Select value={channel} onValueChange={(v) => setChannel(v)} disabled={mustSelectBranch}>
                       <SelectTrigger className="h-10">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="max-h-[320px] overflow-y-auto">
                         <SelectItem value="all">Any</SelectItem>
-                        <SelectItem value="OPD">OPD</SelectItem>
-                        <SelectItem value="IPD">IPD</SelectItem>
-                        <SelectItem value="ER">ER</SelectItem>
-                        <SelectItem value="OT">OT</SelectItem>
-                        <SelectItem value="DAYCARE">DAYCARE</SelectItem>
-                        <SelectItem value="TELECONSULT">TELECONSULT</SelectItem>
-                        <SelectItem value="HOMECARE">HOMECARE</SelectItem>
+                        {channelOptions.map((c) => (
+                          <SelectItem key={c} value={c}>
+                            {c}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -675,7 +617,7 @@ export default function SuperAdminOrderSetsPage() {
                 <CardDescription>Create order sets and curate service items inside each set.</CardDescription>
               </div>
 
-              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "orderSets" | "guide")}>
                 <TabsList className={cn("h-10 rounded-2xl border border-zc-border bg-zc-panel/20 p-1")}>
                   <TabsTrigger
                     value="orderSets"
@@ -703,160 +645,133 @@ export default function SuperAdminOrderSetsPage() {
           <CardContent className="pb-6">
             <Tabs value={activeTab}>
               <TabsContent value="orderSets" className="mt-0">
-                <div className="grid gap-4 lg:grid-cols-12">
-                  {/* Left list */}
-                  <div className="lg:col-span-5">
-                    <div className="rounded-xl border border-zc-border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-[160px]">Code</TableHead>
-                            <TableHead>Name</TableHead>
-                            <TableHead className="w-[140px]">Status</TableHead>
-                            <TableHead className="w-[56px]" />
+                <div className="rounded-xl border border-zc-border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[180px]">Code</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead className="w-[140px]">Status</TableHead>
+                        <TableHead className="w-[180px]">Effective From</TableHead>
+                        <TableHead className="w-[120px]">Items</TableHead>
+                        <TableHead className="w-[72px]" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {loading ? (
+                        Array.from({ length: 10 }).map((_, i) => (
+                          <TableRow key={i}>
+                            <TableCell colSpan={6}>
+                              <Skeleton className="h-6 w-full" />
+                            </TableCell>
                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {loading ? (
-                            Array.from({ length: 10 }).map((_, i) => (
-                              <TableRow key={i}>
-                                <TableCell colSpan={4}>
-                                  <Skeleton className="h-6 w-full" />
-                                </TableCell>
-                              </TableRow>
-                            ))
-                          ) : rows.length === 0 ? (
-                            <TableRow>
-                              <TableCell colSpan={4}>
-                                <div className="flex items-center justify-center gap-3 py-10 text-sm text-zc-muted">
-                                  <Layers className="h-4 w-4" />
-                                  No order sets found. Create one to begin.
+                        ))
+                      ) : rows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6}>
+                            <div className="flex items-center justify-center gap-3 py-10 text-sm text-zc-muted">
+                              <Layers className="h-4 w-4" />
+                              No order sets found. Create one to begin.
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        rows.map((r) => {
+                          const itemsCount = (r.items || []).filter((it) => it.isActive !== false).length;
+                          return (
+                            <TableRow key={r.id}>
+                              <TableCell className="font-mono text-xs">
+                                <div className="flex flex-col gap-1">
+                                  <span className="font-semibold text-zc-text">{r.code}</span>
+                                  <span className="text-[11px] text-zc-muted">v{r.version ?? 1}</span>
                                 </div>
                               </TableCell>
+                              <TableCell>
+                                <div className="flex flex-col gap-1">
+                                  <span className="font-semibold text-zc-text">{r.name}</span>
+                                  <span className="text-xs text-zc-muted">
+                                    {r.description?.trim() ? r.description : `Channel: ${r.channel || "--"}`}
+                                  </span>
+                                </div>
+                              </TableCell>
+                              <TableCell>{statusBadge(r.status)}</TableCell>
+                              <TableCell className="text-sm text-zc-muted">{fmtDateTime(r.effectiveFrom)}</TableCell>
+                              <TableCell className="text-sm text-zc-muted">{itemsCount}</TableCell>
+                              <TableCell>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-[240px]">
+                                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        setSelected(r);
+                                        setSelectedId(r.id);
+                                        setItemsOpen(true);
+                                      }}
+                                    >
+                                      <Eye className="mr-2 h-4 w-4" />
+                                      Open
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => openEdit(r)}>
+                                      <Wrench className="mr-2 h-4 w-4" />
+                                      Edit order set
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => openItems(r)}>
+                                      <Plus className="mr-2 h-4 w-4" />
+                                      Manage items
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => openVersions(r)}>
+                                      <Eye className="mr-2 h-4 w-4" />
+                                      View versions
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => workflow(r, "submit")}>
+                                      <Send className="mr-2 h-4 w-4" />
+                                      Submit for review
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => workflow(r, "approve")}>
+                                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                                      Approve
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => workflow(r, "publish")}>
+                                      <UploadCloud className="mr-2 h-4 w-4" />
+                                      Publish
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => workflow(r, "retire")}>
+                                      <Archive className="mr-2 h-4 w-4" />
+                                      Retire
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableCell>
                             </TableRow>
-                          ) : (
-                            rows.map((r) => (
-                              <TableRow
-                                key={r.id}
-                                className={cn("cursor-pointer", selectedId === r.id ? "bg-zc-panel/30" : "")}
-                                onClick={() => setSelectedId(r.id)}
-                              >
-                                <TableCell className="font-mono text-xs">
-                                  <div className="flex flex-col gap-1">
-                                    <span className="font-semibold text-zc-text">{r.code}</span>
-                                    <span className="text-[11px] text-zc-muted">v{r.version ?? 1}</span>
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex flex-col gap-1">
-                                    <span className="font-semibold text-zc-text">{r.name}</span>
-                                    <span className="text-xs text-zc-muted">
-                                      Items: <span className="font-semibold text-zc-text">{r.items?.length || 0}</span>{" "}
-                                      • Context: <span className="font-semibold text-zc-text">{r.context || "—"}</span>
-                                    </span>
-                                  </div>
-                                </TableCell>
-                                <TableCell>{statusBadge(r.status)}</TableCell>
-                                <TableCell onClick={(e) => e.stopPropagation()}>
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                                        <MoreHorizontal className="h-4 w-4" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-[220px]">
-                                      <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem onClick={() => openEdit(r)}>
-                                        <Wrench className="mr-2 h-4 w-4" />
-                                        Edit order set
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() => {
-                                          setSelectedId(r.id);
-                                          setItemsOpen(true);
-                                        }}
-                                      >
-                                        <Plus className="mr-2 h-4 w-4" />
-                                        Manage items
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={() => openVersions(r)}>
-                                        <Eye className="mr-2 h-4 w-4" />
-                                        View versions
-                                      </DropdownMenuItem>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem onClick={() => workflow(r, "submit")}>
-                                        <Send className="mr-2 h-4 w-4" />
-                                        Submit for review
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={() => workflow(r, "approve")}>
-                                        <CheckCircle2 className="mr-2 h-4 w-4" />
-                                        Approve
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={() => workflow(r, "publish")}>
-                                        <UploadCloud className="mr-2 h-4 w-4" />
-                                        Publish
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={() => workflow(r, "retire")}>
-                                        <Archive className="mr-2 h-4 w-4" />
-                                        Retire
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                </TableCell>
-                              </TableRow>
-                            ))
-                          )}
-                        </TableBody>
-                      </Table>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
 
-                      <div className="flex flex-col gap-3 border-t border-zc-border p-4 md:flex-row md:items-center md:justify-between">
-                        <div className="text-sm text-zc-muted">
-                          Total: <span className="font-semibold text-zc-text">{rows.length}</span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button variant="outline" size="sm" className="gap-2" asChild>
-                            <Link href="/superadmin/infrastructure/service-library">
-                              Service Library <ExternalLink className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                          <Button variant="outline" size="sm" className="gap-2" asChild>
-                            <Link href="/superadmin/infrastructure/service-catalogues">
-                              Service Catalogues <ExternalLink className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                        </div>
-                      </div>
+                  <div className="flex flex-col gap-3 border-t border-zc-border p-4 md:flex-row md:items-center md:justify-between">
+                    <div className="text-sm text-zc-muted">
+                      Total: <span className="font-semibold text-zc-text">{rows.length}</span>
                     </div>
-                  </div>
-
-                  {/* Right detail */}
-                  <div className="lg:col-span-7">
-                    {!selected ? (
-                      <Card className="border-zc-border">
-                        <CardHeader className="py-4">
-                          <CardTitle className="text-base">Select an order set</CardTitle>
-                          <CardDescription>Pick an order set from the left list to view details and manage items.</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 text-sm text-zc-muted">
-                            Tip: create separate order sets for common OPD bundles (CBC+CRP, Fever panel) and IPD admission bundles.
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ) : (
-                      <OrderSetDetail
-                        branchId={branchId}
-                        departments={departments}
-                        row={selected}
-                        busy={busy}
-                        onEdit={() => openEdit(selected)}
-                        onManageItems={() => setItemsOpen(true)}
-                        onVersions={() => openVersions(selected)}
-                        onWorkflow={(a) => workflow(selected, a)}
-                        onAfterChange={() => loadOrderSets(false)}
-                      />
-                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="outline" size="sm" className="gap-2" asChild>
+                        <Link href="/superadmin/infrastructure/service-library">
+                          Service Library <ExternalLink className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                      <Button variant="outline" size="sm" className="gap-2" asChild>
+                        <Link href="/superadmin/infrastructure/service-catalogues">
+                          Service Catalogues <ExternalLink className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </TabsContent>
@@ -865,7 +780,7 @@ export default function SuperAdminOrderSetsPage() {
                 <Card className="border-zc-border">
                   <CardHeader className="py-4">
                     <CardTitle className="text-base">How to use Order Sets</CardTitle>
-                    <CardDescription>Order sets are “one-click bundles” for doctors and nurses.</CardDescription>
+                    <CardDescription>Order sets group commonly ordered services into quick panels.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-4">
                     <div className="grid gap-3 md:grid-cols-2">
@@ -874,35 +789,34 @@ export default function SuperAdminOrderSetsPage() {
                           <Badge variant="ok">1</Badge> Create order set (branch scoped)
                         </div>
                         <div className="mt-1 text-sm text-zc-muted">
-                          Use clear codes like <span className="font-mono font-semibold text-zc-text">OPD-FEVER</span>,{" "}
-                          <span className="font-mono font-semibold text-zc-text">IPD-ADMISSION</span>.
+                          Define code/name and channel. Order sets start as <span className="font-semibold">DRAFT</span>.
                         </div>
                       </div>
 
                       <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                         <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                          <Badge variant="ok">2</Badge> Add items with quantities
+                          <Badge variant="ok">2</Badge> Add service items
                         </div>
                         <div className="mt-1 text-sm text-zc-muted">
-                          Example: <span className="font-semibold">IV fluids</span> quantity 2, <span className="font-semibold">CBC</span> quantity 1.
+                          Each order set item references a <span className="font-semibold">Service Item</span>.
                         </div>
                       </div>
 
                       <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                         <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                          <Badge variant="ok">3</Badge> Publish (version snapshot)
+                          <Badge variant="ok">3</Badge> Publish (versioned)
                         </div>
                         <div className="mt-1 text-sm text-zc-muted">
-                          Publishing creates a snapshot for audit. Downstream ordering should use <span className="font-semibold">PUBLISHED</span>.
+                          Publish for clinical use. Retire instead of delete to preserve audit history.
                         </div>
                       </div>
 
                       <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
                         <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                          <Badge variant="ok">4</Badge> Billing readiness
+                          <Badge variant="ok">4</Badge> Keep sets lean
                         </div>
                         <div className="mt-1 text-sm text-zc-muted">
-                          Order sets drive ordering speed. Billing still depends on Service ↔ Charge mapping + Tariffs (GoLive).
+                          Use 10-20 items per set for speed. Use Service Packages for pricing bundles.
                         </div>
                       </div>
                     </div>
@@ -912,10 +826,10 @@ export default function SuperAdminOrderSetsPage() {
                     <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
                       <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
                         <AlertTriangle className="h-4 w-4 text-zc-warn" />
-                        Avoid confusion
+                        Practical tip
                       </div>
                       <div className="mt-1 text-sm text-zc-muted">
-                        Keep order sets clinical/use-case driven. Don’t overload with hundreds of items; create multiple focused sets.
+                        Keep sortOrder consistent and retire older sets when new versions are published.
                       </div>
                     </div>
                   </CardContent>
@@ -926,21 +840,20 @@ export default function SuperAdminOrderSetsPage() {
         </Card>
       </div>
 
-      {/* Create/Edit modal */}
-      <OrderSetEditModal
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        mode={editMode}
+      {/* Editor Drawer */}
+      <OrderSetEditorDrawer
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
         branchId={branchId}
-        departments={departments}
         editing={editing}
+        channels={channelOptions}
         onSaved={async () => {
           toast({ title: "Saved", description: "Order set saved successfully." });
           await loadOrderSets(false);
         }}
       />
 
-      {/* Items drawer */}
+      {/* Items Drawer */}
       <OrderSetItemsDrawer
         open={itemsOpen}
         onOpenChange={setItemsOpen}
@@ -952,455 +865,200 @@ export default function SuperAdminOrderSetsPage() {
         }}
       />
 
-      {/* Versions modal */}
-      <Dialog open={versionsOpen} onOpenChange={setVersionsOpen}>
-        <DialogContent className="sm:max-w-[860px]">
-          <ModalHeader
-            title="Order Set Versions"
-            description="Each publish creates a snapshot. Use this for audit and rollback planning."
-            onClose={() => setVersionsOpen(false)}
-          />
-
-          <div className="grid gap-4">
-            <div className="rounded-xl border border-zc-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[90px]">Version</TableHead>
-                    <TableHead className="w-[140px]">Status</TableHead>
-                    <TableHead className="w-[200px]">Effective From</TableHead>
-                    <TableHead className="w-[200px]">Effective To</TableHead>
-                    <TableHead className="w-[110px]" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {versions.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5}>
-                        <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
-                          <Eye className="h-4 w-4" />
-                          No versions found (publish creates versions).
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    versions.map((v) => (
-                      <TableRow key={v.id}>
-                        <TableCell className="font-mono text-xs font-semibold">v{v.version}</TableCell>
-                        <TableCell>{statusBadge(v.status)}</TableCell>
-                        <TableCell className="text-sm text-zc-muted">{fmtDateTime(v.effectiveFrom)}</TableCell>
-                        <TableCell className="text-sm text-zc-muted">{fmtDateTime(v.effectiveTo || null)}</TableCell>
-                        <TableCell>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-2"
-                            onClick={() => {
-                              setSnapshotPayload(v.snapshot);
-                              setSnapshotOpen(true);
-                            }}
-                          >
-                            <Eye className="h-4 w-4" />
-                            Snapshot
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setVersionsOpen(false)}>
-                Close
-              </Button>
-            </DialogFooter>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Snapshot modal */}
-      <Dialog open={snapshotOpen} onOpenChange={setSnapshotOpen}>
-        <DialogContent className="sm:max-w-[980px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Eye className="h-4 w-4 text-zc-accent" />
-              Version Snapshot
-            </DialogTitle>
-            <DialogDescription>Read-only JSON snapshot stored at publish time.</DialogDescription>
-          </DialogHeader>
-
-          <div className="mt-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-            <pre className="max-h-[60vh] overflow-auto text-xs leading-relaxed text-zc-text">
-              {JSON.stringify(snapshotPayload ?? {}, null, 2)}
-            </pre>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSnapshotOpen(false)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Versions */}
+      <OrderSetVersionsDialog
+        open={versionsOpen}
+        onOpenChange={setVersionsOpen}
+        orderSet={versionsFor}
+      />
     </AppShell>
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/*                            Detail Right Panel                               */
+/*                              Editor Drawer                                 */
 /* -------------------------------------------------------------------------- */
 
-function OrderSetDetail({
-  branchId,
-  departments,
-  row,
-  busy,
-  onEdit,
-  onManageItems,
-  onVersions,
-  onWorkflow,
-}: {
-  branchId: string;
-  departments: DepartmentRow[];
-  row: OrderSetRow;
-  busy: boolean;
-  onEdit: () => void;
-  onManageItems: () => void;
-  onVersions: () => void;
-  onWorkflow: (a: "submit" | "approve" | "publish" | "retire") => void;
-  onAfterChange: () => void;
-}) {
-  void branchId;
-  const dep = row.departmentId ? departments.find((d) => d.id === row.departmentId) : null;
-
-  return (
-    <div className="grid gap-4">
-      <Card className="border-zc-border">
-        <CardHeader className="py-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <CardTitle className="text-base">
-                <span className="font-mono">{row.code}</span> • {row.name}
-              </CardTitle>
-              <CardDescription>
-                {statusBadge(row.status)} <span className="mx-2 text-zc-muted">•</span>
-                Context: <span className="font-semibold text-zc-text">{row.context || "—"}</span>{" "}
-                <span className="mx-2 text-zc-muted">•</span>
-                Version: <span className="font-semibold text-zc-text">v{row.version ?? 1}</span>
-              </CardDescription>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" className="gap-2" onClick={onEdit} disabled={busy}>
-                <Wrench className="h-4 w-4" />
-                Edit
-              </Button>
-              <Button variant="primary" className="gap-2" onClick={onManageItems} disabled={busy}>
-                <Plus className="h-4 w-4" />
-                Manage Items
-              </Button>
-              <Button variant="outline" className="gap-2" onClick={onVersions} disabled={busy}>
-                <Eye className="h-4 w-4" />
-                Versions
-              </Button>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="gap-2" disabled={busy}>
-                    Workflow <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-[220px]">
-                  <DropdownMenuLabel>Workflow actions</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => onWorkflow("submit")}>
-                    <Send className="mr-2 h-4 w-4" />
-                    Submit
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => onWorkflow("approve")}>
-                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Approve
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => onWorkflow("publish")}>
-                    <UploadCloud className="mr-2 h-4 w-4" />
-                    Publish
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => onWorkflow("retire")}>
-                    <Archive className="mr-2 h-4 w-4" />
-                    Retire
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-        </CardHeader>
-
-        <CardContent className="grid gap-4">
-          {row.description ? (
-            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 text-sm text-zc-muted">
-              {row.description}
-            </div>
-          ) : (
-            <div className="rounded-xl border border-dashed border-zc-border bg-zc-panel/5 p-4 text-sm text-zc-muted">
-              No description. Add one to help admins understand the purpose of this order set.
-            </div>
-          )}
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-              <div className="text-xs font-semibold text-zc-muted">Department</div>
-              <div className="mt-1 text-sm font-semibold text-zc-text">{dep ? `${dep.code} • ${dep.name}` : "—"}</div>
-              <div className="mt-2 text-xs text-zc-muted">Context: {row.context || "—"}</div>
-            </div>
-
-            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-              <div className="text-xs font-semibold text-zc-muted">Effective</div>
-              <div className="mt-1 text-sm font-semibold text-zc-text">
-                {fmtDateTime(row.effectiveFrom)} → {fmtDateTime(row.effectiveTo || null)}
-              </div>
-              <div className="mt-2 text-xs text-zc-muted">Created: {fmtDateTime(row.createdAt || null)}</div>
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="text-sm font-semibold text-zc-text">Items</div>
-              <div className="text-sm text-zc-muted">{row.items?.length || 0} services in this order set.</div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" className="gap-2" asChild>
-                <Link href="/superadmin/infrastructure/service-library">
-                  Service Library <ExternalLink className="h-4 w-4" />
-                </Link>
-              </Button>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-zc-border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[180px]">Service</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead className="w-[110px]">Qty</TableHead>
-                  <TableHead className="w-[120px]">Active</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(row.items || []).length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={4}>
-                      <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
-                        <AlertTriangle className="h-4 w-4 text-zc-warn" />
-                        No items yet. Use “Manage Items”.
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  (row.items || []).slice(0, 12).map((it) => (
-                    <TableRow key={it.id}>
-                      <TableCell className="font-mono text-xs font-semibold">
-                        {it.serviceItem?.code || it.serviceItemId}
-                      </TableCell>
-                      <TableCell className="text-sm text-zc-muted">{it.serviceItem?.name || "—"}</TableCell>
-                      <TableCell className="text-sm text-zc-muted">{it.quantity ?? 1}</TableCell>
-                      <TableCell>
-                        {it.isActive ? <Badge variant="ok">YES</Badge> : <Badge variant="secondary">NO</Badge>}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          {(row.items || []).length > 12 ? (
-            <div className="text-xs text-zc-muted">
-              Showing 12 of {row.items?.length}. Open “Manage Items” to view all and edit.
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*                              Create/Edit Modal                              */
-/* -------------------------------------------------------------------------- */
-
-function OrderSetEditModal({
+function OrderSetEditorDrawer({
   open,
   onOpenChange,
-  mode,
   branchId,
-  departments,
   editing,
+  channels,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  mode: "create" | "edit";
   branchId: string;
-  departments: DepartmentRow[];
   editing: OrderSetRow | null;
-  onSaved: () => void;
+  channels: string[];
+  onSaved: () => Promise<void> | void;
 }) {
   const { toast } = useToast();
-  const [saving, setSaving] = React.useState(false);
+  const isEdit = Boolean(editing?.id);
 
-  const [form, setForm] = React.useState<any>({
-    code: "",
-    name: "",
-    description: "",
-    departmentId: "",
-    context: "",
-  });
+  const [busy, setBusy] = React.useState(false);
+
+  const [code, setCode] = React.useState("");
+  const [name, setName] = React.useState("");
+  const [description, setDescription] = React.useState("");
+  const [channel, setChannel] = React.useState<string>("ORDER_SET");
+
+  const channelOptions = React.useMemo<string[]>(() => {
+    const base: string[] = [...DEFAULT_CHANNELS, ...channels];
+    // ensure current value appears
+    if (editing?.channel) base.push(editing.channel);
+    return uniq(base).filter(isNonEmptyString);
+  }, [channels, editing?.channel]);
 
   React.useEffect(() => {
     if (!open) return;
-    if (mode === "edit" && editing) {
-      setForm({
-        code: editing.code || "",
-        name: editing.name || "",
-        description: editing.description || "",
-        departmentId: editing.departmentId || "",
-        context: editing.context || "",
-      });
-    } else {
-      setForm({
-        code: "",
-        name: "",
-        description: "",
-        departmentId: "",
-        context: "",
-      });
-    }
-  }, [open, mode, editing]);
 
-  function patch(p: Partial<any>) {
-    setForm((prev: any) => ({ ...prev, ...p }));
-  }
+    if (editing) {
+      setCode(editing.code || "");
+      setName(editing.name || "");
+      setDescription(editing.description || "");
+      setChannel(editing.channel || "ORDER_SET");
+    } else {
+      setCode("");
+      setName("");
+      setDescription("");
+      setChannel("ORDER_SET");
+    }
+    setBusy(false);
+  }, [open, editing]);
 
   async function save() {
-    if (!branchId) return;
-
-    const payload: any = {
-      code: String(form.code || "").trim(),
-      name: String(form.name || "").trim(),
-      description: form.description?.trim() ? String(form.description).trim() : null,
-      departmentId: form.departmentId ? form.departmentId : null,
-      context: form.context ? form.context : null,
-    };
-
-    if (!payload.code || !payload.name) {
-      toast({ title: "Missing fields", description: "Code and Name are required." });
+    if (!branchId) {
+      toast({ title: "Select a branch first" });
       return;
     }
 
-    setSaving(true);
+    const c = (code || "").trim();
+    const n = (name || "").trim();
+    const ch = (channel || "").trim() || "ORDER_SET"; // never send null/empty
+
+    if (!c) {
+      toast({ title: "Code is required" });
+      return;
+    }
+    if (!n) {
+      toast({ title: "Name is required" });
+      return;
+    }
+
+    setBusy(true);
     try {
-      if (mode === "create") {
-        await apiFetch(`/api/infrastructure/order-sets?${buildQS({ branchId })}`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-      } else {
-        if (!editing?.id) throw new Error("Invalid editing row");
+      if (isEdit && editing?.id) {
         await apiFetch(`/api/infrastructure/order-sets/${encodeURIComponent(editing.id)}`, {
           method: "PATCH",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            code: c,
+            name: n,
+            description: description.trim() ? description.trim() : null,
+            channel: ch,
+          }),
         });
+        toast({ title: "Saved", description: "Order set updated." });
+      } else {
+        await apiFetch(`/api/infrastructure/order-sets?${buildQS({ branchId })}`, {
+          method: "POST",
+          body: JSON.stringify({
+            code: c,
+            name: n,
+            description: description.trim() ? description.trim() : null,
+            channel: ch,
+          }),
+        });
+        toast({ title: "Created", description: "Order set created." });
       }
 
+      await onSaved();
       onOpenChange(false);
-      onSaved();
     } catch (e: any) {
       toast({ title: "Save failed", description: e?.message || "Request failed", variant: "destructive" as any });
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={drawerClassName()}>
-        <ModalHeader
-          title={mode === "create" ? "New Order Set" : "Edit Order Set"}
-          description="Order sets are branch-scoped. Keep them clinically focused (one use-case per set)."
-          onClose={() => onOpenChange(false)}
-        />
-
-        <div className="px-6 pb-6 grid gap-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="grid gap-2">
-              <Label>Code</Label>
-              <Input value={form.code || ""} onChange={(e) => patch({ code: e.target.value })} placeholder="e.g., OPD-FEVER" />
+        <DialogHeader className="sr-only">
+          <DialogTitle>{isEdit ? "Edit Order Set" : "New Order Set"}</DialogTitle>
+          <DialogDescription>Channel is required (CatalogueChannel). Default is ORDER_SET.</DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center justify-between gap-3 border-b border-zc-border bg-zc-panel/20 px-6 py-4">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 rounded-2xl border border-zc-border bg-white/40 p-2">
+              <Wrench className="h-5 w-5 text-indigo-700" />
             </div>
-            <div className="grid gap-2">
-              <Label>Name</Label>
-              <Input value={form.name || ""} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g., OPD Fever Panel" />
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Department (optional)</Label>
-              <Select value={form.departmentId || ""} onValueChange={(v) => patch({ departmentId: v === "none" ? "" : v })}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Select department (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {departments.map((d) => (
-                    <SelectItem key={d.id} value={d.id}>
-                      {d.code} • {d.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Context (optional)</Label>
-              <Select value={form.context || ""} onValueChange={(v) => patch({ context: v === "none" ? "" : v })}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Select context (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  <SelectItem value="OPD">OPD</SelectItem>
-                  <SelectItem value="IPD">IPD</SelectItem>
-                  <SelectItem value="ER">ER</SelectItem>
-                  <SelectItem value="OT">OT</SelectItem>
-                  <SelectItem value="DAYCARE">DAYCARE</SelectItem>
-                  <SelectItem value="TELECONSULT">TELECONSULT</SelectItem>
-                  <SelectItem value="HOMECARE">HOMECARE</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid gap-2 md:col-span-2">
-              <Label>Description (optional)</Label>
-              <Textarea
-                value={form.description || ""}
-                onChange={(e) => patch({ description: e.target.value })}
-                placeholder="Explain when and why this order set is used…"
-              />
+            <div>
+              <div className="text-base font-semibold text-zc-text">{isEdit ? "Edit Order Set" : "New Order Set"}</div>
+              <div className="text-sm text-zc-muted">
+                Channel is required (CatalogueChannel). Default is <span className="font-semibold">ORDER_SET</span>.
+              </div>
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          {/* <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
+            <X className="h-4 w-4" />
+          </Button> */}
+        </div>
+
+        <div className="grid gap-4 px-6 py-5">
+          <div className="grid gap-2">
+            <Label>Code</Label>
+            <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="OPD-FEVER" />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Name</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="OPD Fever Set" />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Description</Label>
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional notes…" rows={3} />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Channel</Label>
+            <Select value={channel} onValueChange={(v) => setChannel(v)}>
+              <SelectTrigger className="h-10">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {channelOptions.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="text-xs text-zc-muted">
+              If backend enum differs, you’ll get “Invalid channel … Allowed values …” from API.
+            </div>
+          </div>
+
+          {isEdit && editing ? (
+            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 text-sm text-zc-muted">
+              Current status: <span className="font-semibold text-zc-text">{editing.status}</span> • Version{" "}
+              <span className="font-semibold text-zc-text">v{editing.version ?? 1}</span>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="border-t border-zc-border px-6 py-4">
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={saving}>
-              {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Save
+            <Button variant="primary" onClick={save} disabled={busy}>
+              {busy ? "Saving…" : "Save"}
             </Button>
-          </DialogFooter>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -1408,7 +1066,7 @@ function OrderSetEditModal({
 }
 
 /* -------------------------------------------------------------------------- */
-/*                               Items Drawer                                  */
+/*                               Items Drawer                                 */
 /* -------------------------------------------------------------------------- */
 
 function OrderSetItemsDrawer({
@@ -1422,34 +1080,29 @@ function OrderSetItemsDrawer({
   onOpenChange: (v: boolean) => void;
   branchId: string;
   orderSet: OrderSetRow | null;
-  onSaved: () => void;
+  onSaved: () => Promise<void> | void;
 }) {
   const { toast } = useToast();
 
   const [loading, setLoading] = React.useState(false);
   const [detail, setDetail] = React.useState<OrderSetRow | null>(null);
 
-  // add/search
   const [svcQ, setSvcQ] = React.useState("");
   const [svcLoading, setSvcLoading] = React.useState(false);
   const [svcRows, setSvcRows] = React.useState<ServiceItemRow[]>([]);
   const [pickedSvc, setPickedSvc] = React.useState<ServiceItemRow | null>(null);
 
-  const [quantity, setQuantity] = React.useState<string>("1");
   const [sortOrder, setSortOrder] = React.useState<string>("0");
-  const [isActive, setIsActive] = React.useState<boolean>(true);
-  const [notes, setNotes] = React.useState<string>("");
 
   React.useEffect(() => {
     if (!open) return;
+
     setDetail(null);
     setSvcQ("");
     setSvcRows([]);
     setPickedSvc(null);
-    setQuantity("1");
     setSortOrder("0");
-    setIsActive(true);
-    setNotes("");
+
     void loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, orderSet?.id]);
@@ -1481,14 +1134,12 @@ function OrderSetItemsDrawer({
           })}`,
         )) || [];
 
-      // keep list clean: billable + published services are best candidates for order sets
-      const filtered = list.filter((r) => {
-        const billableOk = r.isBillable === undefined ? true : Boolean(r.isBillable);
-        const publishedOk = r.lifecycleStatus ? String(r.lifecycleStatus).toUpperCase() === "PUBLISHED" : true;
-        return billableOk && publishedOk;
-      });
+      // Keep list usable but not too strict (so it never looks "empty")
+      const trimmed = list
+        .filter((s) => s && s.id)
+        .slice(0, 80);
 
-      setSvcRows(filtered.slice(0, 80));
+      setSvcRows(trimmed);
     } catch (e: any) {
       toast({ title: "Service search failed", description: e?.message || "Request failed", variant: "destructive" as any });
       setSvcRows([]);
@@ -1504,23 +1155,13 @@ function OrderSetItemsDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [svcQ, open]);
 
-  async function upsertItem() {
+  async function addServiceItem() {
     if (!orderSet?.id || !pickedSvc?.id) return;
 
-    const qty = Number(quantity);
     const sort = Number(sortOrder);
-
-    if (!Number.isFinite(qty) || qty <= 0) {
-      toast({ title: "Invalid quantity", description: "Quantity must be a positive number." });
-      return;
-    }
-
     const payload: any = {
       serviceItemId: pickedSvc.id,
-      quantity: qty,
       sortOrder: Number.isFinite(sort) ? sort : 0,
-      isActive: Boolean(isActive),
-      notes: notes.trim() ? notes.trim() : null,
     };
 
     setLoading(true);
@@ -1532,13 +1173,10 @@ function OrderSetItemsDrawer({
       toast({ title: "Item saved", description: "Service item added/updated in order set." });
 
       setPickedSvc(null);
-      setQuantity("1");
       setSortOrder("0");
-      setIsActive(true);
-      setNotes("");
 
       await loadDetail();
-      onSaved();
+      await onSaved();
     } catch (e: any) {
       toast({ title: "Save failed", description: e?.message || "Request failed", variant: "destructive" as any });
     } finally {
@@ -1559,7 +1197,7 @@ function OrderSetItemsDrawer({
       );
       toast({ title: "Removed", description: "Service removed from order set." });
       await loadDetail();
-      onSaved();
+      await onSaved();
     } catch (e: any) {
       toast({ title: "Remove failed", description: e?.message || "Request failed", variant: "destructive" as any });
     } finally {
@@ -1567,93 +1205,43 @@ function OrderSetItemsDrawer({
     }
   }
 
-  async function quickToggle(it: OrderSetItemRow, nextActive: boolean) {
-    if (!orderSet?.id) return;
-    setLoading(true);
-    try {
-      await apiFetch(`/api/infrastructure/order-sets/${encodeURIComponent(orderSet.id)}/items`, {
-        method: "POST",
-        body: JSON.stringify({
-          serviceItemId: it.serviceItemId,
-          quantity: it.quantity ?? 1,
-          sortOrder: it.sortOrder ?? 0,
-          isActive: nextActive,
-          notes: it.notes ?? null,
-        }),
-      });
-      await loadDetail();
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Update failed", description: e?.message || "Request failed", variant: "destructive" as any });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function quickQty(it: OrderSetItemRow, nextQty: number) {
-    if (!orderSet?.id) return;
-    setLoading(true);
-    try {
-      await apiFetch(`/api/infrastructure/order-sets/${encodeURIComponent(orderSet.id)}/items`, {
-        method: "POST",
-        body: JSON.stringify({
-          serviceItemId: it.serviceItemId,
-          quantity: nextQty,
-          sortOrder: it.sortOrder ?? 0,
-          isActive: it.isActive,
-          notes: it.notes ?? null,
-        }),
-      });
-      await loadDetail();
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Update failed", description: e?.message || "Request failed", variant: "destructive" as any });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function quickSort(it: OrderSetItemRow, nextSort: number) {
-    if (!orderSet?.id) return;
-    setLoading(true);
-    try {
-      await apiFetch(`/api/infrastructure/order-sets/${encodeURIComponent(orderSet.id)}/items`, {
-        method: "POST",
-        body: JSON.stringify({
-          serviceItemId: it.serviceItemId,
-          quantity: it.quantity ?? 1,
-          sortOrder: nextSort,
-          isActive: it.isActive,
-          notes: it.notes ?? null,
-        }),
-      });
-      await loadDetail();
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Update failed", description: e?.message || "Request failed", variant: "destructive" as any });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const items = detail?.items || [];
+  const itemsAll = detail?.items || [];
+  const items = itemsAll.filter((it) => it.isActive);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={drawerClassName()}>
-        <ModalHeader
-          title={`Manage Items • ${orderSet?.code || ""}`}
-          description="Add services with quantity. Keep the bundle focused and workflow-approved."
-          onClose={() => onOpenChange(false)}
-        />
+        <DialogHeader className="sr-only">
+          <DialogTitle>Manage Items</DialogTitle>
+          <DialogDescription>Search Service Library and add items into this Order Set.</DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center justify-between gap-3 border-b border-zc-border bg-zc-panel/20 px-6 py-4">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 rounded-2xl border border-zc-border bg-white/40 p-2">
+              <Plus className="h-5 w-5 text-indigo-700" />
+            </div>
+            <div>
+              <div className="text-base font-semibold text-zc-text">
+                Manage Items • {orderSet?.code || ""}
+              </div>
+              <div className="text-sm text-zc-muted">
+                Search Service Library and add items into this Order Set.
+              </div>
+            </div>
+          </div>
 
-        <div className="px-6 pb-6 grid gap-6">
+          {/* <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
+            <X className="h-4 w-4" />
+          </Button> */}
+        </div>
+
+        <div className="grid gap-6 overflow-auto px-6 py-5">
           {/* Add section */}
           <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 grid gap-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-zc-text">Add / Update Item</div>
-                <div className="text-xs text-zc-muted">Search billable published services and add them with quantities.</div>
+                <div className="text-sm font-semibold text-zc-text">Add / Update Service Item</div>
+                <div className="text-xs text-zc-muted">Pick one item and save. Re-picking the same item updates sort order.</div>
               </div>
               <Button variant="outline" size="sm" className="gap-2" asChild>
                 <Link href="/superadmin/infrastructure/service-library">
@@ -1680,7 +1268,7 @@ function OrderSetItemsDrawer({
                     <TableRow>
                       <TableHead className="w-[180px]">Code</TableHead>
                       <TableHead>Name</TableHead>
-                      <TableHead className="w-[140px]">Charge Unit</TableHead>
+                      <TableHead className="w-[140px]">Status</TableHead>
                       <TableHead className="w-[120px]">Pick</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1705,6 +1293,8 @@ function OrderSetItemsDrawer({
                     ) : (
                       svcRows.map((s) => {
                         const picked = pickedSvc?.id === s.id;
+                        const isActive = s.isActive !== false;
+                        const published = (s.lifecycleStatus || "").toUpperCase() === "PUBLISHED";
                         return (
                           <TableRow key={s.id} className={picked ? "bg-zc-panel/30" : ""}>
                             <TableCell className="font-mono text-xs">
@@ -1719,11 +1309,16 @@ function OrderSetItemsDrawer({
                                 <span className="text-xs text-zc-muted">{s.type || "—"}</span>
                               </div>
                             </TableCell>
-                            <TableCell>
-                              <Badge variant="secondary">{s.chargeUnit || "—"}</Badge>
+                            <TableCell className="space-x-2">
+                              {isActive ? <Badge variant="ok">Active</Badge> : <Badge variant="secondary">Inactive</Badge>}
+                              {published ? <Badge variant="secondary">Published</Badge> : <Badge variant="secondary">—</Badge>}
                             </TableCell>
                             <TableCell>
-                              <Button variant={picked ? "primary" : "outline"} size="sm" onClick={() => setPickedSvc(s)}>
+                              <Button
+                                variant={picked ? "primary" : "outline"}
+                                size="sm"
+                                onClick={() => setPickedSvc(s)}
+                              >
                                 {picked ? "Picked" : "Pick"}
                               </Button>
                             </TableCell>
@@ -1736,160 +1331,210 @@ function OrderSetItemsDrawer({
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-4">
-              <div className="grid gap-2">
-                <Label>Quantity</Label>
-                <Input value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="1" />
-              </div>
-              <div className="grid gap-2">
+            <div className="grid gap-3 md:grid-cols-12">
+              <div className="md:col-span-4">
                 <Label>Sort Order</Label>
                 <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} placeholder="0" />
+                <div className="mt-1 text-xs text-zc-muted">Lower comes first. Use 0/10/20…</div>
               </div>
-              <div className="grid gap-2">
-                <Label>Active</Label>
-                <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
-                  <Switch checked={isActive} onCheckedChange={setIsActive} />
-                  <div className="text-sm">
-                    <div className="font-semibold text-zc-text">{isActive ? "Active" : "Inactive"}</div>
-                    <div className="text-xs text-zc-muted">Controls usage</div>
-                  </div>
-                </div>
-              </div>
-              <div className="grid gap-2 md:col-span-1">
-                <Label>Notes (optional)</Label>
-                <Textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g., fasting required / repeat x2 / clinician note"
-                  className="min-h-[42px]"
-                />
-              </div>
-            </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-xs text-zc-muted">
-                Selected:{" "}
-                <span className="font-mono font-semibold text-zc-text">{pickedSvc ? pickedSvc.code : "—"}</span>
+              <div className="md:col-span-8 flex items-end justify-end gap-2">
+                <Button variant="outline" onClick={() => setPickedSvc(null)} disabled={!pickedSvc}>
+                  Clear
+                </Button>
+                <Button variant="primary" onClick={addServiceItem} disabled={!pickedSvc || loading}>
+                  {loading ? "Saving…" : "Save Item"}
+                </Button>
               </div>
-              <Button onClick={upsertItem} disabled={loading || !pickedSvc}>
-                {loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                Save Item
-              </Button>
             </div>
           </div>
 
-          {/* Items list */}
-          <div className="grid gap-3">
-            <div className="flex items-center justify-between gap-3">
+          {/* Existing items */}
+          <div className="rounded-xl border border-zc-border">
+            <div className="flex items-center justify-between gap-3 border-b border-zc-border p-4">
               <div>
-                <div className="text-sm font-semibold text-zc-text">Order Set Items</div>
-                <div className="text-xs text-zc-muted">
-                  Total: <span className="font-semibold text-zc-text">{items.length}</span>
-                </div>
+                <div className="text-sm font-semibold text-zc-text">Current Items</div>
+                <div className="text-xs text-zc-muted">Total: {items.length}</div>
               </div>
-              <Button variant="outline" size="sm" className="gap-2" onClick={loadDetail} disabled={loading}>
-                <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-                Reload
-              </Button>
             </div>
 
-            <div className="rounded-xl border border-zc-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[180px]">Service</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="w-[120px]">Qty</TableHead>
-                    <TableHead className="w-[160px]">Sort</TableHead>
-                    <TableHead className="w-[120px]">Active</TableHead>
-                    <TableHead className="w-[120px]" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loading ? (
-                    Array.from({ length: 10 }).map((_, i) => (
-                      <TableRow key={i}>
-                        <TableCell colSpan={6}>
-                          <Skeleton className="h-6 w-full" />
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : items.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6}>
-                        <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
-                          <AlertTriangle className="h-4 w-4 text-zc-warn" />
-                          No items yet.
-                        </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[160px]">Code</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="w-[120px]">Sort</TableHead>
+                  <TableHead className="w-[120px]">Active</TableHead>
+                  <TableHead className="w-[90px]" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loading && !detail ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell colSpan={5}>
+                        <Skeleton className="h-6 w-full" />
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    items.map((it) => (
+                  ))
+                ) : items.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
+                        <AlertTriangle className="h-4 w-4 text-zc-warn" />
+                        No items yet.
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  items.map((it) => {
+                    const lbl = itemLabel(it);
+                    return (
                       <TableRow key={it.id}>
-                        <TableCell className="font-mono text-xs">
+                        <TableCell className="font-mono text-xs font-semibold text-zc-text">{lbl.code}</TableCell>
+                        <TableCell>
                           <div className="flex flex-col gap-1">
-                            <span className="font-semibold text-zc-text">{it.serviceItem?.code || it.serviceItemId}</span>
-                            <span className="text-[11px] text-zc-muted">{String(it.serviceItemId).slice(0, 8)}…</span>
+                            <span className="font-semibold text-zc-text">{lbl.name}</span>
+                            <span className="text-xs text-zc-muted">{it.itemType}</span>
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm text-zc-muted">{it.serviceItem?.name || "—"}</TableCell>
+                        <TableCell className="font-mono text-xs">{it.sortOrder ?? 0}</TableCell>
+                        <TableCell>{it.isActive ? <Badge variant="ok">Yes</Badge> : <Badge variant="secondary">No</Badge>}</TableCell>
                         <TableCell>
-                          <Input
-                            className="h-9 w-[90px]"
-                            defaultValue={String(it.quantity ?? 1)}
-                            onBlur={(e) => {
-                              const next = Number(e.target.value);
-                              if (Number.isFinite(next) && next > 0 && next !== it.quantity) quickQty(it, next);
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Input
-                              className="h-9 w-[90px]"
-                              defaultValue={String(it.sortOrder ?? 0)}
-                              onBlur={(e) => {
-                                const next = Number(e.target.value);
-                                if (Number.isFinite(next) && next !== it.sortOrder) quickSort(it, next);
-                              }}
-                            />
-                            <span className="text-xs text-zc-muted">(blur)</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-2"
-                            onClick={() => quickToggle(it, !it.isActive)}
-                          >
-                            {it.isActive ? <Badge variant="ok">YES</Badge> : <Badge variant="secondary">NO</Badge>}
-                          </Button>
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="outline" size="sm" className="gap-2" onClick={() => removeItem(it.serviceItemId)}>
-                            <Trash2 className="h-4 w-4" />
-                            Remove
-                          </Button>
+                          {it.serviceItemId ? (
+                            <Button variant="outline" size="sm" onClick={() => removeItem(it.serviceItemId!)} disabled={loading}>
+                              Remove
+                            </Button>
+                          ) : (
+                            <Badge variant="secondary">—</Badge>
+                          )}
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
 
-            <div className="text-xs text-zc-muted">
-              Note: quantities will be sent to ordering (later) as default counts. Clinicians can adjust at order-time.
+            <div className="border-t border-zc-border p-4 text-xs text-zc-muted">
+              Removal marks item inactive (soft remove) — consistent with audit trail.
             </div>
           </div>
+        </div>
 
-          <DialogFooter className="pt-2">
+        <div className="border-t border-zc-border px-6 py-4">
+          <div className="flex items-center justify-end gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Close
             </Button>
-          </DialogFooter>
+          </div>
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Versions Dialog                               */
+/* -------------------------------------------------------------------------- */
+
+function OrderSetVersionsDialog({
+  open,
+  onOpenChange,
+  orderSet,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  orderSet: OrderSetRow | null;
+}) {
+  const { toast } = useToast();
+  const [loading, setLoading] = React.useState(false);
+  const [rows, setRows] = React.useState<OrderSetVersionRow[]>([]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    if (!orderSet?.id) return;
+
+    setRows([]);
+    setLoading(true);
+
+    (async () => {
+      try {
+        const list =
+          (await apiFetch<OrderSetVersionRow[]>(
+            `/api/infrastructure/order-sets/${encodeURIComponent(orderSet.id)}/versions`,
+          )) || [];
+        setRows(list);
+      } catch (e: any) {
+        toast({ title: "Failed to load versions", description: e?.message || "Request failed", variant: "destructive" as any });
+        setRows([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, orderSet?.id]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[980px]">
+        <DialogHeader>
+          <DialogTitle>Versions • {orderSet?.code || ""}</DialogTitle>
+          <DialogDescription>Each publish creates a snapshot version.</DialogDescription>
+        </DialogHeader>
+
+        <div className="rounded-xl border border-zc-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[120px]">Version</TableHead>
+                <TableHead className="w-[160px]">Status</TableHead>
+                <TableHead>Effective</TableHead>
+                <TableHead className="w-[220px]">Created</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                Array.from({ length: 8 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell colSpan={4}>
+                      <Skeleton className="h-6 w-full" />
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4}>
+                    <div className="flex items-center justify-center gap-2 py-10 text-sm text-zc-muted">
+                      <AlertTriangle className="h-4 w-4 text-zc-warn" />
+                      No versions yet. Publish to create version history.
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                rows.map((v) => (
+                  <TableRow key={v.id}>
+                    <TableCell className="font-mono text-xs font-semibold text-zc-text">v{v.version}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{v.status || "—"}</Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-zc-text">
+                      From: <span className="font-semibold">{fmtDateTime(v.effectiveFrom)}</span> • To:{" "}
+                      <span className="font-semibold">{fmtDateTime(v.effectiveTo)}</span>
+                    </TableCell>
+                    <TableCell className="text-sm text-zc-muted">{fmtDateTime(v.createdAt)}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

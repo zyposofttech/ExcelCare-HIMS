@@ -5,3 +5,5 @@ export * from "./upsert-tariff-rate.dto";
 export * from "./tax-type.dto";
 export * from "./create-tax-code.dto";
 export * from "./update-tax-code.dto";
+export * from "./update-tariff-rate.dto";
+export * from "./set-default-tariff-plan.dto";

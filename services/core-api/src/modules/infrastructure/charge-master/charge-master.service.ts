@@ -32,7 +32,7 @@ export class ChargeMasterService {
         category: dto.category ?? null,
         unit: dto.unit ?? null,
 
-        // ✅ Option-B fields
+        // Advanced billing
         chargeUnit: (dto.chargeUnit as any) ?? undefined,
         taxCodeId,
         isTaxInclusive: dto.isTaxInclusive ?? false,
@@ -41,6 +41,7 @@ export class ChargeMasterService {
 
         isActive: dto.isActive ?? true,
       },
+      include: { taxCode: true },
     });
 
     await this.ctx.audit.log({
@@ -86,7 +87,6 @@ export class ChargeMasterService {
     });
     if (!row) throw new NotFoundException("Charge master item not found");
 
-    // access check
     this.ctx.resolveBranchId(principal, row.branchId);
     return row;
   }
@@ -125,7 +125,7 @@ export class ChargeMasterService {
         category: dto.category === undefined ? undefined : (dto.category ?? null),
         unit: dto.unit === undefined ? undefined : (dto.unit ?? null),
 
-        // ✅ Option-B fields
+        // Advanced billing
         chargeUnit: dto.chargeUnit === undefined ? undefined : (dto.chargeUnit as any),
         taxCodeId,
         isTaxInclusive: dto.isTaxInclusive ?? undefined,
@@ -144,6 +144,45 @@ export class ChargeMasterService {
       entity: "ChargeMasterItem",
       entityId: id,
       meta: dto,
+    });
+
+    return updated;
+  }
+
+  /**
+   * Safe "Delete" used by UI:
+   * Soft deactivate to preserve historical tariffs / mappings.
+   */
+  async deactivateChargeMasterItem(principal: Principal, id: string) {
+    const existing = await this.ctx.prisma.chargeMasterItem.findUnique({
+      where: { id },
+      select: { id: true, branchId: true, isActive: true },
+    });
+    if (!existing) throw new NotFoundException("Charge master item not found");
+
+    const branchId = this.ctx.resolveBranchId(principal, existing.branchId);
+
+    // Already inactive
+    if (!existing.isActive) {
+      return this.ctx.prisma.chargeMasterItem.findUnique({
+        where: { id },
+        include: { taxCode: true },
+      });
+    }
+
+    const updated = await this.ctx.prisma.chargeMasterItem.update({
+      where: { id },
+      data: { isActive: false },
+      include: { taxCode: true },
+    });
+
+    await this.ctx.audit.log({
+      branchId,
+      actorUserId: principal.userId,
+      action: "INFRA_CHARGE_MASTER_DEACTIVATE",
+      entity: "ChargeMasterItem",
+      entityId: id,
+      meta: {},
     });
 
     return updated;

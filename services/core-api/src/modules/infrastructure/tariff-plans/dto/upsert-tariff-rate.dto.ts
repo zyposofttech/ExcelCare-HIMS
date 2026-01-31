@@ -1,42 +1,30 @@
 import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, Min } from "class-validator";
 
-export class UpsertTariffRateDto {
+export class UpsertInfraTariffRateDto {
   @IsOptional()
   @IsString()
   tariffPlanId?: string;
 
-  // Option-B primary key for pricing
   @IsString()
   chargeMasterItemId!: string;
 
-  /**
-   * Optional legacy compatibility (if older clients still send serviceCode).
-   * We'll keep it but Option-B uses chargeMasterItemId.
-   */
   @IsOptional()
   @IsString()
   serviceCode?: string | null;
 
-  /**
-   * Preferred field
-   */
   @IsOptional()
   @IsNumber()
   @Min(0)
   rateAmount?: number;
 
-  /**
-   * Legacy alias (some older code still sends amount).
-   * We accept it and map to rateAmount.
-   */
   @IsOptional()
   @IsNumber()
   @Min(0)
-  amount?: number;
+  amount?: number; // legacy alias
 
   @IsOptional()
   @IsString()
-  currency?: string; // default INR / plan currency
+  currency?: string;
 
   @IsOptional()
   @IsString()

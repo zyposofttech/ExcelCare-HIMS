@@ -1,27 +1,28 @@
-import { IsBoolean, IsInt, IsOptional, Max, Min } from "class-validator";
+import { IsBoolean, IsInt, IsOptional, Min, Max } from "class-validator";
 
-export class UpdateAvailabilityRuleDto {
+export class UpdateServiceAvailabilityRuleDto {
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  dayOfWeek?: number;
+
   @IsOptional()
   @IsInt()
   @Min(0)
   @Max(1439)
-  startMin?: number;
+  startMinute?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  endMinute?: number;
 
   @IsOptional()
   @IsInt()
   @Min(0)
-  @Max(1439)
-  endMin?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  slotSizeMin?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  maxAppointmentsPerSlot?: number;
+  capacity?: number;
 
   @IsOptional()
   @IsBoolean()

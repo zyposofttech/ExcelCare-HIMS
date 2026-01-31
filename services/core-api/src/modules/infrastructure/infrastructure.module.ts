@@ -54,6 +54,8 @@ import { TaxCodesService } from "./tax-codes/tax-codes.service";
 
 import { ServiceAvailabilityController } from "./service-availability/service-availability.controller";
 import { ServiceAvailabilityService } from "./service-availability/service-availability.service";
+import { TariffPlansController } from "./tariff-plans/tariff-plans.controller";
+import { TariffPlansService } from "./tariff-plans/tariff-plans.service";
 
 
 @Module({
@@ -81,7 +83,8 @@ import { ServiceAvailabilityService } from "./service-availability/service-avail
     ImportController,
     GoLiveController,
     TaxCodesController,
-    ServiceAvailabilityController
+    ServiceAvailabilityController,
+    TariffPlansController
   ],
   providers: [
     LocationService,
@@ -98,7 +101,8 @@ import { ServiceAvailabilityService } from "./service-availability/service-avail
     GoLiveService,
     InfrastructureSeedService,
     TaxCodesService,
-    ServiceAvailabilityService
+    ServiceAvailabilityService,
+    TariffPlansService
   ],
 })
 export class InfrastructureModule {}

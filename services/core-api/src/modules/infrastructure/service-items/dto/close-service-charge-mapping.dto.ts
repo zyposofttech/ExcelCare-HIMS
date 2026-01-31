@@ -1,9 +1,6 @@
-import { IsDateString, IsString } from "class-validator";
+import { IsDateString } from "class-validator";
 
 export class CloseServiceChargeMappingDto {
-  @IsString()
-  serviceItemId!: string;
-
   @IsDateString()
-  effectiveTo!: string;
+  effectiveTo!: string; // ISO date-time string
 }

@@ -20,12 +20,14 @@ export class TaxCodesController {
     @Req() req: any,
     @Query("branchId") branchId?: string,
     @Query("q") q?: string,
+    @Query("taxType") taxType?: string,
     @Query("includeInactive") includeInactive?: string,
     @Query("take") take?: string,
   ) {
     return this.svc.list(this.principal(req), {
       branchId: branchId ?? null,
       q,
+      taxType,
       includeInactive: includeInactive === "true",
       take: take ? Number(take) : undefined,
     });

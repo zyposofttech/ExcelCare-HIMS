@@ -8,11 +8,20 @@ import type { CreateTaxCodeDto, UpdateTaxCodeDto } from "./dto";
 export class TaxCodesService {
   constructor(private readonly ctx: InfraContextService) {}
 
-  async list(principal: Principal, q: { branchId?: string | null; q?: string; includeInactive?: boolean; take?: number }) {
+  async list(
+    principal: Principal,
+    q: { branchId?: string | null; q?: string; taxType?: string; includeInactive?: boolean; take?: number },
+  ) {
     const branchId = this.ctx.resolveBranchId(principal, q.branchId ?? null);
 
     const where: any = { branchId };
     if (!q.includeInactive) where.isActive = true;
+
+    // ✅ taxType filter (UI had this, backend was ignoring it)
+    const tt = (q.taxType ?? "").trim().toUpperCase();
+    if (tt && ["GST", "TDS", "OTHER"].includes(tt)) {
+      where.taxType = tt;
+    }
 
     const query = (q.q ?? "").trim();
     if (query) {
@@ -52,7 +61,11 @@ export class TaxCodesService {
         ratePercent: dto.ratePercent as any,
         components: dto.components ?? undefined,
         hsnSac:
-          dto.hsnSac === undefined ? undefined : dto.hsnSac === null || String(dto.hsnSac).trim() === "" ? null : String(dto.hsnSac).trim(),
+          dto.hsnSac === undefined
+            ? undefined
+            : dto.hsnSac === null || String(dto.hsnSac).trim() === ""
+              ? null
+              : String(dto.hsnSac).trim(),
         isActive: dto.isActive ?? true,
       },
     });
