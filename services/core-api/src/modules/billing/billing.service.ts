@@ -1,6 +1,7 @@
-import { BadRequestException, ForbiddenException, Inject, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@zypocare/db";
 import type { Principal } from "../auth/access-policy.service";
+import { resolveBranchId as resolveBranchIdCommon } from "../../common/branch-scope.util";
 import { AuditService } from "../audit/audit.service";
 import { canonicalizeCode } from "../../common/naming.util";
 import type { ActivateTariffPlanDto, CreateTariffPlanDto, UpdateTariffPlanDto, UpsertTariffRateDto, CreateTaxCodeDto, UpdateTaxCodeDto,SetDefaultTariffPlanDto  } from "./dto";
@@ -13,15 +14,8 @@ export class BillingService {
   ) { }
 
   private resolveBranchId(principal: Principal, requestedBranchId?: string | null) {
-    if (principal.roleScope === "BRANCH") {
-      if (!principal.branchId) throw new ForbiddenException("Branch-scoped principal missing branchId");
-      if (requestedBranchId && requestedBranchId !== principal.branchId) {
-        throw new ForbiddenException("Cannot access another branch");
-      }
-      return principal.branchId;
-    }
-    if (!requestedBranchId) throw new BadRequestException("branchId is required for global operations");
-    return requestedBranchId;
+    // Standardized branch resolution for billing: GLOBAL must provide branchId
+    return resolveBranchIdCommon(principal, requestedBranchId ?? null, { requiredForGlobal: true });
   }
 
   private static readonly mappedServiceChargeSelect = {

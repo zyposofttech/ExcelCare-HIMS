@@ -130,17 +130,24 @@ export class BranchService {
 
   async list(opts: { q?: string | null; onlyActive?: boolean | null } = {}) {
     const q = (opts.q ?? "").trim();
+    const onlyActive = Boolean(opts.onlyActive);
 
     const rows = await this.prisma.branch.findMany({
-      where: q
-        ? {
-            OR: [
-              { name: { contains: q, mode: "insensitive" } },
-              { city: { contains: q, mode: "insensitive" } },
-              { code: { equals: q, mode: "insensitive" } },
-            ],
-          }
-        : undefined,
+      where:
+        q || onlyActive
+          ? {
+              ...(onlyActive ? { isActive: true } : {}),
+              ...(q
+                ? {
+                    OR: [
+                      { name: { contains: q, mode: "insensitive" } },
+                      { city: { contains: q, mode: "insensitive" } },
+                      { code: { equals: q, mode: "insensitive" } },
+                    ],
+                  }
+                : {}),
+            }
+          : undefined,
       include: {
         _count: {
           select: {
@@ -380,6 +387,38 @@ export class BranchService {
       entity: "Branch",
       entityId: updated.id,
       meta: { before: existing, after: patch },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Soft toggle (preferred over delete): deactivate/reactivate branch.
+   * - Deactivate keeps all data but makes the branch unavailable for new operations.
+   */
+  async setActive(id: string, isActive: boolean, actorUserId?: string | null) {
+    const existing = await this.prisma.branch.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("Branch not found");
+
+    if (existing.isActive === isActive) {
+      return existing;
+    }
+
+    const updated = await this.prisma.branch.update({
+      where: { id },
+      data: { isActive },
+    });
+
+    await this.audit.log({
+      actorUserId: actorUserId ?? null,
+      branchId: updated.id,
+      action: isActive ? "REACTIVATE" : "DEACTIVATE",
+      entity: "Branch",
+      entityId: updated.id,
+      meta: {
+        before: { isActive: existing.isActive },
+        after: { isActive },
+      },
     });
 
     return updated;

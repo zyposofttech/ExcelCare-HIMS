@@ -21,6 +21,25 @@ export function pickBranchId(queryBranchId?: string | null, bodyBranchId?: strin
  * - BRANCH principals: always return principal.branchId; if requestedBranchId provided and differs -> 403
  * - GLOBAL principals: return requestedBranchId when provided; if requiredForGlobal and missing -> 400; else null (meaning "all branches")
  */
+// Overloads to keep branchId types strict in call-sites.
+// - If a concrete branchId string is provided, we will always return a string.
+// - If `requiredForGlobal: true`, GLOBAL principals must provide a branchId and the return is a string.
+// - Otherwise, GLOBAL principals may omit branchId and the return can be null ("all branches").
+export function resolveBranchId(
+  principal: Principal,
+  requestedBranchId: string,
+  opts?: { requiredForGlobal?: boolean },
+): string;
+export function resolveBranchId(
+  principal: Principal,
+  requestedBranchId: string | null | undefined,
+  opts: { requiredForGlobal: true },
+): string;
+export function resolveBranchId(
+  principal: Principal,
+  requestedBranchId?: string | null,
+  opts?: { requiredForGlobal?: false },
+): string | null;
 export function resolveBranchId(
   principal: Principal,
   requestedBranchId?: string | null,

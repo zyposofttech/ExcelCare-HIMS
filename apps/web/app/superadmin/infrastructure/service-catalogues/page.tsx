@@ -134,7 +134,7 @@ type CatalogueVersionRow = {
 /*                                   Utils                                    */
 /* -------------------------------------------------------------------------- */
 
-const LS_BRANCH = "zc.superadmin.infrastructure.branchId";
+const LS_BRANCH = "zc.activeBranchId";
 
 function readLS(key: string) {
   if (typeof window === "undefined") return null;

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { Principal } from "../../auth/access-policy.service";
 import { InfraContextService } from "../shared/infra-context.service";
 import type { CreateUnitRoomDto, UpdateUnitRoomDto } from "./dto";
@@ -133,9 +133,7 @@ export class RoomsService {
     });
     if (!room) throw new NotFoundException("Room not found");
 
-    if ((principal as any).roleScope === "BRANCH" && (principal as any).branchId !== room.branchId) {
-      throw new ForbiddenException("Cannot access another branch");
-    }
+    const branchId = this.ctx.resolveBranchId(principal, room.branchId);
 
     const hard = !!opts.hard;
     const cascade = opts.cascade !== false;
@@ -151,7 +149,7 @@ export class RoomsService {
       await this.ctx.prisma.unitRoom.delete({ where: { id: roomId } });
 
       await this.ctx.audit.log({
-        branchId: room.branchId,
+        branchId,
         actorUserId: principal.userId,
         action: "ROOM_DELETE_HARD",
         entity: "UnitRoom",
@@ -173,7 +171,7 @@ export class RoomsService {
     }
 
     await this.ctx.audit.log({
-      branchId: room.branchId,
+      branchId,
       actorUserId: principal.userId,
       action: "ROOM_DEACTIVATE",
       entity: "UnitRoom",

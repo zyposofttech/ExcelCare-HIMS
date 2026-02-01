@@ -40,6 +40,11 @@ export class IamSeedService implements OnModuleInit {
       { code: PERM.IAM_PERMISSION_READ, name: "Read permissions", category: "IAM" },
       { code: PERM.IAM_AUDIT_READ, name: "Read audit events", category: "IAM" },
 
+      // RBAC design (SUPER_ADMIN only; do NOT grant to Corporate/Branch)
+      { code: PERM.IAM_PERMISSION_CREATE, name: "Create permissions", category: "IAM" },
+      { code: PERM.IAM_ROLE_CREATE, name: "Create roles", category: "IAM" },
+      { code: PERM.IAM_ROLE_UPDATE, name: "Update roles", category: "IAM" },
+
       // Facility
       { code: PERM.FACILITY_CATALOG_READ, name: "Read facility catalog", category: "Facility" },
       { code: PERM.FACILITY_CATALOG_CREATE, name: "Create facility catalog items", category: "Facility" },
@@ -167,6 +172,10 @@ export class IamSeedService implements OnModuleInit {
 
     ];
 
+    // Convenience: group permission codes by prefix (keeps role definitions readable)
+    const INFRA_ALL = Object.values(PERM).filter((c) => c.startsWith("INFRA_"));
+    const OT_ALL = Object.values(PERM).filter((c) => c.startsWith("ot."));
+
     for (const p of permissions) {
       await this.prisma.permission.upsert({
         where: { code: p.code },
@@ -177,6 +186,7 @@ export class IamSeedService implements OnModuleInit {
 
     const roleTemplates = [
       { code: ROLE.SUPER_ADMIN, name: "Super Admin", scope: "GLOBAL" as const, desc: "Global system administrator" },
+      { code: ROLE.CORPORATE_ADMIN, name: "Corporate Admin", scope: "GLOBAL" as const, desc: "Enterprise owner (multi-branch ops; no RBAC/governance design by default)" },
       { code: ROLE.BRANCH_ADMIN, name: "Branch Admin", scope: "BRANCH" as const, desc: "Branch configuration and user onboarding" },
       { code: ROLE.IT_ADMIN, name: "IT Admin", scope: "BRANCH" as const, desc: "Branch IT operations (user resets/activation)" },
     ];
@@ -202,7 +212,55 @@ export class IamSeedService implements OnModuleInit {
       const permCodes =
         r.code === ROLE.SUPER_ADMIN
           ? permissions.map((x) => x.code)
-          : r.code === ROLE.BRANCH_ADMIN
+          : r.code === ROLE.CORPORATE_ADMIN
+            ? [
+              // Enterprise ops (multi-branch) + Infrastructure Setup Studio
+              PERM.BRANCH_READ,
+              PERM.BRANCH_CREATE,
+              PERM.BRANCH_UPDATE,
+              PERM.BRANCH_DELETE,
+
+              PERM.IAM_USER_READ,
+              PERM.IAM_USER_CREATE,
+              PERM.IAM_USER_UPDATE,
+              PERM.IAM_USER_RESET_PASSWORD,
+
+              // Read-only role/permission visibility (dropdowns etc.)
+              PERM.IAM_ROLE_READ,
+              PERM.IAM_PERMISSION_READ,
+
+              // Audit read (optional but useful)
+              PERM.IAM_AUDIT_READ,
+
+              // Facility setup (catalog + mappings)
+              PERM.FACILITY_CATALOG_READ,
+              PERM.FACILITY_CATALOG_CREATE,
+              PERM.BRANCH_FACILITY_READ,
+              PERM.BRANCH_FACILITY_UPDATE,
+
+              PERM.DEPARTMENT_READ,
+              PERM.DEPARTMENT_CREATE,
+              PERM.DEPARTMENT_UPDATE,
+              PERM.DEPARTMENT_ASSIGN_DOCTORS,
+
+              PERM.DEPARTMENT_SPECIALTY_READ,
+              PERM.DEPARTMENT_SPECIALTY_UPDATE,
+
+              PERM.SPECIALTY_READ,
+              PERM.SPECIALTY_CREATE,
+              PERM.SPECIALTY_UPDATE,
+
+              PERM.STAFF_READ,
+
+              // Infrastructure + OT configuration
+              ...INFRA_ALL,
+              ...OT_ALL,
+
+              // NOTE: Explicitly NOT granted (by design):
+              // - PERM.IAM_ROLE_CREATE / PERM.IAM_ROLE_UPDATE / PERM.IAM_PERMISSION_CREATE
+              // - PERM.GOV_POLICY_* (unless you explicitly want Corporate to manage governance packs)
+            ]
+            : r.code === ROLE.BRANCH_ADMIN
             ? [
               PERM.BRANCH_READ,
               PERM.IAM_USER_READ, PERM.IAM_USER_CREATE, PERM.IAM_USER_UPDATE,
@@ -243,6 +301,16 @@ export class IamSeedService implements OnModuleInit {
 
       const perms = await this.prisma.permission.findMany({ where: { code: { in: permCodes } } });
 
+
+      // Keep CORPORATE_ADMIN permissions aligned to the intended minimal set (seed acts as source-of-truth).
+      // This prevents accidental privilege creep (e.g., GOV_POLICY_* or RBAC design permissions) in dev environments.
+      if (r.code === ROLE.CORPORATE_ADMIN) {
+        const allowedIds = perms.map((x) => x.id);
+        await this.prisma.roleTemplatePermission.deleteMany({
+          where: { roleVersionId: v1.id, permissionId: { notIn: allowedIds } },
+        });
+      }
+
       for (const p of perms) {
         await this.prisma.roleTemplatePermission.upsert({
           where: { roleVersionId_permissionId: { roleVersionId: v1.id, permissionId: p.id } },
@@ -250,6 +318,19 @@ export class IamSeedService implements OnModuleInit {
           create: { roleVersionId: v1.id, permissionId: p.id },
         });
       }
+    }
+
+    // ✅ Ensure CORPORATE_ADMIN users have roleVersionId set (prevents empty permissions)
+    const corpTpl = await this.prisma.roleTemplate.findUnique({ where: { code: ROLE.CORPORATE_ADMIN } });
+    const corpV1 = corpTpl
+      ? await this.prisma.roleTemplateVersion.findFirst({ where: { roleTemplateId: corpTpl.id, version: 1 } })
+      : null;
+
+    if (corpV1) {
+      await this.prisma.user.updateMany({
+        where: { role: ROLE.CORPORATE_ADMIN, OR: [{ roleVersionId: null }, { roleVersionId: undefined as any }] },
+        data: { roleVersionId: corpV1.id },
+      });
     }
 
     // ✅ Ensure SUPER_ADMIN users have roleVersionId set (prevents empty permissions)

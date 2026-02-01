@@ -119,6 +119,9 @@ model Branch {
   name String
   city String
 
+  // Soft lifecycle toggle (preferred over delete)
+  isActive Boolean @default(true)
+
   address       String? @db.VarChar(240)
   contactPhone1 String? @db.VarChar(20)
   contactPhone2 String? @db.VarChar(20)

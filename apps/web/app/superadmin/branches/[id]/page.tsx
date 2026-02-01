@@ -44,6 +44,8 @@ type BranchRow = {
   name: string;
   city: string;
 
+  isActive?: boolean;
+
   gstNumber?: string | null;
 
   address?: string | null;
@@ -578,8 +580,9 @@ function DeleteConfirmModal({
       await apiFetch(`/api/branches/${branch.id}`, { method: "DELETE" });
 
       toast({
-        title: "Branch Deleted",
-        description: `Deleted "${branch.name}"`,
+        title: "Branch Deleted (Hard)",
+        description: `Hard deleted "${branch.name}"`,
+        variant: "success",
       });
 
       await onDeleted();
@@ -597,8 +600,8 @@ function DeleteConfirmModal({
 
   return (
     <ModalShell
-      title="Delete Branch"
-      description="Deletion is allowed only when there is no Facilities/Departments/Specialties setup for this branch."
+      title="Hard Delete Branch"
+      description="Hard delete is allowed only when there is no Facilities/Departments/Specialties setup for this branch. Prefer Deactivate for retirement unless this is a test branch."
       onClose={onClose}
     >
       {err ? (
@@ -636,10 +639,104 @@ function DeleteConfirmModal({
           Cancel
         </Button>
         <Button variant="destructive" onClick={onConfirm} disabled={busy || deps > 0}>
-          {deps > 0 ? "Cannot Delete (Has Setup)" : busy ? "Deleting…" : "Delete"}
+          {deps > 0 ? "Cannot Delete (Has Setup)" : busy ? "Deleting…" : "Hard Delete"}
         </Button>
       </div>
     </ModalShell>
+  );
+}
+
+function ToggleActiveConfirmDialog({
+  open,
+  branch,
+  action,
+  onClose,
+  onChanged,
+}: {
+  open: boolean;
+  branch: BranchRow | null;
+  action: "deactivate" | "reactivate";
+  onClose: () => void;
+  onChanged: () => Promise<void> | void;
+}) {
+  const { toast } = useToast();
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (open) {
+      setErr(null);
+      setBusy(false);
+    }
+  }, [open]);
+
+  const nextActive = action === "reactivate";
+  const title = nextActive ? "Reactivate Branch" : "Deactivate Branch";
+  const description = nextActive
+    ? "This will re-enable the branch for operations. No data is deleted."
+    : "This will retire the branch (soft toggle). No data is deleted, and you can reactivate later.";
+
+  async function onConfirm() {
+    if (!branch?.id) return;
+    setErr(null);
+    setBusy(true);
+    try {
+      await apiFetch(`/api/branches/${branch.id}/${action}`, { method: "PATCH" });
+      await onChanged();
+      toast({
+        title,
+        description: `${nextActive ? "Reactivated" : "Deactivated"} "${branch.name}"`,
+        variant: "success",
+      });
+      onClose();
+    } catch (e: any) {
+      setErr(e?.message || "Update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open || !branch) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : null)}>
+      <DialogContent className={drawerClassName("max-w-2xl")}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+
+        {err ? (
+          <div className="flex items-start gap-2 rounded-xl border border-[rgb(var(--zc-danger-rgb)/0.35)] bg-[rgb(var(--zc-danger-rgb)/0.12)] px-3 py-2 text-sm text-[rgb(var(--zc-danger))]">
+            <AlertTriangle className="mt-0.5 h-4 w-4" />
+            <div className="min-w-0">{err}</div>
+          </div>
+        ) : null}
+
+        <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
+          <div className="text-sm font-semibold text-zc-text">
+            {branch.name} <span className="font-mono text-xs text-zc-muted">({branch.code})</span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <MetricPill label="Facilities" value={countOf(branch, "facilities")} tone="sky" />
+            <MetricPill label="Departments" value={countOf(branch, "departments")} tone="emerald" />
+            <MetricPill label="Specialties" value={countOf(branch, "specialties")} tone="violet" />
+          </div>
+          <div className="mt-4 text-sm text-zc-muted">
+            Tip: prefer deactivation for retirement. Hard delete should be used only for test branches with no dependent data.
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant={nextActive ? "success" : "secondary"} onClick={onConfirm} disabled={busy}>
+            {busy ? "Updating…" : nextActive ? "Reactivate" : "Deactivate"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -654,6 +751,9 @@ export default function BranchDetailPage() {
     (user as any)?.roleCode === "SUPER_ADMIN" ||
     (Array.isArray((user as any)?.roles) && (user as any).roles.includes("SUPER_ADMIN"));
 
+  // Corporate / Global admins can manage branch registry (edit + deactivate/reactivate)
+  const isGlobalAdmin = (user as any)?.roleScope === "GLOBAL" || isSuperAdmin;
+
   const router = useRouter();
   const params = useParams();
   const id = typeof params?.id === "string" ? params.id : Array.isArray(params?.id) ? params.id[0] : "";
@@ -664,6 +764,8 @@ export default function BranchDetailPage() {
 
   const [editOpen, setEditOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [toggleOpen, setToggleOpen] = React.useState(false);
+  const [toggleAction, setToggleAction] = React.useState<"deactivate" | "reactivate">("deactivate");
   const [activeTab, setActiveTab] = React.useState<"overview" | "setup">("overview");
 
   const facilitySetupHref = `/superadmin/infrastructure/facilities/`;
@@ -754,6 +856,15 @@ export default function BranchDetailPage() {
                     <span
                       className={cn(
                         "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] border",
+                        row.isActive !== false ? pillTones.emerald : pillTones.amber,
+                      )}
+                    >
+                      {row.isActive !== false ? "Active" : "Inactive"}
+                    </span>
+                    <span className="text-zc-muted/60">•</span>
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] border",
                         readyFacilities || readyDepartments || readySpecialties ? pillTones.emerald : pillTones.zinc,
                       )}
                     >
@@ -791,7 +902,7 @@ export default function BranchDetailPage() {
               Refresh
             </Button>
 
-            {isSuperAdmin ? (
+            {isGlobalAdmin ? (
               <Button asChild className="gap-2">
                 <Link href={facilitySetupHref}>
                   <Wand2 className="h-4 w-4" />
@@ -800,16 +911,30 @@ export default function BranchDetailPage() {
               </Button>
             ) : null}
 
-            {isSuperAdmin && !loading && row ? (
+            {isGlobalAdmin && !loading && row ? (
               <>
                 <Button variant="secondary" className="gap-2" onClick={() => setEditOpen(true)}>
                   <Pencil className="h-4 w-4" />
                   Edit
                 </Button>
-                <Button variant="destructive" className="gap-2" onClick={() => setDeleteOpen(true)}>
-                  <Trash2 className="h-4 w-4" />
-                  Delete
+
+                <Button
+                  variant={row.isActive !== false ? "secondary" : "success"}
+                  className="gap-2"
+                  onClick={() => {
+                    setToggleAction(row.isActive !== false ? "deactivate" : "reactivate");
+                    setToggleOpen(true);
+                  }}
+                >
+                  {row.isActive !== false ? "Deactivate" : "Reactivate"}
                 </Button>
+
+                {isSuperAdmin && row.isActive === false ? (
+                  <Button variant="destructive" className="gap-2" onClick={() => setDeleteOpen(true)}>
+                    <Trash2 className="h-4 w-4" />
+                    Hard Delete
+                  </Button>
+                ) : null}
               </>
             ) : null}
           </div>
@@ -1098,6 +1223,14 @@ export default function BranchDetailPage() {
       </div>
 
       <EditBranchModal open={editOpen} branch={row} onClose={() => setEditOpen(false)} onSaved={() => refresh(false)} />
+
+      <ToggleActiveConfirmDialog
+        open={toggleOpen}
+        branch={row}
+        action={toggleAction}
+        onClose={() => setToggleOpen(false)}
+        onChanged={() => refresh(false)}
+      />
 
       <DeleteConfirmModal
         open={deleteOpen}

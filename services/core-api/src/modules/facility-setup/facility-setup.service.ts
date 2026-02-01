@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import type { PrismaClient } from "@zypocare/db";
 import { AuditService } from "../audit/audit.service";
 import type { Principal } from "../auth/access-policy.service";
+import { resolveBranchId as resolveBranchIdCommon } from "../../common/branch-scope.util";
 import type { CreateFacilityDto, CreateSpecialtyDto, UpdateSpecialtyDto, SetDepartmentSpecialtiesDto } from "./facility-setup.dto";
 
 function uniq(ids: string[]) {
@@ -16,15 +17,8 @@ export class FacilitySetupService {
   ) { }
 
   private resolveBranchId(principal: Principal, requestedBranchId?: string | null) {
-    if (principal.roleScope === "BRANCH") {
-      if (!principal.branchId) throw new ForbiddenException("Branch-scoped principal missing branchId");
-      if (requestedBranchId && requestedBranchId !== principal.branchId) throw new ForbiddenException("Cannot access another branch");
-      return principal.branchId;
-    }
-
-    // GLOBAL scope
-    if (!requestedBranchId) throw new BadRequestException("branchId is required for global operations");
-    return requestedBranchId;
+    // Standardized branch resolution for facility setup: GLOBAL must provide branchId (except catalog ops)
+    return resolveBranchIdCommon(principal, requestedBranchId ?? null, { requiredForGlobal: true });
   }
 
   // ---------------------------------------------------------------------------
@@ -498,9 +492,7 @@ export class FacilitySetupService {
   if (!row) throw new NotFoundException("Department not found");
 
   // Branch scope enforcement
-  if (principal.roleScope === "BRANCH" && principal.branchId !== row.branchId) {
-    throw new ForbiddenException("Cannot access another branch");
-  }
+  this.resolveBranchId(principal, row.branchId);
 
   const hard = !!opts.hard;
 
@@ -566,9 +558,7 @@ async deactivateSpecialty(
   });
   if (!row) throw new NotFoundException("Specialty not found");
 
-  if (principal.roleScope === "BRANCH" && principal.branchId !== row.branchId) {
-    throw new ForbiddenException("Cannot access another branch");
-  }
+  this.resolveBranchId(principal, row.branchId);
 
   const hard = !!opts.hard;
 

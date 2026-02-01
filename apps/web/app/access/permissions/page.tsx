@@ -3,6 +3,7 @@
 import * as React from "react";
 import { AppShell } from "@/components/AppShell";
 import { apiFetch } from "@/lib/api";
+import { getRoleCode, useAuthStore } from "@/lib/auth/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,6 +65,10 @@ const PERMISSION_CATEGORIES = [
 ];
 
 export default function AccessPermissionsPage() {
+  const user = useAuthStore((s) => s.user);
+  const roleCode = getRoleCode(user);
+  const isSuperAdmin = roleCode === "SUPER_ADMIN";
+
   const [q, setQ] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [perms, setPerms] = React.useState<Permission[]>([]);
@@ -123,6 +128,7 @@ export default function AccessPermissionsPage() {
 
   async function createPermission() {
     setErr(null);
+    if (!isSuperAdmin) return setErr("Only SUPER_ADMIN can create permissions.");
     if (!cCode.trim()) return setErr("Code is required.");
     if (!cName.trim()) return setErr("Name is required.");
     if (!cCategory.trim()) return setErr("Category is required.");
@@ -182,7 +188,11 @@ export default function AccessPermissionsPage() {
                   )}
                   Refresh
                 </Button>
-                <Button onClick={() => setOpenCreate(true)}>
+                <Button
+                  onClick={() => setOpenCreate(true)}
+                  disabled={!isSuperAdmin}
+                  title={!isSuperAdmin ? "Only SUPER_ADMIN can create permissions." : undefined}
+                >
                   <Plus className="h-4 w-4" />
                   Create Permission
                 </Button>

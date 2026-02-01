@@ -14,13 +14,25 @@ import { AccessPolicyService } from "./access-policy.service";
 import { PrincipalGuard } from "./principal.guard";
 import { PermissionsGuard } from "./permissions.guard";
 
+function readJwtExpiresIn(): number | string | undefined {
+  const raw = process.env.JWT_EXPIRES_IN;
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const asNumber = Number(trimmed);
+  if (Number.isFinite(asNumber)) return asNumber;
+  return trimmed;
+}
+
 @Module({
   imports: [
     AuditModule,
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET || "dev-secret-key",
-      signOptions: { expiresIn: "1d" },
+      signOptions: {
+        expiresIn: (readJwtExpiresIn() || "1d") as any,
+      },
     }),
   ],
   controllers: [AuthController],

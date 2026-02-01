@@ -36,7 +36,7 @@ type UnitResource = {
   isActive?: boolean;
 };
 
-const LS_KEY = "zc.superadmin.infrastructure.bedPolicy.branchId";
+const LS_KEY = "zc.activeBranchId";
 
 function readLS(key: string): string | null {
   if (typeof window === "undefined") return null;

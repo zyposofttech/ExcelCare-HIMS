@@ -86,7 +86,7 @@ type DeptSpecialtyListResp = {
 
 /* ----------------------------- Helpers ----------------------------- */
 
-const LS_BRANCH_KEY = "zc.superadmin.infrastructure.branchId";
+const LS_BRANCH_KEY = "zc.activeBranchId";
 
 function readLS(key: string) {
   if (typeof window === "undefined") return null;

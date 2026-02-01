@@ -119,7 +119,7 @@ type BranchReadiness = {
 
 // ---------------- Utilities ----------------
 
-const LS_KEY = "zc.superadmin.infrastructure.branchId";
+const LS_KEY = "zc.activeBranchId";
 
 const pillTones = {
   sky: "border-sky-200/70 bg-sky-50/70 text-sky-700 dark:border-sky-900/40 dark:bg-sky-900/20 dark:text-sky-200",

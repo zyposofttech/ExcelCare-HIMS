@@ -3,6 +3,7 @@
 import * as React from "react";
 import { AppShell } from "@/components/AppShell";
 import { apiFetch } from "@/lib/api";
+import { getRoleCode, useAuthStore } from "@/lib/auth/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -74,6 +75,10 @@ function formatScope(scope: Role["scope"]) {
 }
 
 export default function AccessRolesPage() {
+  const user = useAuthStore((s) => s.user);
+  const roleCode = getRoleCode(user);
+  const isSuperAdmin = roleCode === "SUPER_ADMIN";
+
   const [q, setQ] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [roles, setRoles] = React.useState<Role[]>([]);
@@ -141,6 +146,7 @@ export default function AccessRolesPage() {
 
   async function createRole() {
     setErr(null);
+    if (!isSuperAdmin) return setErr("Only SUPER_ADMIN can create roles.");
     const name = cName.trim();
     const code = cCode.trim();
 
@@ -178,6 +184,10 @@ export default function AccessRolesPage() {
   }
 
   function openEditDialog(role: Role) {
+    if (!isSuperAdmin) {
+      setErr("Only SUPER_ADMIN can edit roles.");
+      return;
+    }
     setEditTarget(role);
     setEName(role.roleName);
     setEPerms([...role.permissions]);
@@ -188,6 +198,7 @@ export default function AccessRolesPage() {
   async function saveEdit() {
     if (!editTarget) return;
     setErr(null);
+    if (!isSuperAdmin) return setErr("Only SUPER_ADMIN can edit roles.");
     const name = eName.trim();
     if (!name) return setErr("Role name is required.");
 
@@ -317,7 +328,11 @@ export default function AccessRolesPage() {
                   Refresh
                 </Button>
 
-                <Button onClick={() => setOpenCreate(true)}>
+                <Button
+                  onClick={() => setOpenCreate(true)}
+                  disabled={!isSuperAdmin}
+                  title={!isSuperAdmin ? "Only SUPER_ADMIN can create roles." : undefined}
+                >
                   <Plus className="h-4 w-4" />
                   Create role
                 </Button>
@@ -392,6 +407,8 @@ export default function AccessRolesPage() {
                               size="sm"
                               variant="outline"
                               onClick={() => openEditDialog(r)}
+                              disabled={!isSuperAdmin}
+                              title={!isSuperAdmin ? "Only SUPER_ADMIN can edit roles." : undefined}
                             >
                               <Edit className="h-4 w-4 mr-1" />
                               Edit

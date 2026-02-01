@@ -41,8 +41,12 @@ export class IamController {
   
   @Get("users")
   @Permissions(PERM.IAM_USER_READ)
-  async users(@Query("q") q: string | undefined, @Req() req: any) {
-    return this.iam.listUsers(this.principal(req), q);
+  async users(
+    @Query("q") q: string | undefined,
+    @Query("branchId") branchId: string | undefined,
+    @Req() req: any,
+  ) {
+    return this.iam.listUsers(this.principal(req), q, branchId);
   }
 
   @Get("users/:id")
@@ -76,6 +80,7 @@ export class IamController {
     @Query("entityId") entityId: string | undefined,
     @Query("actorUserId") actorUserId: string | undefined,
     @Query("action") action: string | undefined,
+    @Query("branchId") branchId: string | undefined,
     @Query("take") take: string | undefined,
     @Req() req: any,
   ) {
@@ -84,18 +89,19 @@ export class IamController {
       entityId,
       actorUserId,
       action,
+      branchId,
       take: take ? Number(take) : undefined,
     });
   }
 
   @Post("roles")
-  // @Permissions(PERM.IAM_ROLE_CREATE) <--- Ensure this constant exists in iam.constants.ts
+  @Permissions(PERM.IAM_ROLE_CREATE)
   async createRole(@Body() dto: CreateRoleDto, @Req() req: any) {
     return this.iam.createRole(this.principal(req), dto);
   }
 
   @Patch("roles/:code")
-  // @Permissions(PERM.IAM_ROLE_UPDATE) <--- Ensure this constant exists
+  @Permissions(PERM.IAM_ROLE_UPDATE)
   async updateRole(@Param("code") code: string, @Body() dto: UpdateRoleDto, @Req() req: any) {
     return this.iam.updateRole(this.principal(req), code, dto);
   }

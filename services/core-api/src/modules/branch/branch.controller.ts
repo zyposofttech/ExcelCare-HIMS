@@ -20,6 +20,11 @@ class ListBranchesQuery {
   @IsOptional()
   @IsString()
   q?: string;
+
+  // When true, returns only active branches (useful for selectors)
+  @IsOptional()
+  @IsString()
+  onlyActive?: string;
 }
 
 class CreateBranchDto {
@@ -118,8 +123,11 @@ export class BranchController {
   async list(@Query() q: ListBranchesQuery, @Req() req: any) {
     const principal = req.principal;
 
+    const onlyActive = String(q.onlyActive ?? "").toLowerCase();
+    const onlyActiveBool = onlyActive === "true" || onlyActive === "1" || onlyActive === "yes";
+
     if (isGlobalAdmin(principal)) {
-      return this.branches.list({ q: q.q ?? null }); // ALL branches
+      return this.branches.list({ q: q.q ?? null, onlyActive: onlyActiveBool ? true : null });
     }
 
     if (!principal?.branchId) return [];
@@ -164,6 +172,30 @@ export class BranchController {
     const principal = req.principal;
     const actorUserId = principal?.userId ?? req?.user?.sub ?? null;
     return this.branches.update(id, dto, actorUserId);
+  }
+
+  // ---------------- Soft lifecycle toggle (preferred over delete) ----------------
+
+  @Permissions(PERM.BRANCH_UPDATE)
+  @Patch(":id/deactivate")
+  async deactivate(@Param("id") id: string, @Req() req: any) {
+    const principal = req.principal;
+    if (!isGlobalAdmin(principal)) {
+      throw new ForbiddenException("Only global admins can deactivate branches");
+    }
+    const actorUserId = principal?.userId ?? req?.user?.sub ?? null;
+    return this.branches.setActive(id, false, actorUserId);
+  }
+
+  @Permissions(PERM.BRANCH_UPDATE)
+  @Patch(":id/reactivate")
+  async reactivate(@Param("id") id: string, @Req() req: any) {
+    const principal = req.principal;
+    if (!isGlobalAdmin(principal)) {
+      throw new ForbiddenException("Only global admins can reactivate branches");
+    }
+    const actorUserId = principal?.userId ?? req?.user?.sub ?? null;
+    return this.branches.setActive(id, true, actorUserId);
   }
 
   @Permissions(PERM.BRANCH_DELETE)

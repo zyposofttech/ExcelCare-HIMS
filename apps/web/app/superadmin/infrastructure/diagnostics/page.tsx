@@ -307,7 +307,7 @@ const MODALITIES: Array<{ value: Modality; label: string }> = [
    Utilities (aligned to backend regex + maxLen)
    ========================================================= */
 
-const LS_KEY = "zc.superadmin.infrastructure.branchId";
+const LS_KEY = "zc.activeBranchId";
 const CODE_REGEX = /^[A-Z0-9][A-Z0-9-]{0,63}$/; // backend: 1-64
 
 function normalizeCode(v: any) {

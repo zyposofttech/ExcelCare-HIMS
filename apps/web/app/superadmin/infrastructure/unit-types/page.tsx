@@ -58,7 +58,7 @@ type BranchUnitTypeRow =
 
 /* ----------------------------- Helpers ----------------------------- */
 
-const LS_KEY = "zc.superadmin.infrastructure.branchId";
+const LS_KEY = "zc.activeBranchId";
 
 type Tone = "indigo" | "emerald" | "amber" | "rose";
 

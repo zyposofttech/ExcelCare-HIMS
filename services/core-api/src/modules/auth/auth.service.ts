@@ -104,7 +104,10 @@ export class AuthService {
 
     const policyErrors = validatePassword(newPassword);
     if (policyErrors.length) {
-      throw new BadRequestException({ message: "Password policy violation", errors: policyErrors });
+      throw new BadRequestException({
+        message: "Password policy violation",
+        errors: policyErrors,
+      });
     }
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });

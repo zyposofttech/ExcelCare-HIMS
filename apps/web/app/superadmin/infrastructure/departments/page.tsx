@@ -85,7 +85,7 @@ function fmtDateTime(value?: string | Date | null) {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-const LS_BRANCH_KEY = "zc.superadmin.infrastructure.branchId";
+const LS_BRANCH_KEY = "zc.activeBranchId";
 const ALL_FACILITIES = "__ALL__";
 
 function readLS(key: string) {

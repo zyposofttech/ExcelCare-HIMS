@@ -24,6 +24,49 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
 type AuthView = "LOGIN" | "FORGOT";
 const REMEMBER_DEVICE_KEY = "zypocare-remember-device";
 
+function sanitizeNext(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const v = String(raw).trim();
+  // Prevent open redirects
+  if (!v.startsWith("/")) return null;
+  return v;
+}
+
+function resolveScope(u: any): "GLOBAL" | "BRANCH" | null {
+  if (!u) return null;
+  const scope = u.roleScope as ("GLOBAL" | "BRANCH" | null | undefined);
+  if (scope === "GLOBAL" || scope === "BRANCH") return scope;
+
+  const roleCode = String(u.roleCode ?? u.role ?? "").trim().toUpperCase();
+  if (roleCode === "SUPER_ADMIN" || roleCode === "CORPORATE_ADMIN") return "GLOBAL";
+  if (u.branchId) return "BRANCH";
+  return null;
+}
+
+function homeForUser(u: any): string {
+  const scope = resolveScope(u);
+  return scope === "BRANCH" ? "/admin" : "/superadmin";
+}
+
+function nextForUser(u: any, requestedNext: string | null): string {
+  const scope = resolveScope(u);
+  const safeNext = sanitizeNext(requestedNext);
+
+  if (!safeNext) return homeForUser(u);
+
+  // Branch users must never land in Central Console or Access screens
+  if (scope === "BRANCH" && (safeNext.startsWith("/superadmin") || safeNext.startsWith("/access"))) {
+    return "/admin";
+  }
+
+  // Global users normally operate from Central Console
+  if (scope === "GLOBAL" && safeNext.startsWith("/admin")) {
+    return "/superadmin";
+  }
+
+  return safeNext;
+}
+
 function BrandPattern() {
   return (
     <div className="absolute inset-0 z-0 overflow-hidden opacity-30 dark:opacity-20">
@@ -33,7 +76,7 @@ function BrandPattern() {
 }
 
 function StatusBadge() {
-  const [status, setStatus] = React.useState<'loading' | 'online' | 'offline'>('loading');
+  const [status, setStatus] = React.useState<"loading" | "online" | "offline">("loading");
 
   React.useEffect(() => {
     const checkHealth = async () => {
@@ -41,12 +84,12 @@ function StatusBadge() {
         // Fetches the NestJS HealthController @ /health (via proxy /api/health)
         const res = await fetch("/api/health");
         if (res.ok) {
-          setStatus('online');
+          setStatus("online");
         } else {
-          setStatus('offline');
+          setStatus("offline");
         }
       } catch (error) {
-        setStatus('offline');
+        setStatus("offline");
       }
     };
 
@@ -56,9 +99,12 @@ function StatusBadge() {
     return () => clearInterval(interval);
   }, []);
 
-  if (status === 'offline') {
+  if (status === "offline") {
     return (
-      <div className="flex items-center gap-2 rounded-full border border-red-200 bg-red-50/80 px-3 py-1 text-[11px] font-medium text-red-600 backdrop-blur-md transition dark:border-red-900/30 dark:bg-red-900/20 dark:text-red-400 cursor-not-allowed" title="Cannot connect to server">
+      <div
+        className="flex items-center gap-2 rounded-full border border-red-200 bg-red-50/80 px-3 py-1 text-[11px] font-medium text-red-600 backdrop-blur-md transition dark:border-red-900/30 dark:bg-red-900/20 dark:text-red-400 cursor-not-allowed"
+        title="Cannot connect to server"
+      >
         <span className="relative flex h-2 w-2">
           {/* Static red dot for offline */}
           <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500"></span>
@@ -68,7 +114,7 @@ function StatusBadge() {
     );
   }
 
-  if (status === 'loading') {
+  if (status === "loading") {
     return (
       <div className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white/50 px-3 py-1 text-[11px] font-medium text-zinc-500 backdrop-blur-md dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">
         <Loader2 className="h-2.5 w-2.5 animate-spin" />
@@ -79,7 +125,10 @@ function StatusBadge() {
 
   // Default: Online (Green)
   return (
-    <div className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white/50 px-3 py-1 text-[11px] font-medium text-zinc-600 backdrop-blur-md transition hover:bg-white/80 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300 dark:hover:bg-white/10 cursor-help" title="All systems operational">
+    <div
+      className="flex items-center gap-2 rounded-full border border-zinc-200 bg-white/50 px-3 py-1 text-[11px] font-medium text-zinc-600 backdrop-blur-md transition hover:bg-white/80 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300 dark:hover:bg-white/10 cursor-help"
+      title="All systems operational"
+    >
       <span className="relative flex h-2 w-2">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75"></span>
         <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
@@ -92,7 +141,7 @@ function StatusBadge() {
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/superadmin";
+  const requestedNext = searchParams.get("next");
 
   const { user, login } = useAuthStore();
   const isHydrated = useAuthStore((s) => s._hasHydrated);
@@ -107,13 +156,14 @@ export default function LoginPage() {
 
   React.useEffect(() => {
     if (isHydrated && user) {
+      const dest = nextForUser(user, requestedNext);
       if (user.mustChangePassword) {
-        router.replace(`/must-change-password?next=${encodeURIComponent(next)}` as any);
+        router.replace(`/must-change-password?next=${encodeURIComponent(dest)}` as any);
       } else {
-        router.replace(next as any);
+        router.replace(dest as any);
       }
     }
-  }, [user, isHydrated, router, next]);
+  }, [user, isHydrated, router, requestedNext]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -173,8 +223,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
-
+    <div className="flex h-screen w-full overflow-hidden bg-white text-zinc-900 dark:bg-zc-panel dark:text-zc-text">
       {/* Left Panel */}
       <div className="relative hidden w-2/3 flex-col justify-between border-r border-zinc-200 bg-zinc-50 p-16 text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white lg:flex">
         <BrandPattern />
@@ -200,142 +249,144 @@ export default function LoginPage() {
             </span>
           </h1>
           <p className="max-w-xl text-lg text-zinc-600 dark:text-zinc-400 leading-relaxed">
-            Unified clinical workflows, billing, and patient data in one secure enterprise environment.
+            Unified clinical workflows, governed operations, and enterprise-grade setup built for hospitals.
           </p>
+
           <div className="mt-8 flex gap-4">
-            <div className="flex items-center gap-3 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-300">
-              <ShieldCheck className="h-4 w-4 text-emerald-500" />
-              HIPAA Compliant
-            </div>
-            <div className="flex items-center gap-3 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-300">
-              <Lock className="h-4 w-4 text-emerald-500" />
-              SOC2 Type II Ready
-            </div>
-          </div>
+                      <div className="flex items-center gap-3 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-300">
+                        <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                        HIPAA Compliant
+                      </div>
+                      <div className="flex items-center gap-3 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-300">
+                        <Lock className="h-4 w-4 text-emerald-500" />
+                        End-to-End Encrypted
+                      </div>
+                    </div>
         </div>
-        <div className="relative z-10 text-xs text-zinc-400 dark:text-zinc-500">
-          © 2026 ZypoSoft Technologies. • Enterprise Build v4.2.0
+
+        <div className="relative z-10 flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+          <div>© {new Date().getFullYear()} ZypoCare</div>
+          <div className="flex items-center gap-2">
+            <span>v0.1</span>
+            <span className="h-1 w-1 rounded-full bg-zinc-400" />
+            <span>Build: DEV</span>
+          </div>
         </div>
       </div>
 
       {/* Right Panel */}
-      <div className="relative flex flex-1 flex-col items-center justify-center bg-white p-8 dark:bg-zinc-950 lg:w-1/3 lg:flex-none">
-        <div className="absolute right-6 top-6">
+      <div className="flex w-full flex-col justify-between p-8 lg:w-1/3 lg:p-12">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3 font-semibold lg:hidden">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white">
+              <Command className="h-5 w-5" />
+            </div>
+            <div>
+              ZypoCare <span className="font-normal text-zinc-500 dark:text-zinc-400">ONE</span>
+            </div>
+          </div>
           <ThemeToggle />
         </div>
 
-        <div className="w-full max-w-[360px] space-y-8">
-          <div className="space-y-1.5 text-center lg:text-left">
-            <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">
-              {view === "LOGIN" && "Welcome back"}
-              {view === "FORGOT" && "Reset Password"}
+        <div className="mx-auto w-full max-w-sm">
+          <div className="mb-8">
+            <h2 className="text-2xl font-semibold tracking-tight">
+              {view === "LOGIN" ? "Sign in" : "Reset password"}
             </h2>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              {view === "LOGIN" && "Enter your credentials to access the workspace."}
-              {view === "FORGOT" && "We'll send a recovery link to your email."}
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              {view === "LOGIN"
+                ? "Use your work email and password to continue."
+                : "Enter your email and we’ll send reset instructions."}
             </p>
           </div>
 
-          {error && (
-            <div className="flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-50 p-4 text-sm font-medium text-red-600 dark:bg-red-500/10 dark:text-red-400 animate-in slide-in-from-top-2">
-              {error}
-            </div>
-          )}
-
-          {view === "LOGIN" && (
-            <form onSubmit={handleLogin} className="space-y-5">
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Email Address</label>
-                  <div className="group relative">
-                    <Mail className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zinc-400 transition group-focus-within:text-indigo-600 dark:group-focus-within:text-indigo-400" />
-                    <Input
-                      placeholder="Enter your email"
-                      type="email"
-                      className="pl-9 h-11 bg-zinc-50 border-zinc-200 focus:border-indigo-500 focus:ring-indigo-500/20 dark:bg-zinc-900 dark:border-zinc-800 dark:focus:border-indigo-400"
-                      value={email}
-                      onChange={e => setEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Password</label>
-                    <button type="button" onClick={() => setView("FORGOT")} className="text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300">
-                      Forgot password?
-                    </button>
-                  </div>
-                  <div className="group relative">
-                    <Lock className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zinc-400 transition group-focus-within:text-indigo-600 dark:group-focus-within:text-indigo-400" />
-                    <Input
-                      placeholder="Enter your password"
-                      type="password"
-                      className="pl-9 h-11 bg-zinc-50 border-zinc-200 focus:border-indigo-500 focus:ring-indigo-500/20 dark:bg-zinc-900 dark:border-zinc-800 dark:focus:border-indigo-400"
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between text-xs">
-                <label className="flex items-center gap-2 text-zinc-500 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={(e) => setRemember(e.target.checked)}
-                    className="rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800"
-                  />
-                  Remember device
-                </label>
-              </div>
-
-              <Button type="submit" disabled={isLoading} className="w-full h-11 text-base font-medium bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-600/20 dark:bg-indigo-600 dark:hover:bg-indigo-500">
-                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Sign in"}
-              </Button>
-
-              <div className="relative py-2">
-                <div className="absolute inset-0 flex items-center"><Separator className="w-full border-zinc-200 dark:border-zinc-800" /></div>
-                <div className="relative flex justify-center text-[10px] uppercase tracking-wider font-semibold"><span className="bg-white px-2 text-zinc-400 dark:bg-zinc-950">Or continue with</span></div>
-              </div>
-
-              <Button type="button" variant="outline" className="w-full h-11 border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800">
-                <Building2 className="mr-2 h-4 w-4 text-zinc-400" />
-                Enterprise SSO
-              </Button>
-            </form>
-          )}
-
-          {view === "FORGOT" && (
-            <div className="space-y-6 animate-in slide-in-from-left-4 fade-in duration-300">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Email Address</label>
-                <div className="group relative">
-                  <Mail className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zinc-400" />
-                  <Input placeholder="Enter your email" type="email" className="pl-9 h-11 bg-zinc-50 dark:bg-zinc-900" />
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <Button className="w-full h-11 bg-indigo-600 hover:bg-indigo-700 text-white">Send Reset Link</Button>
-                <Button variant="ghost" onClick={() => setView("LOGIN")} className="w-full h-11 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200">
-                  <ChevronLeft className="mr-2 h-4 w-4" /> Back to Login
-                </Button>
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Email</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@hospital.com"
+                  className="pl-10"
+                  autoComplete="email"
+                />
               </div>
             </div>
-          )}
 
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  type="password"
+                  className="pl-10"
+                  autoComplete="current-password"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-600"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
+                Remember this device
+              </label>
+
+              <button
+                type="button"
+                className="text-sm font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+                onClick={() => setView("FORGOT")}
+              >
+                Forgot password?
+              </button>
+            </div>
+
+            {error ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/30 dark:bg-red-900/20 dark:text-red-300">
+                {error}
+              </div>
+            ) : null}
+
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Signing in…
+                </span>
+              ) : (
+                "Sign in"
+              )}
+            </Button>
+          </form>
+
+          <Separator className="my-8" />
+
+          <div className="text-xs text-zinc-500 dark:text-zinc-400">
+            Need access? Contact your system administrator.
+          </div>
         </div>
-        <div className="absolute bottom-6 left-0 w-full text-center">
-          <div className="flex justify-center gap-6 text-xs font-medium text-zinc-400 dark:text-zinc-600">
-            <a href="#" className="hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors">Privacy Policy</a>
-            <a href="#" className="hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors">Terms of Service</a>
-            <a href="#" className="flex items-center gap-1 hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors">
-              <Globe className="h-3 w-3" /> Help Center
-            </a>
+
+        <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+          <div className="inline-flex items-center gap-1">
+            <Building2 className="h-4 w-4" />
+            Enterprise-ready HIMS
+          </div>
+          <div className="inline-flex items-center gap-1">
+            <ChevronLeft className="h-4 w-4" />
+            Back to site
           </div>
         </div>
       </div>

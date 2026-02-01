@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 
-import { apiFetch } from "@/lib/api";
+import { apiFetch, type Principal as ApiPrincipal } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useAuthStore } from "@/lib/auth/store";
 
@@ -80,7 +80,25 @@ export default function UsersPage() {
   const { toast } = useToast();
   const user = useAuthStore((s) => s.user);
 
-  const isSuperAdmin = user?.role === "SUPER_ADMIN" || (user as any)?.roleCode === "SUPER_ADMIN";
+  // Principal (includes permissions). We use this for UI gating (defense-in-depth).
+  const [principal, setPrincipal] = React.useState<ApiPrincipal | null>(null);
+
+  const roleCode = String(user?.roleCode ?? user?.role ?? "").trim().toUpperCase();
+  const roleScope = (user?.roleScope === "GLOBAL" || user?.roleScope === "BRANCH")
+    ? user.roleScope
+    : (roleCode === "SUPER_ADMIN" || roleCode === "CORPORATE_ADMIN")
+      ? "GLOBAL"
+      : user?.branchId
+        ? "BRANCH"
+        : null;
+
+  const isBranchScope = roleScope === "BRANCH";
+  const fixedBranchId = String(user?.branchId ?? "");
+
+  const perms = principal?.permissions ?? null;
+  const canCreate = perms ? perms.includes("IAM_USER_CREATE") : (roleCode === "SUPER_ADMIN" || roleCode === "CORPORATE_ADMIN" || roleCode === "BRANCH_ADMIN");
+  const canUpdate = perms ? perms.includes("IAM_USER_UPDATE") : (roleCode === "SUPER_ADMIN" || roleCode === "CORPORATE_ADMIN" || roleCode === "BRANCH_ADMIN" || roleCode === "IT_ADMIN");
+  const canReset = perms ? perms.includes("IAM_USER_RESET_PASSWORD") : (roleCode === "SUPER_ADMIN" || roleCode === "CORPORATE_ADMIN" || roleCode === "IT_ADMIN");
 
   const [q, setQ] = React.useState("");
   const [loading, setLoading] = React.useState(false);
@@ -145,11 +163,14 @@ export default function UsersPage() {
     setErr(null);
     setLoading(true);
     try {
-      const [r, u, b] = await Promise.all([
+      const [me, r, u, b] = await Promise.all([
+        apiFetch<{ principal: ApiPrincipal }>("/api/iam/me").catch(() => null as any),
         apiFetch<Role[]>("/api/iam/roles"),
         apiFetch<UserRow[]>("/api/iam/users"),
         apiFetch<BranchLite[]>("/api/branches").catch(() => [] as BranchLite[]), // optional convenience
       ]);
+
+      if (me?.principal) setPrincipal(me.principal);
 
       const rolesSorted = [...(r ?? [])].sort((a, b) => (a.roleCode || "").localeCompare(b.roleCode || ""));
       const usersSorted = [...(u ?? [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -158,6 +179,11 @@ export default function UsersPage() {
       setRoles(rolesSorted);
       setUsers(usersSorted);
       setBranches(branchesSorted);
+
+      // Branch-scoped users should default to their branch without extra clicks.
+      if (isBranchScope && fixedBranchId) {
+        setForm((s) => ({ ...s, branchId: s.branchId || fixedBranchId }));
+      }
 
       if (showToast) {
         toast({
@@ -192,6 +218,10 @@ export default function UsersPage() {
   }
 
   async function onCreate() {
+    if (!canCreate) {
+      setErr("You don't have permission to create users.");
+      return;
+    }
     setErr(null);
 
     const name = form.name.trim();
@@ -221,7 +251,7 @@ export default function UsersPage() {
       });
 
       setCreateOpen(false);
-      setForm({ email: "", name: "", roleCode: "BRANCH_ADMIN", branchId: "" });
+      setForm({ email: "", name: "", roleCode: "BRANCH_ADMIN", branchId: isBranchScope && fixedBranchId ? fixedBranchId : "" });
 
       if (res?.tempPassword) {
         setPwCtx({ title: "Temporary Password", email: res.email, password: res.tempPassword });
@@ -239,23 +269,24 @@ export default function UsersPage() {
   }
 
   async function onUpdateUser() {
+    if (!canUpdate) {
+      setErr("You don't have permission to update users.");
+      return;
+    }
     if (!detailsUser) return;
     setErr(null);
 
     const name = detailsForm.name.trim();
-    const email = detailsForm.email.trim().toLowerCase();
     const roleCode = detailsForm.roleCode.trim();
     const branchId = detailsForm.branchId.trim();
 
     if (!name) return setErr("Full name is required");
-    if (!email || !isEmail(email)) return setErr("A valid email is required");
     if (!roleCode) return setErr("Role is required");
     if (detailsNeedsBranch && !branchId) return setErr("Branch is required for BRANCH-scoped roles");
 
     setBusyDetails(true);
     try {
-      const payload: any = { name, email, roleCode };
-      payload.branchId = branchId || null;
+      const payload: any = { name, roleCode, branchId: branchId || null };
 
       await apiFetch(`/api/iam/users/${detailsUser.id}`, {
         method: "PATCH",
@@ -264,7 +295,7 @@ export default function UsersPage() {
 
       toast({
         title: "User updated",
-        description: `Updated ${email}.`,
+        description: `Updated ${detailsUser.email}.`,
         variant: "success" as any,
       });
 
@@ -281,6 +312,7 @@ export default function UsersPage() {
   }
 
   async function toggleActive(u: UserRow) {
+    if (!canUpdate) return;
     setErr(null);
     setBusyUserId(u.id);
     try {
@@ -306,6 +338,7 @@ export default function UsersPage() {
   }
 
   async function resetPassword(u: UserRow) {
+    if (!canReset) return;
     setErr(null);
     setBusyUserId(u.id);
     try {
@@ -362,8 +395,20 @@ export default function UsersPage() {
               Refresh
             </Button>
 
-            {isSuperAdmin ? (
-              <Button variant="primary" className="px-5 gap-2" onClick={() => setCreateOpen(true)}>
+            {canCreate ? (
+              <Button
+                variant="primary"
+                className="px-5 gap-2"
+                onClick={() => {
+                  setErr(null);
+                  setForm((s) => ({
+                    ...s,
+                    roleCode: s.roleCode || "BRANCH_ADMIN",
+                    branchId: isBranchScope && fixedBranchId ? fixedBranchId : s.branchId,
+                  }));
+                  setCreateOpen(true);
+                }}
+              >
                 <IconPlus className="h-4 w-4" />
                 Create User
               </Button>
@@ -496,7 +541,7 @@ export default function UsersPage() {
                           <Button
                             variant={u.isActive ? "secondary" : "success"}
                             className="px-3 gap-2"
-                            disabled={rowBusy}
+                            disabled={rowBusy || !canUpdate}
                             onClick={() => void toggleActive(u)}
                             title={u.isActive ? "Deactivate user" : "Activate user"}
                           >
@@ -504,16 +549,18 @@ export default function UsersPage() {
                             {u.isActive ? "Deactivate" : "Activate"}
                           </Button>
 
-                          <Button
-                            variant="outline"
-                            className="px-3 gap-2"
-                            disabled={rowBusy}
-                            onClick={() => void resetPassword(u)}
-                            title="Reset password"
-                          >
-                            {rowBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-                            Reset
-                          </Button>
+                          {canReset ? (
+                            <Button
+                              variant="outline"
+                              className="px-3 gap-2"
+                              disabled={rowBusy}
+                              onClick={() => void resetPassword(u)}
+                              title="Reset password"
+                            >
+                              {rowBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                              Reset
+                            </Button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -629,6 +676,7 @@ export default function UsersPage() {
                 )}
                 value={form.branchId}
                 onChange={(e) => setForm((s) => ({ ...s, branchId: e.target.value }))}
+                disabled={isBranchScope}
               >
                 <option value="">{needsBranch ? "Select branch (required)" : "Select branch (optional)"}</option>
                 {branches.map((b) => (
@@ -722,7 +770,7 @@ export default function UsersPage() {
                 <Input
                   value={detailsForm.name}
                   onChange={(e) => setDetailsForm((s) => ({ ...s, name: e.target.value }))}
-                  disabled={!isSuperAdmin}
+                  disabled={!canUpdate}
                 />
               </div>
 
@@ -730,8 +778,8 @@ export default function UsersPage() {
                 <Label>Email</Label>
                 <Input
                   value={detailsForm.email}
-                  onChange={(e) => setDetailsForm((s) => ({ ...s, email: e.target.value }))}
-                  disabled={!isSuperAdmin}
+                  readOnly
+                  disabled
                 />
               </div>
             </div>
@@ -745,7 +793,7 @@ export default function UsersPage() {
                 )}
                 value={detailsForm.roleCode}
                 onChange={(e) => setDetailsForm((s) => ({ ...s, roleCode: e.target.value }))}
-                disabled={!isSuperAdmin}
+                disabled={!canUpdate}
               >
                 {roles.map((r) => (
                   <option key={r.roleCode} value={r.roleCode}>
@@ -774,7 +822,7 @@ export default function UsersPage() {
                 )}
                 value={detailsForm.branchId}
                 onChange={(e) => setDetailsForm((s) => ({ ...s, branchId: e.target.value }))}
-                disabled={!isSuperAdmin}
+                disabled={!canUpdate || isBranchScope}
               >
                 <option value="">{detailsNeedsBranch ? "Select branch (required)" : "Select branch (optional)"}</option>
                 {branches.map((b) => (
@@ -788,9 +836,9 @@ export default function UsersPage() {
               </p>
             </div>
 
-            {!isSuperAdmin ? (
+            {!canUpdate ? (
               <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-3 text-xs text-zc-muted">
-                Only super administrators can edit user details.
+                You don't have permission to edit user details.
               </div>
             ) : null}
           </div>
@@ -805,10 +853,10 @@ export default function UsersPage() {
                 }}
                 disabled={busyDetails}
               >
-                {isSuperAdmin ? "Cancel" : "Close"}
+                {canUpdate ? "Cancel" : "Close"}
               </Button>
 
-              {isSuperAdmin ? (
+              {canUpdate ? (
                 <Button variant="primary" onClick={() => void onUpdateUser()} disabled={busyDetails} className="gap-2">
                   {busyDetails ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                   Save Changes

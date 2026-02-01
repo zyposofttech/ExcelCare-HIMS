@@ -8,6 +8,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { GlobalLoader } from "@/components/global-loading/GlobalLoader";
 import { GlobalNavWatcher } from "@/components/global-loading/GlobalNavWatcher";
 import { NavigationLoader } from "@/components/NavigationLoader";
+import { AuthBootstrapper } from "@/components/AuthBootstrapper";
 
 const inter = Inter({ subsets: ["latin"], display: "swap", variable: "--font-sans" });
 
@@ -22,6 +23,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className={`${inter.variable} font-sans antialiased bg-zc-bg text-zc-text`}>
         <ThemeProvider>
           <Suspense fallback={<div className="p-6 text-sm text-zc-muted">Loading…</div>}>
+            {/* ✅ Sync principal → auth store on client hydration */}
+            <AuthBootstrapper />
+
             <GlobalNavWatcher />
             <NavigationLoader />
             {children}

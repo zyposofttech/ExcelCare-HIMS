@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { Principal } from "../../auth/access-policy.service";
 import { InfraContextService } from "../shared/infra-context.service";
 import { BranchConfigService } from "../branch-config/branch-config.service";
@@ -202,9 +202,7 @@ export class ResourcesService {
     });
     if (!res) throw new NotFoundException("Resource not found");
 
-    if (principal.roleScope === "BRANCH" && principal.branchId !== res.branchId) {
-      throw new ForbiddenException("Cannot access another branch");
-    }
+    const branchId = this.ctx.resolveBranchId(principal, res.branchId);
 
     const hard = !!opts.hard;
 
@@ -212,7 +210,7 @@ export class ResourcesService {
       await this.ctx.prisma.unitResource.delete({ where: { id: resourceId } });
 
       await this.ctx.audit.log({
-        branchId: res.branchId,
+        branchId,
         actorUserId: principal.userId,
         action: "RESOURCE_DELETE_HARD",
         entity: "UnitResource",
@@ -230,7 +228,7 @@ export class ResourcesService {
     });
 
     await this.ctx.audit.log({
-      branchId: res.branchId,
+      branchId,
       actorUserId: principal.userId,
       action: "RESOURCE_DEACTIVATE",
       entity: "UnitResource",

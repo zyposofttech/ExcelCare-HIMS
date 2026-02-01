@@ -137,6 +137,9 @@ export const PERM = {
 
 export const ROLE = {
   SUPER_ADMIN: "SUPER_ADMIN",
+  // Enterprise-level admin (GLOBAL). Can manage branches + enterprise users,
+  // but should NOT have system-level RBAC design or governance policy controls by default.
+  CORPORATE_ADMIN: "CORPORATE_ADMIN",
   BRANCH_ADMIN: "BRANCH_ADMIN",
   IT_ADMIN: "IT_ADMIN",
 } as const;

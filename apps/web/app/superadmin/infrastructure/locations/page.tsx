@@ -81,7 +81,7 @@ type LocationTreeResponse =
 /*                                   Utils                                    */
 /* -------------------------------------------------------------------------- */
 
-const LS_BRANCH = "zc.superadmin.infrastructure.branchId";
+const LS_BRANCH = "zc.activeBranchId";
 
 const pillTones = {
   indigo:

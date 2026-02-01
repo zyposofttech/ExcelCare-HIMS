@@ -5,6 +5,8 @@ import { persist, createJSONStorage } from "zustand/middleware";
 
 export type AppRole =
   | "SUPER_ADMIN"
+  | "CORPORATE_ADMIN"
+  | "GLOBAL_ADMIN"
   | "BRANCH_ADMIN"
   | "FRONT_OFFICE"
   | "DOCTOR"
@@ -20,6 +22,9 @@ export type AuthUser = {
   branchName?: string | null;
   mustChangePassword?: boolean;
   isActive?: boolean;
+
+  // Optional (if your backend already sends it)
+  roleScope?: "GLOBAL" | "BRANCH" | string | null;
 };
 
 const REMEMBER_DEVICE_KEY = "zypocare-remember-device";
@@ -27,19 +32,50 @@ const REMEMBER_DEVICE_KEY = "zypocare-remember-device";
 type AuthState = {
   user: AuthUser | null;
   token: string | null;
-  _hasHydrated: boolean; //  New Flag
+  _hasHydrated: boolean;
   login: (user: AuthUser, token: string | null) => void;
   updateUser: (patch: Partial<AuthUser>) => void;
   logout: () => void;
   setHydrated: (state: boolean) => void;
 };
 
+function setCookie(name: string, value: string) {
+  document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; SameSite=Lax`;
+}
+
+function clearCookie(name: string) {
+  document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax`;
+}
+
 function setAuthCookie() {
-  document.cookie = `zypocare_auth=1; Path=/; SameSite=Lax`;
+  setCookie("zypocare_auth", "1");
 }
 
 function clearAuthCookie() {
-  document.cookie = `zypocare_auth=; Max-Age=0; Path=/; SameSite=Lax`;
+  clearCookie("zypocare_auth");
+}
+
+function inferScopeFromUser(u: AuthUser): "GLOBAL" | "BRANCH" {
+  // Prefer explicit scope if backend provides it
+  const scope = String(u.roleScope || "").toUpperCase();
+  if (scope === "BRANCH") return "BRANCH";
+  if (scope === "GLOBAL") return "GLOBAL";
+
+  // Fallback: branchId implies BRANCH scope
+  if (u.branchId) return "BRANCH";
+  return "GLOBAL";
+}
+
+function setRoleScopeCookies(u: AuthUser) {
+  const roleCode = String(u.role || "").trim().toUpperCase();
+  const scope = inferScopeFromUser(u);
+  setCookie("zypocare_role", roleCode || "UNKNOWN");
+  setCookie("zypocare_scope", scope);
+}
+
+function clearRoleScopeCookies() {
+  clearCookie("zypocare_role");
+  clearCookie("zypocare_scope");
 }
 
 function getPreferredStorage(): Storage | null {
@@ -83,21 +119,28 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null,
       token: null,
-      _hasHydrated: false, // Default false
+      _hasHydrated: false,
 
       login: (user, token) => {
         setAuthCookie();
+        setRoleScopeCookies(user);
         set({ user, token });
       },
 
       updateUser: (patch) => {
         const current = get().user;
         if (!current) return;
-        set({ user: { ...current, ...patch } });
+        const nextUser = { ...current, ...patch };
+        // Keep cookies aligned if role/scope/branch changes
+        try {
+          setRoleScopeCookies(nextUser);
+        } catch {}
+        set({ user: nextUser });
       },
 
       logout: () => {
         clearAuthCookie();
+        clearRoleScopeCookies();
         try {
           localStorage.removeItem(REMEMBER_DEVICE_KEY);
           sessionStorage.removeItem(REMEMBER_DEVICE_KEY);
@@ -113,7 +156,6 @@ export const useAuthStore = create<AuthState>()(
       name: "zypocare-auth",
       storage: createJSONStorage(() => authStorage),
       partialize: (s) => ({ user: s.user, token: s.token }),
-      //  Update flag when storage is loaded
       onRehydrateStorage: () => (state) => {
         state?.setHydrated(true);
       },

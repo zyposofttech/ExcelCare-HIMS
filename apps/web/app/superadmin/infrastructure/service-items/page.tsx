@@ -88,7 +88,7 @@ type ServiceItemRow = {
 /*                                   Utils                                    */
 /* -------------------------------------------------------------------------- */
 
-const LS_BRANCH_KEY = "zc.superadmin.infrastructure.branchId";
+const LS_BRANCH_KEY = "zc.activeBranchId";
 
 function qs(params: Record<string, any>) {
   const usp = new URLSearchParams();

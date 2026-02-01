@@ -1,6 +1,7 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma, PrismaClient } from "@zypocare/db";
 import type { Principal } from "../../auth/access-policy.service";
+import { resolveBranchId as resolveBranchIdCommon } from "../../../common/branch-scope.util";
 
 import {
   CreateOtEquipmentDto,
@@ -19,14 +20,7 @@ export class OtService {
   constructor(@Inject("PRISMA") private prisma: PrismaClient) {}
 
   private resolveBranchId(principal: Principal, requestedBranchId?: string | null) {
-    if (principal.roleScope === "BRANCH") {
-      if (!principal.branchId) throw new ForbiddenException("Branch-scoped principal missing branchId");
-      if (requestedBranchId && requestedBranchId !== principal.branchId) throw new ForbiddenException("Cannot access another branch");
-      return principal.branchId;
-    }
-    // GLOBAL scope
-    if (!requestedBranchId) throw new BadRequestException("branchId is required for global operations");
-    return requestedBranchId;
+    return resolveBranchIdCommon(principal, requestedBranchId ?? null, { requiredForGlobal: true });
   }
 
   private normCode(code: string) {

@@ -1,5 +1,6 @@
-import { BadRequestException, ForbiddenException } from "@nestjs/common";
+import { BadRequestException } from "@nestjs/common";
 import type { Principal } from "./diagnostics.principal";
+import { resolveBranchId as resolveBranchIdCommon } from "../../../common/branch-scope.util";
 
 /**
  * Codes across infrastructure should accept realistic hospital codes:
@@ -30,14 +31,7 @@ export function assertName(input: unknown, label: string, maxLen = 160): string 
 }
 
 export function resolveBranchId(principal: Principal, branchId?: string): string {
-  if (principal?.branchId) {
-    if (branchId && principal.branchId !== branchId) {
-      throw new ForbiddenException("Cross-branch access is not allowed");
-    }
-    return principal.branchId;
-  }
-  if (!branchId) throw new BadRequestException("branchId is required");
-  return branchId;
+  return resolveBranchIdCommon(principal as any, branchId ?? null, { requiredForGlobal: true }) as string;
 }
 
 export function parseOptionalInt(input: unknown): number | null {

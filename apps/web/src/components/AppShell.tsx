@@ -6,6 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { useAuthStore } from "@/lib/auth/store";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { BranchSelector } from "@/components/BranchSelector";
+import { initActiveBranchSync } from "@/lib/branch/active-branch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -68,6 +70,59 @@ type NavGroup = {
   items: NavNode[];
 };
 
+function resolveRoleScope(user: any): "GLOBAL" | "BRANCH" | null {
+  if (!user) return null;
+  const scope = user.roleScope as ("GLOBAL" | "BRANCH" | null | undefined);
+  if (scope === "GLOBAL" || scope === "BRANCH") return scope;
+
+  const roleCode = String(user.roleCode ?? user.role ?? "").trim().toUpperCase();
+  if (roleCode === "SUPER_ADMIN" || roleCode === "CORPORATE_ADMIN") return "GLOBAL";
+  if (user.branchId) return "BRANCH";
+  return null;
+}
+
+function roleLabel(user: any) {
+  return String(user?.roleCode ?? user?.role ?? "").replaceAll("_", " ") || "UNKNOWN";
+}
+
+function buildAllNavItems(groups: NavGroup[]) {
+  return groups.flatMap((group) =>
+    group.items.flatMap((item) => {
+      const results: {
+        label: string;
+        href: string;
+        icon: React.ComponentType<IconProps>;
+        group: string;
+        type: "Parent" | "Child";
+        parent?: string;
+      }[] = [
+        {
+          label: item.label,
+          href: item.href,
+          icon: item.icon,
+          group: group.title,
+          type: "Parent",
+        },
+      ];
+
+      const childLinks = flattenChildLinks(item.children);
+      if (childLinks.length) {
+        results.push(
+          ...childLinks.map(({ link, groupLabel }) => ({
+            label: link.label,
+            href: link.href,
+            icon: item.icon,
+            group: group.title,
+            type: "Child" as const,
+            parent: groupLabel ? `${item.label} - ${groupLabel}` : item.label,
+          }))
+        );
+      }
+      return results;
+    })
+  );
+}
+
 const NAV_WORKSPACES: NavNode[] = [
   {
     label: "Central Console",
@@ -76,6 +131,7 @@ const NAV_WORKSPACES: NavNode[] = [
     children: [
       { label: "Overview", href: "/superadmin/dashboard" },
       { label: "Branches", href: "/superadmin/branches" },
+      { label: "Users", href: "/superadmin/users" },
       { label: "Policy Governance", href: "/superadmin/policy" },
       { label: "Policy Presets", href: "/superadmin/policy/presets" },
       { label: "Policies", href: "/superadmin/policy/policies" },
@@ -301,7 +357,7 @@ const NAV_GOVERN: NavNode[] = [
     children: [
       { label: "Permissions", href: "/access/permissions" },
       { label: "Roles", href: "/access/roles" },
-      { label: "App Users", href: "/admin/users" },
+      { label: "App Users", href: "/superadmin/users" },
       { label: "Audit Trails", href: "/access/audit" },
     ],
   },
@@ -312,6 +368,127 @@ const NAV_GROUPS: NavGroup[] = [
   { title: "Care Delivery", items: NAV_CARE },
   { title: "Governance & Ops", items: NAV_GOVERN },
 ];
+// ----------------------
+// Role-based Nav Visibility
+// ----------------------
+const ALLOW_CORPORATE_INFRA = true; // Corporate Admin CAN configure Infrastructure
+
+function normRole(role?: string | null) {
+  return String(role ?? "").trim().toUpperCase();
+}
+
+function inferScopeFromUser(user: any): "GLOBAL" | "BRANCH" {
+  const s = resolveRoleScope(user);
+  return s === "BRANCH" ? "BRANCH" : "GLOBAL";
+}
+
+function isPlatformAdminRole(roleCode: string) {
+  return ["SUPER_ADMIN", "CORPORATE_ADMIN", "GLOBAL_ADMIN", "BRANCH_ADMIN"].includes(roleCode);
+}
+
+function allowHrefByRole(href: string, ctx: { roleCode: string; scope: "GLOBAL" | "BRANCH" }) {
+  const { roleCode, scope } = ctx;
+
+  // Scope gates
+  if (href.startsWith("/superadmin") || href.startsWith("/access")) {
+    if (scope !== "GLOBAL") return false;
+  }
+  if (href.startsWith("/admin")) {
+    if (scope !== "BRANCH") return false;
+  }
+
+  // SUPER_ADMIN-only areas
+  if (href.startsWith("/access")) return roleCode === "SUPER_ADMIN";
+  if (href.startsWith("/superadmin/policy")) return roleCode === "SUPER_ADMIN";
+
+  // Infrastructure: (recommended) SUPER_ADMIN / GLOBAL_ADMIN only by default
+  if (href.startsWith("/superadmin/infrastructure")) {
+    if (roleCode === "SUPER_ADMIN") return true;
+    if (roleCode === "GLOBAL_ADMIN") return true;
+    if (roleCode === "CORPORATE_ADMIN") return ALLOW_CORPORATE_INFRA;
+    return false;
+  }
+
+  // Corporate allowed items (Central Console basics)
+  if (href.startsWith("/superadmin/branches")) {
+    return ["SUPER_ADMIN", "CORPORATE_ADMIN", "GLOBAL_ADMIN"].includes(roleCode);
+  }
+  if (href.startsWith("/superadmin/users")) {
+    return ["SUPER_ADMIN", "CORPORATE_ADMIN", "GLOBAL_ADMIN"].includes(roleCode);
+  }
+
+  return true;
+}
+
+function rewriteHref(label: string, href: string, ctx: { scope: "GLOBAL" | "BRANCH" }) {
+  // Fix “App Users” link so GLOBAL users land on the corporate user screen
+  if (label === "App Users" && ctx.scope === "GLOBAL") return "/superadmin/users";
+  return href;
+}
+
+function filterNavGroupsForUser(groups: NavGroup[], user: any): NavGroup[] {
+  const roleCode = normRole(user?.roleCode ?? user?.role);
+  const scope = inferScopeFromUser(user);
+  const ctx = { roleCode, scope };
+  const platformRole = isPlatformAdminRole(roleCode);
+
+  // For platform admin roles, keep menu clean (mainly Workspaces; SUPER_ADMIN also gets Governance & Ops for /access)
+  const allowedGroupTitle = (title: string) => {
+    if (platformRole) {
+      if (title === "Workspaces") return true;
+      if (title === "Governance & Ops") return roleCode === "SUPER_ADMIN"; // to expose /access only for super
+      return false; // hide Care Delivery for admin roles
+    }
+    // For clinical roles, hide Workspaces to avoid confusion
+    if (title === "Workspaces") return false;
+    return true;
+  };
+
+  const out: NavGroup[] = [];
+
+  for (const g of groups) {
+    if (!allowedGroupTitle(g.title)) continue;
+
+    const items: NavNode[] = [];
+
+    for (const n of g.items) {
+      const nodeHrefAllowed = allowHrefByRole(n.href, ctx);
+
+      // Filter children
+      let nextChildren: NavChild[] | undefined = undefined;
+
+      if (n.children?.length) {
+        const kept: NavChild[] = [];
+
+        for (const child of n.children) {
+          if (isChildGroup(child)) {
+            const groupChildren = child.children
+              .map((c) => ({ ...c, href: rewriteHref(c.label, c.href, ctx) }))
+              .filter((c) => allowHrefByRole(c.href, ctx));
+
+            if (groupChildren.length) kept.push({ ...child, children: groupChildren });
+          } else {
+            const updated = { ...child, href: rewriteHref(child.label, child.href, ctx) };
+            if (allowHrefByRole(updated.href, ctx)) kept.push(updated);
+          }
+        }
+
+        if (kept.length) nextChildren = kept;
+      }
+
+      // Keep the node if:
+      // - it’s allowed directly, OR
+      // - it has at least one allowed child
+      if (!nodeHrefAllowed && (!nextChildren || nextChildren.length === 0)) continue;
+
+      items.push({ ...n, children: nextChildren });
+    }
+
+    if (items.length) out.push({ ...g, items });
+  }
+
+  return out;
+}
 
 // --- Command Center Types ---
 type CommandItem = {
@@ -382,43 +559,6 @@ function flattenChildLinks(children?: NavChild[]) {
   }
   return links;
 }
-
-// Flatten the navigation tree for searching
-const ALL_NAV_ITEMS = NAV_GROUPS.flatMap((group) =>
-  group.items.flatMap((item) => {
-    const results: {
-      label: string;
-      href: string;
-      icon: React.ComponentType<IconProps>;
-      group: string;
-      type: "Parent" | "Child";
-      parent?: string;
-    }[] = [
-        {
-          label: item.label,
-          href: item.href,
-          icon: item.icon,
-          group: group.title,
-          type: "Parent",
-        },
-      ];
-
-    const childLinks = flattenChildLinks(item.children);
-    if (childLinks.length) {
-      results.push(
-        ...childLinks.map(({ link, groupLabel }) => ({
-          label: link.label,
-          href: link.href,
-          icon: item.icon,
-          group: group.title,
-          type: "Child" as const,
-          parent: groupLabel ? `${item.label} - ${groupLabel}` : item.label,
-        }))
-      );
-    }
-    return results;
-  })
-);
 
 // --- Helpers ---
 
@@ -506,6 +646,72 @@ export function AppShell({
 
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+    const handleLogout = React.useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore network failures; still logout locally
+    } finally {
+      logout();
+      router.replace("/login");
+    }
+  }, [logout, router]);
+
+  const scope = resolveRoleScope(user);
+  const isGlobalScope = scope === "GLOBAL";
+  const roleCode = String(user?.roleScope ?? user?.role ?? "").trim().toUpperCase();
+  const isSuperAdmin = roleCode === "SUPER_ADMIN";
+
+  React.useEffect(() => {
+    initActiveBranchSync();
+  }, []);
+
+  // Role-based navigation filtering:
+  // - GLOBAL (Super/Corporate): show /superadmin workspaces
+  // - BRANCH: show /admin workspace only
+  const roleNavGroups = React.useMemo<NavGroup[]>(() => {
+    const hideAccess = !isSuperAdmin;
+
+    if (!scope) {
+      if (!hideAccess) return NAV_GROUPS;
+      return NAV_GROUPS.map((g) => ({
+        ...g,
+        items: g.items.filter((n) => n.href !== "/access"),
+      })).filter((g) => g.items.length);
+    }
+
+    return NAV_GROUPS.map((g) => {
+      let items = g.items;
+
+      // Workspace split: GLOBAL -> /superadmin, BRANCH -> /admin
+      if (g.title === "Workspaces") {
+        items = items.filter((n) =>
+          scope === "GLOBAL" ? n.href.startsWith("/superadmin") : n.href.startsWith("/admin")
+        );
+      }
+
+      // Access control menu must be SUPER_ADMIN only.
+      if (hideAccess) {
+        items = items.filter((n) => n.href !== "/access");
+      }
+
+      return { ...g, items };
+    }).filter((g) => g.items.length);
+  }, [scope, isSuperAdmin]);
+
+  // Guard: branch-scoped users should not access superadmin routes.
+  React.useEffect(() => {
+    if (!scope) return;
+    if (scope === "BRANCH" && pathname?.startsWith("/superadmin")) {
+      router.replace("/admin");
+    }
+
+    // Defense in depth: even if someone types the URL, keep /access SUPER_ADMIN only.
+    if (pathname?.startsWith("/access")) {
+      if (scope === "BRANCH") router.replace("/admin");
+      if (scope === "GLOBAL" && !isSuperAdmin) router.replace("/superadmin");
+    }
+  }, [scope, pathname, router, isSuperAdmin]);
 
   // Initialize state
   const [collapsed, setCollapsed] = React.useState(false);
@@ -576,9 +782,29 @@ export function AppShell({
     });
   }
 
+  const roleCommandActions = React.useMemo<CommandItem[]>(() => {
+    if (!isGlobalScope) return [];
+    const roleCode = normRole(user?.roleScope ?? user?.role);
+    const scope = inferScopeFromUser(user);
+    const ctx = { roleCode, scope };
+
+    return COMMAND_ACTIONS
+      .map((a) => (a.href ? { ...a, href: rewriteHref(a.label, a.href, ctx) } : a))
+      .filter((a) => !a.href || allowHrefByRole(a.href, ctx));
+  }, [isGlobalScope, user]);
+
+  const allNavItems = React.useMemo(() => buildAllNavItems(roleNavGroups), [roleNavGroups]);
+
   // Command Center helpers
-  const commandNavItems = React.useMemo<CommandItem[]>(() => {
-    return ALL_NAV_ITEMS.map((item) => ({
+ const commandNavItems = React.useMemo<CommandItem[]>(() => {
+  const roleCode = normRole(user?.roleScope ?? user?.role);
+  const scope = inferScopeFromUser(user);
+  const ctx = { roleCode, scope };
+
+  return allNavItems
+    .map((item) => ({ ...item, href: rewriteHref(item.label, item.href, ctx) }))
+    .filter((item) => allowHrefByRole(item.href, ctx))
+    .map((item) => ({
       id: `nav:${item.href}`,
       label: item.label,
       group: item.group,
@@ -587,9 +813,9 @@ export function AppShell({
       keywords: [item.parent, item.group, item.label].filter(Boolean) as string[],
       href: item.href,
     }));
-  }, []);
+}, [user, allNavItems]);
 
-  const commandItems = React.useMemo<CommandItem[]>(() => [...COMMAND_ACTIONS, ...commandNavItems], [commandNavItems]);
+const commandItems = React.useMemo<CommandItem[]>(() => [...roleCommandActions, ...commandNavItems], [roleCommandActions, commandNavItems]);
 
   function recordRecentCommand(id: string) {
     const next = [id, ...recentCommandIds.filter((x) => x !== id)].slice(0, 6);
@@ -634,8 +860,8 @@ export function AppShell({
 
   const suggestedCommandItems = React.useMemo(() => {
     const topNavParents = commandNavItems.filter((i) => i.subtitle?.includes("Workspaces") || i.subtitle?.includes("Care Delivery")).slice(0, 6);
-    return [...COMMAND_ACTIONS, ...topNavParents].slice(0, 8);
-  }, [commandNavItems]);
+    return [...roleCommandActions, ...topNavParents].slice(0, 8);
+  }, [commandNavItems, roleCommandActions]);
 
   const commandSections = React.useMemo(() => {
     if (commandQuery.trim()) {
@@ -643,10 +869,10 @@ export function AppShell({
     }
     const sections: Array<{ title: string; items: CommandItem[] }> = [];
     if (recentCommandItems.length) sections.push({ title: "Recent", items: recentCommandItems });
-    sections.push({ title: "Actions", items: COMMAND_ACTIONS });
+    if (roleCommandActions.length) sections.push({ title: "Actions", items: roleCommandActions });
     sections.push({ title: "Navigation", items: suggestedCommandItems });
     return sections;
-  }, [commandQuery, filteredCommandItems, recentCommandItems, suggestedCommandItems]);
+  }, [commandQuery, filteredCommandItems, recentCommandItems, suggestedCommandItems, roleCommandActions]);
 
   const flatCommandItems = React.useMemo(
     () => commandSections.flatMap((s) => s.items),
@@ -666,39 +892,44 @@ export function AppShell({
     setCommandQuery("");
   }
 
-  const visibleGroups = React.useMemo(() => {
-    const q = navQuery.trim().toLowerCase();
-    if (!q) return NAV_GROUPS;
+ const navGroupsForUser = React.useMemo(() => {
+  return filterNavGroupsForUser(NAV_GROUPS, user);
+}, [user]);
 
-    const filtered: NavGroup[] = [];
-    for (const g of NAV_GROUPS) {
-      const items: NavNode[] = [];
-      for (const n of g.items) {
-        const selfMatch = n.label.toLowerCase().includes(q) || n.href.toLowerCase().includes(q);
-        const filteredChildren: NavChild[] = [];
-        for (const child of n.children ?? []) {
-          if (isChildGroup(child)) {
-            const groupMatch = child.label.toLowerCase().includes(q);
-            const groupChildren = child.children.filter((c) =>
-              (c.label + " " + c.href).toLowerCase().includes(q)
-            );
-            if (groupMatch) {
-              filteredChildren.push(child);
-            } else if (groupChildren.length) {
-              filteredChildren.push({ ...child, children: groupChildren });
-            }
-          } else if ((child.label + " " + child.href).toLowerCase().includes(q)) {
+const visibleGroups = React.useMemo(() => {
+  const q = navQuery.trim().toLowerCase();
+  if (!q) return navGroupsForUser;
+
+  const filtered: NavGroup[] = [];
+  for (const g of navGroupsForUser) {
+    const items: NavNode[] = [];
+    for (const n of g.items) {
+      const selfMatch = n.label.toLowerCase().includes(q) || n.href.toLowerCase().includes(q);
+      const filteredChildren: NavChild[] = [];
+      for (const child of n.children ?? []) {
+        if (isChildGroup(child)) {
+          const groupMatch = child.label.toLowerCase().includes(q);
+          const groupChildren = child.children.filter((c) =>
+            (c.label + " " + c.href).toLowerCase().includes(q)
+          );
+          if (groupMatch) {
             filteredChildren.push(child);
+          } else if (groupChildren.length) {
+            filteredChildren.push({ ...child, children: groupChildren });
           }
+        } else if ((child.label + " " + child.href).toLowerCase().includes(q)) {
+          filteredChildren.push(child);
         }
-
-        if (!selfMatch && filteredChildren.length === 0) continue;
-        items.push({ ...n, children: selfMatch ? n.children : filteredChildren });
       }
-      if (items.length) filtered.push({ ...g, items });
+
+      if (!selfMatch && filteredChildren.length === 0) continue;
+      items.push({ ...n, children: selfMatch ? n.children : filteredChildren });
     }
-    return filtered;
-  }, [navQuery]);
+    if (items.length) filtered.push({ ...g, items });
+  }
+  return filtered;
+}, [navQuery, navGroupsForUser]);
+
 
   const sidebarW = collapsed ? "w-[72px]" : "w-[280px]";
   const rowHover = "hover:bg-[rgb(var(--zc-hover-rgb)/0.06)]";
@@ -836,7 +1067,7 @@ export function AppShell({
                 >
                   <div className="truncate text-sm font-semibold tracking-tight">ZypoCare ONE</div>
                   <div className="mt-0.5 truncate text-xs text-zc-muted">
-                    {user?.role ? user.role.replaceAll("_", " ") : "SUPER ADMIN"}
+                    {user ? roleLabel(user) : "SUPER ADMIN"}
                   </div>
                 </div>
               </div>
@@ -1112,10 +1343,7 @@ export function AppShell({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => {
-                  logout();
-                  router.replace("/login");
-                }}
+                onClick={handleLogout}
                 aria-label="Logout"
                 title="Logout"
                 className="rounded-full"
@@ -1128,13 +1356,15 @@ export function AppShell({
 
         {/* Main Content Area */}
         <div className="min-w-0 flex-1 flex h-screen flex-col bg-zc-bg">
-          <header className="shrink-0 border-b border-zc-border bg-zc-panel">
-            <div className="flex items-center gap-3 px-4 py-3 md:px-6">
+          <header className="shrink-0 sticky top-0 z-40 border-b border-zc-border bg-zc-panel/95 backdrop-blur supports-[backdrop-filter]:bg-zc-panel/75">
+
+            <div className="flex flex-nowrap items-center gap-3 px-4 py-3 md:px-6">
+
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold tracking-tight">{title}</div>
                 {user ? (
                   <div className="mt-0.5 truncate text-xs text-zc-muted">
-                    {user.name} • {user.role.replaceAll("_", " ")}
+                    {user.name} • {roleLabel(user)}
                   </div>
                 ) : null}
               </div>
@@ -1157,6 +1387,7 @@ export function AppShell({
               </div>
 
               <div className="ml-auto flex items-center gap-2">
+                {isGlobalScope ? <BranchSelector className="hidden lg:flex" /> : null}
                 <Button
                   variant="primary"
                   size="sm"
@@ -1170,10 +1401,7 @@ export function AppShell({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => {
-                    logout();
-                    router.replace("/login");
-                  }}
+                  onClick={handleLogout}
                   aria-label="Logout"
                   title="Logout"
                   className="rounded-full"

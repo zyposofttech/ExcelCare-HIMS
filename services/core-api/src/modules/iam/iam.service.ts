@@ -9,6 +9,7 @@ import {
 import type { PrismaClient } from "@zypocare/db";
 import { AuditService } from "../audit/audit.service";
 import type { Principal } from "../auth/access-policy.service";
+import { resolveBranchId } from "../../common/branch-scope.util";
 import { PERM, ROLE } from "./iam.constants";
 import { CreateUserDto, UpdateUserDto, CreateRoleDto, UpdateRoleDto, CreatePermissionDto} from "./iam.dto";
 import { generateTempPassword, hashPassword } from "./password.util";
@@ -31,6 +32,20 @@ export class IamService {
       if (branchId !== principal.branchId) throw new ForbiddenException("Cross-branch access is not allowed");
     }
   }
+
+  private assertRoleTemplateScopeManageable(principal: Principal, templateScope: "GLOBAL" | "BRANCH") {
+    // No behavior change for GLOBAL principals. Only prevent BRANCH principals from touching GLOBAL templates.
+    if (principal.roleScope === "BRANCH" && templateScope === "GLOBAL") {
+      throw new ForbiddenException("Branch-scoped principals cannot manage GLOBAL role templates");
+    }
+  }
+
+  private normalizeRoleScope(input: any): "GLOBAL" | "BRANCH" {
+    const scope = String(input ?? "").trim().toUpperCase();
+    if (scope !== "GLOBAL" && scope !== "BRANCH") throw new BadRequestException("Invalid role scope");
+    return scope as "GLOBAL" | "BRANCH";
+  }
+
 
   async listRoles(principal: Principal) {
     // Read roles/templates that are ACTIVE; branch users will only see BRANCH roles.
@@ -58,7 +73,7 @@ export class IamService {
     }));
   }
 
-  async listUsers(principal: Principal, q?: string) {
+  async listUsers(principal: Principal, q?: string, branchId?: string) {
     if (!principal.permissions.includes(PERM.IAM_USER_READ)) throw new ForbiddenException("Missing IAM_USER_READ");
 
     const query = (q || "").trim();
@@ -70,7 +85,21 @@ export class IamService {
       ];
     }
     if (principal.roleScope === "BRANCH") {
-      where.branchId = principal.branchId ?? "__none__";
+      // Preserve legacy behavior: missing branchId -> empty result, not an exception.
+      if (!principal.branchId) {
+        where.branchId = "__none__";
+      } else {
+        // Optional filter for BRANCH scope: must match principal.branchId
+        if (branchId) {
+          // Use shared helper where safe (principal.branchId exists)
+          resolveBranchId(principal, branchId);
+        }
+        where.branchId = principal.branchId;
+      }
+    } else {
+      // GLOBAL scope: optional branchId filter
+      const resolved = resolveBranchId(principal, branchId ?? null);
+      if (resolved) where.branchId = resolved;
     }
 
     const rows = await this.prisma.user.findMany({
@@ -363,8 +392,8 @@ export class IamService {
   }
 
   async listAudit(
-    principal: Principal, 
-    params: { entity?: string; entityId?: string; actorUserId?: string; action?: string; take?: number }
+    principal: Principal,
+    params: { entity?: string; entityId?: string; actorUserId?: string; action?: string; branchId?: string; take?: number }
   ) {
     if (!principal.permissions.includes(PERM.IAM_AUDIT_READ)) {
        throw new ForbiddenException("Missing IAM_AUDIT_READ");
@@ -374,7 +403,20 @@ export class IamService {
     
     // Branch isolation for audit logs
     if (principal.roleScope === "BRANCH") {
-      where.branchId = principal.branchId ?? "__none__";
+      // Preserve legacy behavior: missing branchId -> empty result, not an exception.
+      if (!principal.branchId) {
+        where.branchId = "__none__";
+      } else {
+        // Optional filter for BRANCH scope: must match principal.branchId
+        if (params.branchId) {
+          resolveBranchId(principal, params.branchId);
+        }
+        where.branchId = principal.branchId;
+      }
+    } else {
+      // GLOBAL scope: optional branchId filter
+      const resolved = resolveBranchId(principal, params.branchId ?? null);
+      if (resolved) where.branchId = resolved;
     }
 
     if (params.entity) where.entity = params.entity;
@@ -392,11 +434,14 @@ export class IamService {
   async createRole(principal: Principal, dto: CreateRoleDto) {
     // 1. Permission Check
     // Ensure you add IAM_ROLE_CREATE to your PERM constants
-    if (!principal.permissions.includes("IAM_ROLE_CREATE")) { 
+    if (!principal.permissions.includes(PERM.IAM_ROLE_CREATE)) { 
       throw new ForbiddenException("Missing IAM_ROLE_CREATE");
     }
 
     const code = dto.roleCode.trim().toUpperCase();
+
+    const scope = this.normalizeRoleScope(dto.scope);
+    this.assertRoleTemplateScopeManageable(principal, scope);
 
     // 2. Check existence
     const existing = await this.prisma.roleTemplate.findUnique({
@@ -418,7 +463,7 @@ export class IamService {
         data: {
           code,
           name: dto.roleName,
-          scope: dto.scope,
+          scope,
         },
       });
 
@@ -438,7 +483,7 @@ export class IamService {
         action: "IAM_ROLE_CREATED",
         entity: "RoleTemplate",
         entityId: template.id,
-        meta: { code, version: 1, scope: dto.scope },
+        meta: { code, version: 1, scope },
         branchId: principal.branchId ?? null,
       });
 
@@ -448,35 +493,49 @@ export class IamService {
 
   // ✅ ADD THIS METHOD
   async updateRole(principal: Principal, code: string, dto: UpdateRoleDto) {
-    // 1. Permission Check
-    if (!principal.permissions.includes("IAM_ROLE_UPDATE")) {
+    if (!principal.permissions.includes(PERM.IAM_ROLE_UPDATE)) {
       throw new ForbiddenException("Missing IAM_ROLE_UPDATE");
     }
 
-    // 2. Fetch current active version
+    const roleCode = code.trim().toUpperCase();
+
     const current = await this.prisma.roleTemplateVersion.findFirst({
-      where: { roleTemplate: { code }, status: "ACTIVE" },
-      include: { roleTemplate: true },
+      where: { roleTemplate: { code: roleCode }, status: "ACTIVE" },
+      include: {
+        roleTemplate: true,
+        permissions: { include: { permission: true } },
+      },
     });
 
     if (!current) throw new NotFoundException("Role not found or no active version");
 
-    // 3. Prepare new permissions
+    // BRANCH principals must not manage GLOBAL templates (no behavior change for GLOBAL principals)
+    this.assertRoleTemplateScopeManageable(principal, current.roleTemplate.scope as any);
+
+    // Prepare permission IDs:
+    // - if permissions provided: validate codes and use them
+    // - else: carry forward current active permission set (prevents accidental wipe)
     let permIds: string[] = [];
     if (dto.permissions) {
       const perms = await this.prisma.permission.findMany({
         where: { code: { in: dto.permissions } },
       });
-      permIds = perms.map(p => p.id);
+      if (perms.length !== dto.permissions.length) {
+        throw new BadRequestException("One or more invalid permission codes");
+      }
+      permIds = perms.map((p) => p.id);
+    } else {
+      permIds =
+        (current as any).permissions?.map((p: any) => p.permissionId ?? p.permission?.id).filter(Boolean) ?? [];
     }
 
-    // 4. Transaction: Versioning logic
     await this.prisma.$transaction(async (tx) => {
-      // Archive current version
+      // Retire current version
       await tx.roleTemplateVersion.update({
         where: { id: current.id },
-        data: { status: "RETIRED" }, 
+        data: { status: "RETIRED" },
       });
+
       // Create new version
       const newVersion = await tx.roleTemplateVersion.create({
         data: {
@@ -489,7 +548,7 @@ export class IamService {
         },
       });
 
-      // Update name if changed
+      // Update template name if requested
       if (dto.roleName && dto.roleName !== current.roleTemplate.name) {
         await tx.roleTemplate.update({
           where: { id: current.roleTemplateId },
@@ -502,7 +561,7 @@ export class IamService {
         action: "IAM_ROLE_UPDATED",
         entity: "RoleTemplate",
         entityId: current.roleTemplateId,
-        meta: { code, oldVersion: current.version, newVersion: newVersion.version },
+        meta: { code: roleCode, oldVersion: current.version, newVersion: newVersion.version },
         branchId: principal.branchId ?? null,
       });
     });

@@ -82,7 +82,7 @@ type UnitForm = {
 
 /* --------------------------------- Utils --------------------------------- */
 
-const LS_KEY = "zc.superadmin.infrastructure.units.branchId";
+const LS_KEY = "zc.activeBranchId";
 
 function readLS(key: string) {
   if (typeof window === "undefined") return null;

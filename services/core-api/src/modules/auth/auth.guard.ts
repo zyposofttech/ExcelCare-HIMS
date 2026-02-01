@@ -25,30 +25,40 @@ export class JwtAuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
     const token = this.extractTokenFromHeader(request);
-
     if (!token) throw new UnauthorizedException("Missing Bearer token");
 
     try {
       const payload = await this.jwtService.verifyAsync(token);
       request.user = payload;
 
-      // ✅ Enforce mustChangePassword
+      // ✅ Enforce mustChangePassword, but allow minimal endpoints needed
+      // IMPORTANT: allow /iam/me so frontend bootstrap doesn't get stuck/log-out loops
       const mustChangePassword = payload?.mustChangePassword === true;
       if (mustChangePassword) {
-        const url = request.originalUrl || request.url || "";
-        const allowed =
-          url.includes("/auth/change-password"); // only allow password change endpoint
+        const url = String(request.originalUrl || request.url || "");
+        const method = String(request.method || "GET").toUpperCase();
 
-        if (!allowed) {
-          throw new ForbiddenException("Password change required");
+        const allow =
+          // password change itself
+          url.includes("/auth/change-password") ||
+          // allow principal bootstrap & UI role detection
+          (method === "GET" && url.includes("/iam/me")) ||
+          // allow logout endpoint if you later add it in core-api
+          url.includes("/auth/logout");
+
+        if (!allow) {
+          throw new ForbiddenException({
+            message: "Password change required",
+            code: "MUST_CHANGE_PASSWORD",
+          });
         }
       }
+
+      return true;
     } catch (e: any) {
       if (e instanceof ForbiddenException) throw e;
       throw new UnauthorizedException("Invalid or Expired Token");
     }
-
-    return true;
   }
 
   private extractTokenFromHeader(request: any): string | undefined {

@@ -1,6 +1,7 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import type { PrismaClient } from "@zypocare/db";
 import type { Principal } from "../../auth/access-policy.service";
+import { resolveBranchId as resolveBranchIdCommon } from "../../../common/branch-scope.util";
 import { AuditService } from "../../audit/audit.service";
 import { PolicyEngineService } from "../../policy-engine/policy-engine.service";
 
@@ -12,16 +13,9 @@ export class InfraContextService {
     public policyEngine: PolicyEngineService,
   ) {}
 
-  resolveBranchId(principal: Principal, requestedBranchId?: string | null) {
-    if (principal.roleScope === "BRANCH") {
-      if (!principal.branchId) throw new ForbiddenException("Branch-scoped principal missing branchId");
-      if (requestedBranchId && requestedBranchId !== principal.branchId) {
-        throw new ForbiddenException("Cannot access another branch");
-      }
-      return principal.branchId;
-    }
-    if (!requestedBranchId) throw new BadRequestException("branchId is required for global operations");
-    return requestedBranchId;
+  resolveBranchId(principal: Principal, requestedBranchId?: string | null): string {
+    // Standardized branch resolution for infrastructure: GLOBAL must provide branchId
+    return resolveBranchIdCommon(principal, requestedBranchId ?? null, { requiredForGlobal: true });
   }
 
   uniq(ids: string[]) {

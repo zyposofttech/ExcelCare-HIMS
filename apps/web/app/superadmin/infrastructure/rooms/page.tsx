@@ -47,7 +47,7 @@ type RoomRow = {
   isActive: boolean;
 };
 
-const LS_KEY = "zc.superadmin.infrastructure.branchId";
+const LS_KEY = "zc.activeBranchId";
 
 function readLS(key: string) {
   if (typeof window === "undefined") return null;
