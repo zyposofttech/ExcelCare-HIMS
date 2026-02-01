@@ -18,6 +18,7 @@ export type AuthUser = {
   name: string;
   email: string;
   role: AppRole | string;
+  roleCode?: AppRole | string | null;
   branchId?: string | null;
   branchName?: string | null;
   mustChangePassword?: boolean;
@@ -64,6 +65,27 @@ function inferScopeFromUser(u: AuthUser): "GLOBAL" | "BRANCH" {
   // Fallback: branchId implies BRANCH scope
   if (u.branchId) return "BRANCH";
   return "GLOBAL";
+}
+// ✅ Exported helper used by Access pages and other UI gating
+export function getRoleCode(user?: AuthUser | null): string {
+  if (!user) return "";
+  const raw = (user as any)?.roleCode ?? user.role ?? "";
+  const r = String(raw).trim().toUpperCase();
+  const map: Record<string, string> = {
+    SUPER: "SUPER_ADMIN",
+    SUPERADMIN: "SUPER_ADMIN",
+    SUPER_ADMIN: "SUPER_ADMIN",
+    CORPORATE: "CORPORATE_ADMIN",
+    CORPORATEADMIN: "CORPORATE_ADMIN",
+    CORPORATE_ADMIN: "CORPORATE_ADMIN",
+    GLOBAL: "GLOBAL_ADMIN",
+    GLOBALADMIN: "GLOBAL_ADMIN",
+    GLOBAL_ADMIN: "GLOBAL_ADMIN",
+    BRANCH: "BRANCH_ADMIN",
+    BRANCHADMIN: "BRANCH_ADMIN",
+    BRANCH_ADMIN: "BRANCH_ADMIN",
+  };
+  return map[r] ?? r;
 }
 
 function setRoleScopeCookies(u: AuthUser) {

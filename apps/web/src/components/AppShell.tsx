@@ -75,8 +75,9 @@ function resolveRoleScope(user: any): "GLOBAL" | "BRANCH" | null {
   const scope = user.roleScope as ("GLOBAL" | "BRANCH" | null | undefined);
   if (scope === "GLOBAL" || scope === "BRANCH") return scope;
 
-  const roleCode = String(user.roleCode ?? user.role ?? "").trim().toUpperCase();
-  if (roleCode === "SUPER_ADMIN" || roleCode === "CORPORATE_ADMIN") return "GLOBAL";
+  const roleCode = normRole(user.roleCode ?? user.role);
+  if (roleCode === "SUPER_ADMIN" || roleCode === "CORPORATE_ADMIN" || roleCode === "GLOBAL_ADMIN") return "GLOBAL";
+  if (roleCode === "BRANCH_ADMIN") return "BRANCH";
   if (user.branchId) return "BRANCH";
   return null;
 }
@@ -96,14 +97,14 @@ function buildAllNavItems(groups: NavGroup[]) {
         type: "Parent" | "Child";
         parent?: string;
       }[] = [
-        {
-          label: item.label,
-          href: item.href,
-          icon: item.icon,
-          group: group.title,
-          type: "Parent",
-        },
-      ];
+          {
+            label: item.label,
+            href: item.href,
+            icon: item.icon,
+            group: group.title,
+            type: "Parent",
+          },
+        ];
 
       const childLinks = flattenChildLinks(item.children);
       if (childLinks.length) {
@@ -125,112 +126,101 @@ function buildAllNavItems(groups: NavGroup[]) {
 
 const NAV_WORKSPACES: NavNode[] = [
   {
+    label: "Welcome",
+    href: "/welcome",
+    icon: IconZypoCare,
+  },
+  {
+    label: "Dashboard",
+    href: "/dashboard",
+    icon: IconDashboard,
+  },
+  {
     label: "Central Console",
-    href: "/superadmin",
+    href: "/dashboard/global",
     icon: IconDashboard,
     children: [
-      { label: "Overview", href: "/superadmin/dashboard" },
-      { label: "Branches", href: "/superadmin/branches" },
-      { label: "Users", href: "/superadmin/users" },
-      { label: "Policy Governance", href: "/superadmin/policy" },
-      { label: "Policy Presets", href: "/superadmin/policy/presets" },
-      { label: "Policies", href: "/superadmin/policy/policies" },
-      { label: "Approvals", href: "/superadmin/policy/approvals" },
-      { label: "Audit Trail", href: "/superadmin/policy/audit" },
-      { label: "Reports", href: "/superadmin/reports" },
+      // { label: "Overview", href: "/dashboard/global" },
+      { label: "Branches", href: "/branches" },
+      { label: "Users", href: "/users" },
+      { label: "Policy Governance", href: "/policy" },
+      { label: "Policy Presets", href: "/policy/presets" },
+      { label: "Policies", href: "/policy/policies" },
+      { label: "Approvals", href: "/policy/approvals" },
+      { label: "Audit Trail", href: "/policy/audit" },
+      { label: "Access Control", href: "/access" },
     ],
   },
   {
     label: "Infrastructure Setup",
-    href: "/superadmin/infrastructure",
+    href: "/infrastructure",
     icon: IconBuilding,
     children: [
-
-      { label: "Overview", href: "/superadmin/infrastructure" },
+      { label: "Overview", href: "/infrastructure" },
       {
         type: "group",
         label: "Org & Clinical Structure",
         children: [
-          { label: "Facilities", href: "/superadmin/infrastructure/facilities" },
-          { label: "Departments", href: "/superadmin/infrastructure/departments" },
-          { label: "Specialties", href: "/superadmin/infrastructure/specialties" },
+          { label: "Facilities", href: "/infrastructure/facilities" },
+          { label: "Departments", href: "/infrastructure/departments" },
+          { label: "Specialties", href: "/infrastructure/specialties" },
         ],
       },
       {
         type: "group",
         label: "Infra Core",
         children: [
-          { label: "Locations (Building)", href: "/superadmin/infrastructure/locations" },
-          { label: "Unit Types", href: "/superadmin/infrastructure/unit-types" },
-          { label: "Units", href: "/superadmin/infrastructure/units" },
-          { label: "Rooms / Bays", href: "/superadmin/infrastructure/rooms" },
-          { label: "Resources", href: "/superadmin/infrastructure/resources" },
-          { label: "Housekeeping Gate", href: "/superadmin/infrastructure/bed-policy" },
+          { label: "Locations (Building)", href: "/infrastructure/locations" },
+          { label: "Unit Types", href: "/infrastructure/unit-types" },
+          { label: "Units", href: "/infrastructure/units" },
+          { label: "Rooms / Bays", href: "/infrastructure/rooms" },
+          { label: "Resources", href: "/infrastructure/resources" },
+          { label: "Housekeeping Gate", href: "/infrastructure/bed-policy" },
         ],
       },
       {
         type: "group",
         label: "Clinical Facilities",
         children: [
-          { label: "OT Setup", href: "/superadmin/infrastructure/ot" },
-          { label: "Diagnostics Configuration", href: "/superadmin/infrastructure/diagnostics" },
-          { label: "Equipment Register", href: "/superadmin/infrastructure/equipment" },
+          { label: "OT Setup", href: "/infrastructure/ot" },
+          { label: "Diagnostics Configuration", href: "/infrastructure/diagnostics" },
+          { label: "Equipment Register", href: "/infrastructure/equipment" },
         ],
       },
       {
         type: "group",
         label: "Billing Setup",
         children: [
-          { label: "Tax Codes (GST)", href: "/superadmin/infrastructure/tax-codes" },
-          { label: "Charge Master", href: "/superadmin/infrastructure/charge-master" },
-          { label: "Tariff Plans & Rates", href: "/superadmin/infrastructure/tariff-plans" },
+          { label: "Tax Codes (GST)", href: "/infrastructure/tax-codes" },
+          { label: "Charge Master", href: "/infrastructure/charge-master" },
+          { label: "Tariff Plans & Rates", href: "/infrastructure/tariff-plans" },
         ],
       },
       {
         type: "group",
         label: "Service Catalogue",
         children: [
-          { label: "Service Items", href: "/superadmin/infrastructure/service-items" },
-          { label: "Service Library", href: "/superadmin/infrastructure/service-library" },
-          { label: "Service <-> Charge Mapping", href: "/superadmin/infrastructure/service-mapping" },
-          { label: "Service Catalogue", href: "/superadmin/infrastructure/service-catalogues" },
-          { label: "Service Packages", href: "/superadmin/infrastructure/service-packages" },
-          { label: "Order Sets", href: "/superadmin/infrastructure/order-sets" },
-          { label: "Service Availability", href: "/superadmin/infrastructure/service-availability" },
+          { label: "Service Items", href: "/infrastructure/service-items" },
+          { label: "Service Library", href: "/infrastructure/service-library" },
+          { label: "Service <-> Charge Mapping", href: "/infrastructure/service-mapping" },
+          { label: "Service Catalogue", href: "/infrastructure/service-catalogues" },
+          { label: "Service Packages", href: "/infrastructure/service-packages" },
+          { label: "Order Sets", href: "/infrastructure/order-sets" },
+          { label: "Service Availability", href: "/infrastructure/service-availability" },
         ],
       },
-
       {
         type: "group",
         label: "Readiness & Ops",
         children: [
-          { label: "Fix-It Queue", href: "/superadmin/infrastructure/fixit" },
-          { label: "Go-Live Validator", href: "/superadmin/infrastructure/golive" },
-          { label: "Bulk Import (CSV/XLS)", href: "/superadmin/infrastructure/import" },
+          { label: "Fix-It Queue", href: "/infrastructure/fixit" },
+          { label: "Go-Live Validator", href: "/infrastructure/golive" },
+          { label: "Bulk Import (CSV/XLS)", href: "/infrastructure/import" },
         ],
       },
+    ],
+  },
 
-    ],
-  },
-  {
-    label: "Branch Admin",
-    href: "/admin",
-    icon: IconBuilding,
-    children: [
-      { label: "Policy Overrides", href: "/admin/policy" },
-      { label: "Facility Setup", href: "/admin/facility" },
-      { label: "Departments", href: "/admin/departments" },
-      { label: "Staff Directory", href: "/admin/staff" },
-      { label: "Specialties", href: "/admin/specialties" },
-      { label: "Wards", href: "/admin/wards" },
-      { label: "Beds", href: "/admin/beds", badge: { label: "New", tone: "new" } },
-      { label: "OT Setup", href: "/admin/ot" },
-      { label: "Labs Setup", href: "/admin/labs" },
-      { label: "Users & Roles", href: "/admin/users" },
-      { label: "Duty Rosters", href: "/admin/duty" },
-      { label: "Settings", href: "/admin/settings" },
-    ],
-  },
 ];
 
 const NAV_CARE: NavNode[] = [
@@ -357,7 +347,7 @@ const NAV_GOVERN: NavNode[] = [
     children: [
       { label: "Permissions", href: "/access/permissions" },
       { label: "Roles", href: "/access/roles" },
-      { label: "App Users", href: "/superadmin/users" },
+      { label: "App Users", href: "/users" },
       { label: "Audit Trails", href: "/access/audit" },
     ],
   },
@@ -371,15 +361,30 @@ const NAV_GROUPS: NavGroup[] = [
 // ----------------------
 // Role-based Nav Visibility
 // ----------------------
-const ALLOW_CORPORATE_INFRA = true; // Corporate Admin CAN configure Infrastructure
+const ALLOW_CORPORATE_INFRA = true; // flip to true later if you want Corporate Admin to configure infra
 
 function normRole(role?: string | null) {
-  return String(role ?? "").trim().toUpperCase();
-}
+  const r = String(role ?? "").trim().toUpperCase();
+  const map: Record<string, string> = {
+    ADMIN: "BRANCH_ADMIN",
+    BRANCHADMIN: "BRANCH_ADMIN",
+    BRANCH_ADMIN: "BRANCH_ADMIN",
+    GLOBAL: "GLOBAL_ADMIN",
+    GLOBALADMIN: "GLOBAL_ADMIN",
+    GLOBAL_ADMIN: "GLOBAL_ADMIN",
+    CORP_ADMIN: "CORPORATE_ADMIN",
+    CORPORATE: "CORPORATE_ADMIN",
+    SUPER: "SUPER_ADMIN",
+  };
 
+  return map[r] ?? r;
+}
 function inferScopeFromUser(user: any): "GLOBAL" | "BRANCH" {
-  const s = resolveRoleScope(user);
-  return s === "BRANCH" ? "BRANCH" : "GLOBAL";
+  // In your app, branch-scoped principals typically have branchId set.
+  // Prefer explicit roleScope / roleCode mapping (GLOBAL admins may still have a branchId).
+  const resolved = resolveRoleScope(user);
+  if (resolved === "GLOBAL" || resolved === "BRANCH") return resolved;
+  return user?.branchId ? "BRANCH" : "GLOBAL";
 }
 
 function isPlatformAdminRole(roleCode: string) {
@@ -390,30 +395,40 @@ function allowHrefByRole(href: string, ctx: { roleCode: string; scope: "GLOBAL" 
   const { roleCode, scope } = ctx;
 
   // Scope gates
-  if (href.startsWith("/superadmin") || href.startsWith("/access")) {
+  // GLOBAL-only workspaces / screens
+  if (
+    href.startsWith("/access") ||
+    href.startsWith("/policy") ||
+    href.startsWith("/branches") ||
+    href.startsWith("/dashboard/global")
+  ) {
     if (scope !== "GLOBAL") return false;
   }
+  // Legacy branch workspace (kept for backward compatibility)
   if (href.startsWith("/admin")) {
     if (scope !== "BRANCH") return false;
   }
 
   // SUPER_ADMIN-only areas
   if (href.startsWith("/access")) return roleCode === "SUPER_ADMIN";
-  if (href.startsWith("/superadmin/policy")) return roleCode === "SUPER_ADMIN";
+  if (href.startsWith("/policy")) return roleCode === "SUPER_ADMIN";
 
-  // Infrastructure: (recommended) SUPER_ADMIN / GLOBAL_ADMIN only by default
-  if (href.startsWith("/superadmin/infrastructure")) {
+  // Infrastructure (single canonical module under /infrastructure)
+  // Allow platform admins by role. Corporate infra is enabled via flag.
+  const isInfraHref = href.startsWith("/infrastructure");
+  if (isInfraHref) {
     if (roleCode === "SUPER_ADMIN") return true;
     if (roleCode === "GLOBAL_ADMIN") return true;
+    if (roleCode === "BRANCH_ADMIN") return true;
     if (roleCode === "CORPORATE_ADMIN") return ALLOW_CORPORATE_INFRA;
     return false;
   }
 
   // Corporate allowed items (Central Console basics)
-  if (href.startsWith("/superadmin/branches")) {
+  if (href.startsWith("/branches")) {
     return ["SUPER_ADMIN", "CORPORATE_ADMIN", "GLOBAL_ADMIN"].includes(roleCode);
   }
-  if (href.startsWith("/superadmin/users")) {
+  if (href.startsWith("/users")) {
     return ["SUPER_ADMIN", "CORPORATE_ADMIN", "GLOBAL_ADMIN"].includes(roleCode);
   }
 
@@ -422,7 +437,7 @@ function allowHrefByRole(href: string, ctx: { roleCode: string; scope: "GLOBAL" 
 
 function rewriteHref(label: string, href: string, ctx: { scope: "GLOBAL" | "BRANCH" }) {
   // Fix “App Users” link so GLOBAL users land on the corporate user screen
-  if (label === "App Users" && ctx.scope === "GLOBAL") return "/superadmin/users";
+  if (label === "App Users") return "/users";
   return href;
 }
 
@@ -510,7 +525,7 @@ const COMMAND_ACTIONS: CommandItem[] = [
     icon: IconPlus,
     subtitle: "Open branch create form",
     keywords: ["branch", "create", "new"],
-    href: "/superadmin/branches?create=1",
+    href: "/branches?create=1",
   },
   {
     id: "action:open-branches",
@@ -519,7 +534,7 @@ const COMMAND_ACTIONS: CommandItem[] = [
     icon: IconBuilding,
     subtitle: "Branch registry and setup",
     keywords: ["branches", "registry"],
-    href: "/superadmin/branches",
+    href: "/branches",
   },
   {
     id: "action:open-diagnostics",
@@ -528,7 +543,7 @@ const COMMAND_ACTIONS: CommandItem[] = [
     icon: IconFlask,
     subtitle: "Packs, catalog, templates",
     keywords: ["diagnostics", "lab", "imaging"],
-    href: "/superadmin/infrastructure/diagnostics",
+    href: "/infrastructure/diagnostics",
   },
   {
     id: "action:open-policy-presets",
@@ -537,7 +552,7 @@ const COMMAND_ACTIONS: CommandItem[] = [
     icon: IconShield,
     subtitle: "Install governance packs",
     keywords: ["policy", "presets", "governance"],
-    href: "/superadmin/policy/presets",
+    href: "/policy/presets",
   },
 ];
 
@@ -646,7 +661,7 @@ export function AppShell({
 
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-    const handleLogout = React.useCallback(async () => {
+  const handleLogout = React.useCallback(async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } catch {
@@ -659,57 +674,44 @@ export function AppShell({
 
   const scope = resolveRoleScope(user);
   const isGlobalScope = scope === "GLOBAL";
-  const roleCode = String(user?.roleScope ?? user?.role ?? "").trim().toUpperCase();
+  const roleCode = normRole(user?.roleCode ?? user?.role);
   const isSuperAdmin = roleCode === "SUPER_ADMIN";
 
   React.useEffect(() => {
     initActiveBranchSync();
   }, []);
 
-  // Role-based navigation filtering:
-  // - GLOBAL (Super/Corporate): show /superadmin workspaces
-  // - BRANCH: show /admin workspace only
-  const roleNavGroups = React.useMemo<NavGroup[]>(() => {
-    const hideAccess = !isSuperAdmin;
+  // Role-based navigation filtering (single menu with role-aware visibility)
+  const navGroupsForUser = React.useMemo<NavGroup[]>(() => {
+    return filterNavGroupsForUser(NAV_GROUPS, user);
+  }, [user]);
 
-    if (!scope) {
-      if (!hideAccess) return NAV_GROUPS;
-      return NAV_GROUPS.map((g) => ({
-        ...g,
-        items: g.items.filter((n) => n.href !== "/access"),
-      })).filter((g) => g.items.length);
-    }
-
-    return NAV_GROUPS.map((g) => {
-      let items = g.items;
-
-      // Workspace split: GLOBAL -> /superadmin, BRANCH -> /admin
-      if (g.title === "Workspaces") {
-        items = items.filter((n) =>
-          scope === "GLOBAL" ? n.href.startsWith("/superadmin") : n.href.startsWith("/admin")
-        );
-      }
-
-      // Access control menu must be SUPER_ADMIN only.
-      if (hideAccess) {
-        items = items.filter((n) => n.href !== "/access");
-      }
-
-      return { ...g, items };
-    }).filter((g) => g.items.length);
-  }, [scope, isSuperAdmin]);
-
-  // Guard: branch-scoped users should not access superadmin routes.
+  // Guard: keep users inside their workspace (defense-in-depth; proxy/middleware should also enforce this)
   React.useEffect(() => {
-    if (!scope) return;
-    if (scope === "BRANCH" && pathname?.startsWith("/superadmin")) {
-      router.replace("/admin");
+    if (!scope || !pathname) return;
+
+    // BRANCH users: never allow GLOBAL-only workspaces
+    if (
+      scope === "BRANCH" &&
+      (pathname.startsWith("/access") ||
+        pathname.startsWith("/policy") ||
+        pathname.startsWith("/branches") ||
+        pathname.startsWith("/dashboard/global") ||
+        pathname.startsWith("/superadmin"))
+    ) {
+      router.replace("/welcome");
+      return;
     }
 
-    // Defense in depth: even if someone types the URL, keep /access SUPER_ADMIN only.
-    if (pathname?.startsWith("/access")) {
-      if (scope === "BRANCH") router.replace("/admin");
-      if (scope === "GLOBAL" && !isSuperAdmin) router.replace("/superadmin");
+    // GLOBAL users: avoid /admin workspace
+    if (scope === "GLOBAL" && pathname.startsWith("/admin")) {
+      router.replace("/welcome");
+      return;
+    }
+
+    // Defense in depth: /access is SUPER_ADMIN only
+    if (pathname.startsWith("/access") && !isSuperAdmin) {
+      router.replace("/welcome");
     }
   }, [scope, pathname, router, isSuperAdmin]);
 
@@ -783,39 +785,42 @@ export function AppShell({
   }
 
   const roleCommandActions = React.useMemo<CommandItem[]>(() => {
-    if (!isGlobalScope) return [];
-    const roleCode = normRole(user?.roleScope ?? user?.role);
+    const roleCode = normRole(user?.roleCode ?? user?.role);
     const scope = inferScopeFromUser(user);
     const ctx = { roleCode, scope };
 
     return COMMAND_ACTIONS
-      .map((a) => (a.href ? { ...a, href: rewriteHref(a.label, a.href, ctx) } : a))
+      .map((a) => ({
+        ...a,
+        href: a.href ? rewriteHref(a.label, a.href, ctx) : a.href,
+      }))
       .filter((a) => !a.href || allowHrefByRole(a.href, ctx));
-  }, [isGlobalScope, user]);
+  }, [user]);
 
-  const allNavItems = React.useMemo(() => buildAllNavItems(roleNavGroups), [roleNavGroups]);
+  const allNavItems = React.useMemo(() => buildAllNavItems(navGroupsForUser), [navGroupsForUser]);
 
   // Command Center helpers
- const commandNavItems = React.useMemo<CommandItem[]>(() => {
-  const roleCode = normRole(user?.roleScope ?? user?.role);
-  const scope = inferScopeFromUser(user);
-  const ctx = { roleCode, scope };
+  const commandNavItems = React.useMemo<CommandItem[]>(() => {
+    const roleCode = normRole(user?.roleCode ?? user?.role);
+    const scope = inferScopeFromUser(user);
+    const ctx = { roleCode, scope };
 
-  return allNavItems
-    .map((item) => ({ ...item, href: rewriteHref(item.label, item.href, ctx) }))
-    .filter((item) => allowHrefByRole(item.href, ctx))
-    .map((item) => ({
-      id: `nav:${item.href}`,
-      label: item.label,
-      group: item.group,
-      icon: item.icon,
-      subtitle: item.parent ? `${item.parent} • ${item.group}` : item.group,
-      keywords: [item.parent, item.group, item.label].filter(Boolean) as string[],
-      href: item.href,
-    }));
-}, [user, allNavItems]);
+    return allNavItems
+      .map((item) => ({ ...item, href: rewriteHref(item.label, item.href, ctx) }))
+      .filter((item) => allowHrefByRole(item.href, ctx))
+      .map((item) => ({
+        id: `nav:${item.href}`,
+        label: item.label,
+        group: item.group,
+        icon: item.icon,
+        subtitle: item.parent ? `${item.parent} • ${item.group}` : item.group,
+        keywords: [item.parent, item.group, item.label].filter(Boolean) as string[],
+        href: item.href,
+      }));
+  }, [user, allNavItems]);
 
-const commandItems = React.useMemo<CommandItem[]>(() => [...roleCommandActions, ...commandNavItems], [roleCommandActions, commandNavItems]);
+
+  const commandItems = React.useMemo<CommandItem[]>(() => [...roleCommandActions, ...commandNavItems], [roleCommandActions, commandNavItems]);
 
   function recordRecentCommand(id: string) {
     const next = [id, ...recentCommandIds.filter((x) => x !== id)].slice(0, 6);
@@ -892,43 +897,39 @@ const commandItems = React.useMemo<CommandItem[]>(() => [...roleCommandActions, 
     setCommandQuery("");
   }
 
- const navGroupsForUser = React.useMemo(() => {
-  return filterNavGroupsForUser(NAV_GROUPS, user);
-}, [user]);
+  const visibleGroups = React.useMemo(() => {
+    const q = navQuery.trim().toLowerCase();
+    if (!q) return navGroupsForUser;
 
-const visibleGroups = React.useMemo(() => {
-  const q = navQuery.trim().toLowerCase();
-  if (!q) return navGroupsForUser;
-
-  const filtered: NavGroup[] = [];
-  for (const g of navGroupsForUser) {
-    const items: NavNode[] = [];
-    for (const n of g.items) {
-      const selfMatch = n.label.toLowerCase().includes(q) || n.href.toLowerCase().includes(q);
-      const filteredChildren: NavChild[] = [];
-      for (const child of n.children ?? []) {
-        if (isChildGroup(child)) {
-          const groupMatch = child.label.toLowerCase().includes(q);
-          const groupChildren = child.children.filter((c) =>
-            (c.label + " " + c.href).toLowerCase().includes(q)
-          );
-          if (groupMatch) {
+    const filtered: NavGroup[] = [];
+    for (const g of navGroupsForUser) {
+      const items: NavNode[] = [];
+      for (const n of g.items) {
+        const selfMatch = n.label.toLowerCase().includes(q) || n.href.toLowerCase().includes(q);
+        const filteredChildren: NavChild[] = [];
+        for (const child of n.children ?? []) {
+          if (isChildGroup(child)) {
+            const groupMatch = child.label.toLowerCase().includes(q);
+            const groupChildren = child.children.filter((c) =>
+              (c.label + " " + c.href).toLowerCase().includes(q)
+            );
+            if (groupMatch) {
+              filteredChildren.push(child);
+            } else if (groupChildren.length) {
+              filteredChildren.push({ ...child, children: groupChildren });
+            }
+          } else if ((child.label + " " + child.href).toLowerCase().includes(q)) {
             filteredChildren.push(child);
-          } else if (groupChildren.length) {
-            filteredChildren.push({ ...child, children: groupChildren });
           }
-        } else if ((child.label + " " + child.href).toLowerCase().includes(q)) {
-          filteredChildren.push(child);
         }
-      }
 
-      if (!selfMatch && filteredChildren.length === 0) continue;
-      items.push({ ...n, children: selfMatch ? n.children : filteredChildren });
+        if (!selfMatch && filteredChildren.length === 0) continue;
+        items.push({ ...n, children: selfMatch ? n.children : filteredChildren });
+      }
+      if (items.length) filtered.push({ ...g, items });
     }
-    if (items.length) filtered.push({ ...g, items });
-  }
-  return filtered;
-}, [navQuery, navGroupsForUser]);
+    return filtered;
+  }, [navQuery, navGroupsForUser]);
 
 
   const sidebarW = collapsed ? "w-[72px]" : "w-[280px]";

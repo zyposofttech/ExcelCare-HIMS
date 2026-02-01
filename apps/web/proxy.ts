@@ -24,8 +24,9 @@ function getRoleCode(req: NextRequest) {
 }
 
 function homeForScope(scope: "GLOBAL" | "BRANCH" | null) {
-  if (scope === "BRANCH") return "/admin";
-  if (scope === "GLOBAL") return "/superadmin";
+  // "superadmin" workspace has been removed. Use dashboard routes.
+  if (scope === "BRANCH") return "/dashboard";
+  if (scope === "GLOBAL") return "/dashboard/global";
   return "/"; // unknown scope
 }
 
@@ -66,6 +67,39 @@ export function proxy(req: NextRequest) {
   }
 
   // -------------------------
+  // Legacy route compatibility
+  // -------------------------
+  // The /superadmin workspace was removed; redirect stale links to their new homes.
+  if (pathname === "/superadmin" || pathname.startsWith("/superadmin/")) {
+    const url = req.nextUrl.clone();
+
+    // Branch users should never land in global console.
+    if (scope === "BRANCH") {
+      url.pathname = "/dashboard";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
+
+    // GLOBAL users: map known subtrees.
+    if (pathname.startsWith("/superadmin/infrastructure")) {
+      url.pathname = pathname.replace("/superadmin/infrastructure", "/infrastructure") || "/infrastructure";
+    } else if (pathname.startsWith("/superadmin/branches")) {
+      url.pathname = pathname.replace("/superadmin/branches", "/branches") || "/branches";
+    } else if (pathname.startsWith("/superadmin/policy")) {
+      url.pathname = pathname.replace("/superadmin/policy", "/policy") || "/policy";
+    } else if (pathname.startsWith("/superadmin/users")) {
+      url.pathname = pathname.replace("/superadmin/users", "/users") || "/users";
+    } else if (pathname.startsWith("/superadmin/dashboard")) {
+      url.pathname = "/dashboard/global";
+    } else {
+      url.pathname = "/dashboard/global";
+    }
+
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
+  // -------------------------
   // Role-based route enforcement (defense-in-depth)
   // -------------------------
 
@@ -74,30 +108,30 @@ export function proxy(req: NextRequest) {
     const roleCode = getRoleCode(req);
     if (roleCode !== "SUPER_ADMIN") {
       const url = req.nextUrl.clone();
-      url.pathname = "/superadmin";
+      url.pathname = "/dashboard/global";
       url.search = "";
       return NextResponse.redirect(url);
     }
   }
 
   // Policy governance is SUPER_ADMIN only
-  if (pathname.startsWith("/superadmin/policy") && scope === "GLOBAL") {
+  if (pathname.startsWith("/policy") && scope === "GLOBAL") {
     const roleCode = getRoleCode(req);
     if (roleCode !== "SUPER_ADMIN") {
       const url = req.nextUrl.clone();
-      url.pathname = "/superadmin";
+      url.pathname = "/dashboard/global";
       url.search = "";
       return NextResponse.redirect(url);
     }
   }
 
   // Infrastructure setup: SUPER_ADMIN + CORPORATE_ADMIN (+ optionally GLOBAL_ADMIN)
-  if (pathname.startsWith("/superadmin/infrastructure") && scope === "GLOBAL") {
+  if (pathname.startsWith("/infrastructure") && scope === "GLOBAL") {
     const roleCode = getRoleCode(req);
     const ok = roleCode === "SUPER_ADMIN" || roleCode === "CORPORATE_ADMIN" || roleCode === "GLOBAL_ADMIN";
     if (!ok) {
       const url = req.nextUrl.clone();
-      url.pathname = "/superadmin";
+      url.pathname = "/dashboard/global";
       url.search = "";
       return NextResponse.redirect(url);
     }
@@ -111,14 +145,15 @@ export function proxy(req: NextRequest) {
   if (scope === "BRANCH") {
     if (pathname === "/") {
       const url = req.nextUrl.clone();
-      url.pathname = "/admin";
+      url.pathname = "/dashboard";
       url.search = "";
       return NextResponse.redirect(url);
     }
 
-    if (pathname.startsWith("/superadmin") || pathname.startsWith("/access")) {
+    // Branch users must not enter GLOBAL-only areas.
+    if (pathname.startsWith("/access") || pathname.startsWith("/policy") || pathname.startsWith("/dashboard/global") || pathname.startsWith("/branches")) {
       const url = req.nextUrl.clone();
-      url.pathname = "/admin";
+      url.pathname = "/dashboard";
       url.search = "";
       return NextResponse.redirect(url);
     }
@@ -128,14 +163,14 @@ export function proxy(req: NextRequest) {
   if (scope === "GLOBAL") {
     if (pathname === "/") {
       const url = req.nextUrl.clone();
-      url.pathname = "/superadmin";
+      url.pathname = "/dashboard/global";
       url.search = "";
       return NextResponse.redirect(url);
     }
 
     if (pathname.startsWith("/admin")) {
       const url = req.nextUrl.clone();
-      url.pathname = "/superadmin";
+      url.pathname = "/dashboard/global";
       url.search = "";
       return NextResponse.redirect(url);
     }

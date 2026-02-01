@@ -64,7 +64,7 @@ export type BranchCounts = {
   facilities: number;
   specialties: number;
 
-  // Setup Studio raw totals (useful for dashboards + delete protection)
+  // Setup Studio raw totals (useful for dashboards  delete protection)
   locationNodes: number;
   units: number;
   unitRooms: number;
@@ -117,7 +117,7 @@ function countMapFromGroupBy(rows: Array<{ branchId: string; _count: { _all: num
 // input rows are groupBy(["branchId","unitId"]) => each row is one distinct unit per branch that has BED
 function wardsMapFromBedUnitGroups(rows: Array<{ branchId: string; unitId: string }>): Record<string, number> {
   const map: Record<string, number> = {};
-  for (const r of rows) map[r.branchId] = (map[r.branchId] ?? 0) + 1;
+  for (const r of rows) map[r.branchId] = (map[r.branchId] ?? 0) ;
   return map;
 }
 
@@ -128,26 +128,43 @@ export class BranchService {
     private audit: AuditService,
   ) {}
 
-  async list(opts: { q?: string | null; onlyActive?: boolean | null } = {}) {
+  async list(opts: { q?: string | null; onlyActive?: boolean | null; mode?: "full" | "selector" } = {}) {
     const q = (opts.q ?? "").trim();
     const onlyActive = Boolean(opts.onlyActive);
+    const mode = opts.mode === "selector" ? "selector" : "full";
 
+    const where: Prisma.BranchWhereInput | undefined =
+      q || onlyActive
+        ? {
+            ...(onlyActive ? { isActive: true } : {}),
+            ...(q
+              ? {
+                  OR: [
+                    { name: { contains: q, mode: "insensitive" } },
+                    { city: { contains: q, mode: "insensitive" } },
+                    { code: { equals: q, mode: "insensitive" } },
+                  ],
+                }
+              : {}),
+          }
+        : undefined;
+
+    // Fast path for branch selector dropdowns: avoid heavy derived-count queries.
+    if (mode === "selector") {
+      return this.prisma.branch.findMany({
+        where,
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          city: true,
+          isActive: true,
+        },
+        orderBy: { name: "asc" },
+      });
+    }
     const rows = await this.prisma.branch.findMany({
-      where:
-        q || onlyActive
-          ? {
-              ...(onlyActive ? { isActive: true } : {}),
-              ...(q
-                ? {
-                    OR: [
-                      { name: { contains: q, mode: "insensitive" } },
-                      { city: { contains: q, mode: "insensitive" } },
-                      { code: { equals: q, mode: "insensitive" } },
-                    ],
-                  }
-                : {}),
-            }
-          : undefined,
+      where,
       include: {
         _count: {
           select: {
@@ -496,7 +513,7 @@ export class BranchService {
       ["goLiveReports", (c as any).goLiveReports ?? 0],
     ];
 
-    const total = blockers.reduce((acc, [, v]) => acc + (v || 0), 0);
+    const total = blockers.reduce((acc, [, v]) => acc + (v ?? 0), 0);
 
     if (total > 0) {
       const nonZero = blockers

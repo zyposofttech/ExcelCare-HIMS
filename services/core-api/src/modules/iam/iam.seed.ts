@@ -215,15 +215,15 @@ export class IamSeedService implements OnModuleInit {
           : r.code === ROLE.CORPORATE_ADMIN
             ? [
               // Enterprise ops (multi-branch) + Infrastructure Setup Studio
-              PERM.BRANCH_READ,
-              PERM.BRANCH_CREATE,
-              PERM.BRANCH_UPDATE,
-              PERM.BRANCH_DELETE,
+              // PERM.BRANCH_READ,
+              // PERM.BRANCH_CREATE,
+              // PERM.BRANCH_UPDATE,
+              // PERM.BRANCH_DELETE,
 
-              PERM.IAM_USER_READ,
-              PERM.IAM_USER_CREATE,
-              PERM.IAM_USER_UPDATE,
-              PERM.IAM_USER_RESET_PASSWORD,
+              // PERM.IAM_USER_READ,
+              // PERM.IAM_USER_CREATE,
+              // PERM.IAM_USER_UPDATE,
+              // PERM.IAM_USER_RESET_PASSWORD,
 
               // Read-only role/permission visibility (dropdowns etc.)
               PERM.IAM_ROLE_READ,

@@ -25,6 +25,11 @@ class ListBranchesQuery {
   @IsOptional()
   @IsString()
   onlyActive?: string;
+
+  // When set to "selector", returns a lite payload (id, code, name, city, isActive)
+  @IsOptional()
+  @IsString()
+  mode?: string | null;
 }
 
 class CreateBranchDto {
@@ -107,8 +112,8 @@ class UpdateBranchDto {
 function isGlobalAdmin(principal: any): boolean {
   if (!principal) return false;
   return (
-    principal.roleScope === "GLOBAL" ||
-    principal.roleCode === "SUPER_ADMIN" ||
+    principal.roleScope === "GLOBAL" || principal.roleCode === "CORPORATE_ADMIN" || principal.roleCode === "GLOBAL_ADMIN" ||
+    principal.roleCode === "SUPER_ADMIN" || principal.role === "CORPORATE_ADMIN" || principal.role === "GLOBAL_ADMIN" ||
     principal.role === "SUPER_ADMIN"
   );
 }
@@ -116,7 +121,7 @@ function isGlobalAdmin(principal: any): boolean {
 @ApiTags("branches")
 @Controller("branches")
 export class BranchController {
-  constructor(private readonly branches: BranchService) {}
+  constructor(private readonly branches: BranchService) { }
 
   @Permissions(PERM.BRANCH_READ)
   @Get()
@@ -125,25 +130,34 @@ export class BranchController {
 
     const onlyActive = String(q.onlyActive ?? "").toLowerCase();
     const onlyActiveBool = onlyActive === "true" || onlyActive === "1" || onlyActive === "yes";
+    const mode = String(q.mode ?? "").toLowerCase();
+    const modeNorm = mode === "selector" ? "selector" : "full";
 
     if (isGlobalAdmin(principal)) {
-      return this.branches.list({ q: q.q ?? null, onlyActive: onlyActiveBool ? true : null });
+      return this.branches.list({
+        q: q.q ?? null,
+        onlyActive: onlyActiveBool ? true : null,
+        mode: modeNorm as any,
+      });
     }
 
     if (!principal?.branchId) return [];
     const row = await this.branches.get(principal.branchId);
-
+    // Respect onlyActive for branch-scoped callers too
+    if (onlyActiveBool && !row.isActive) return [];
+    const outRow: any =
+      modeNorm === "selector"
+        ? { id: row.id, code: row.code, name: row.name, city: row.city, isActive: row.isActive }
+        : row;
     if (q.q) {
       const term = q.q.toLowerCase();
       const match =
         row.name.toLowerCase().includes(term) ||
         row.city.toLowerCase().includes(term) ||
         String(row.code).toLowerCase() === term;
-
-      return match ? [row] : [];
+      return match ? [outRow] : [];
     }
-
-    return [row];
+    return [outRow];
   }
 
   @Permissions(PERM.BRANCH_READ)
@@ -162,7 +176,10 @@ export class BranchController {
   @Post()
   async create(@Body() dto: CreateBranchDto, @Req() req: any) {
     const principal = req.principal;
-    const actorUserId = principal?.userId ?? req?.user?.sub ?? null; 
+    if (!isGlobalAdmin(principal)) {
+      throw new ForbiddenException("Only global admins can create branches");
+    }
+    const actorUserId = principal?.userId ?? req?.user?.sub ?? null;
     return this.branches.create(dto, actorUserId);
   }
 
@@ -170,6 +187,9 @@ export class BranchController {
   @Patch(":id")
   async update(@Param("id") id: string, @Body() dto: UpdateBranchDto, @Req() req: any) {
     const principal = req.principal;
+    if (!isGlobalAdmin(principal)) {
+      throw new ForbiddenException("Only global admins can update branches");
+    }
     const actorUserId = principal?.userId ?? req?.user?.sub ?? null;
     return this.branches.update(id, dto, actorUserId);
   }
@@ -202,6 +222,9 @@ export class BranchController {
   @Delete(":id")
   async remove(@Param("id") id: string, @Req() req: any) {
     const principal = req.principal;
+    if (!isGlobalAdmin(principal)) {
+      throw new ForbiddenException("Only global admins can delete branches");
+    }
     const actorUserId = principal?.userId ?? req?.user?.sub ?? null;
     return this.branches.remove(id, actorUserId);
   }

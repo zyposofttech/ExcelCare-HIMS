@@ -41,7 +41,7 @@ export function BranchSelector({ className }: { className?: string }) {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiFetch<BranchRow[]>("/api/branches", { showLoader: false });
+      const data = await apiFetch<BranchRow[]>("/api/branches?mode=selector&onlyActive=true", { showLoader: false });
       const sorted = [...(data ?? [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
       const activeFirst = sorted.sort((a, b) => Number(Boolean(b.isActive)) - Number(Boolean(a.isActive)));
       setBranches(activeFirst);

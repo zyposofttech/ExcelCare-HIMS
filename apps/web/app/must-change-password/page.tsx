@@ -43,7 +43,8 @@ function resolveScope(u: any): "GLOBAL" | "BRANCH" | null {
 
 function homeForUser(u: any): string {
   const scope = resolveScope(u);
-  return scope === "BRANCH" ? "/admin" : "/superadmin";
+  // "superadmin" workspace has been removed.
+  return scope === "BRANCH" ? "/dashboard" : "/dashboard/global";
 }
 
 function nextForUser(u: any, requestedNext: string | null): string {
@@ -52,12 +53,19 @@ function nextForUser(u: any, requestedNext: string | null): string {
 
   if (!safeNext) return homeForUser(u);
 
-  if (scope === "BRANCH" && (safeNext.startsWith("/superadmin") || safeNext.startsWith("/access"))) {
-    return "/admin";
+  if (
+    scope === "BRANCH" &&
+    (safeNext.startsWith("/access") ||
+      safeNext.startsWith("/policy") ||
+      safeNext.startsWith("/branches") ||
+      safeNext.startsWith("/dashboard/global") ||
+      safeNext.startsWith("/superadmin"))
+  ) {
+    return "/dashboard";
   }
 
   if (scope === "GLOBAL" && safeNext.startsWith("/admin")) {
-    return "/superadmin";
+    return "/dashboard/global";
   }
 
   return safeNext;
