@@ -212,6 +212,10 @@ export async function getMe(opts: { showLoader?: boolean } = {}): Promise<Princi
   return res.principal;
 }
 
+/**
+ * Fetches /api/iam/me (if access_token exists) and syncs to Zustand auth store.
+ * This is the single source of truth for frontend permission gating.
+ */
 export async function syncPrincipalToAuthStore(): Promise<Principal | null> {
   if (typeof window === "undefined") return null;
 
@@ -234,6 +238,7 @@ export async function syncPrincipalToAuthStore(): Promise<Principal | null> {
         name: principal.name,
         roleCode: principal.roleCode,
         roleScope: principal.roleScope,
+        permissions: principal.permissions, // ✅ add this
         branchId: principal.branchId,
         role: (principal.roleCode ?? currentUser.role) as any,
       });
@@ -246,9 +251,10 @@ export async function syncPrincipalToAuthStore(): Promise<Principal | null> {
           role: (principal.roleCode ?? "BRANCH_ADMIN") as any,
           roleCode: principal.roleCode,
           roleScope: principal.roleScope,
+          permissions: principal.permissions, // ✅ add this
           branchId: principal.branchId,
         } as any,
-        token,
+        token
       );
     }
 
@@ -258,3 +264,4 @@ export async function syncPrincipalToAuthStore(): Promise<Principal | null> {
     return null;
   }
 }
+

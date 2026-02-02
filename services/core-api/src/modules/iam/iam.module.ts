@@ -7,10 +7,15 @@ import { PermissionsGuard } from "../auth/permissions.guard";
 import { IamController } from "./iam.controller";
 import { IamService } from "./iam.service";
 import { IamSeedService } from "./iam.seed";
-
+import { RbacSyncService } from "./rbac/rbac-sync.service";
 @Module({
   imports: [AuditModule, AuthModule],
   controllers: [IamController],
-  providers: [IamService, IamSeedService],
+  providers: [
+    IamService,
+    IamSeedService,
+    RbacSyncService,
+  ],
+  exports: [IamService],
 })
 export class IamModule {}

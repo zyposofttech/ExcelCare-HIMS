@@ -359,9 +359,11 @@ const NAV_GROUPS: NavGroup[] = [
   { title: "Governance & Ops", items: NAV_GOVERN },
 ];
 // ----------------------
-// Role-based Nav Visibility
-// ----------------------
-const ALLOW_CORPORATE_INFRA = true; // flip to true later if you want Corporate Admin to configure infra
+/* Permission-based Nav Visibility (enterprise RBAC)
+   - UI uses permissions (principal.permissions[]) coming from /api/iam/me
+   - No role hardcoding for authorization decisions
+   - Scope (GLOBAL/BRANCH) still controls which workspace routes exist
+*/
 
 function normRole(role?: string | null) {
   const r = String(role ?? "").trim().toUpperCase();
@@ -379,23 +381,41 @@ function normRole(role?: string | null) {
 
   return map[r] ?? r;
 }
+
 function inferScopeFromUser(user: any): "GLOBAL" | "BRANCH" {
-  // In your app, branch-scoped principals typically have branchId set.
-  // Prefer explicit roleScope / roleCode mapping (GLOBAL admins may still have a branchId).
-  const resolved = resolveRoleScope(user);
-  if (resolved === "GLOBAL" || resolved === "BRANCH") return resolved;
-  return user?.branchId ? "BRANCH" : "GLOBAL";
+  const s = resolveRoleScope(user);
+  return s === "BRANCH" ? "BRANCH" : "GLOBAL";
 }
 
-function isPlatformAdminRole(roleCode: string) {
-  return ["SUPER_ADMIN", "CORPORATE_ADMIN", "GLOBAL_ADMIN", "BRANCH_ADMIN"].includes(roleCode);
+function getUserPerms(user: any): string[] | null {
+  const perms = user?.permissions;
+  if (!Array.isArray(perms)) return null;
+  return perms.filter((p: any) => typeof p === "string" && p.length > 0);
 }
 
-function allowHrefByRole(href: string, ctx: { roleCode: string; scope: "GLOBAL" | "BRANCH" }) {
-  const { roleCode, scope } = ctx;
+function hasAnyPrefix(perms: string[], prefixes: string[]) {
+  if (!prefixes.length) return true;
+  return perms.some((p) => prefixes.some((pre) => p.startsWith(pre)));
+}
 
-  // Scope gates
-  // GLOBAL-only workspaces / screens
+type NavCtx = {
+  scope: "GLOBAL" | "BRANCH";
+  perms: string[] | null; // null => not loaded/unknown
+};
+
+/**
+ * Central policy for which routes appear in the sidebar / command center.
+ * IMPORTANT: This does not replace backend authorization.
+ *
+ * Strategy:
+ * - Scope gates are always applied (GLOBAL/BRANCH workspace split).
+ * - If permissions are not yet loaded, we allow links by scope (prevents blank nav on first paint).
+ * - Once permissions are loaded, admin surfaces become permission-driven.
+ */
+function allowHrefByPerm(href: string, ctx: NavCtx) {
+  const { scope, perms } = ctx;
+
+  // Scope gates (GLOBAL-only areas)
   if (
     href.startsWith("/access") ||
     href.startsWith("/policy") ||
@@ -404,57 +424,84 @@ function allowHrefByRole(href: string, ctx: { roleCode: string; scope: "GLOBAL" 
   ) {
     if (scope !== "GLOBAL") return false;
   }
+
   // Legacy branch workspace (kept for backward compatibility)
   if (href.startsWith("/admin")) {
     if (scope !== "BRANCH") return false;
   }
 
-  // SUPER_ADMIN-only areas
-  if (href.startsWith("/access")) return roleCode === "SUPER_ADMIN";
-  if (href.startsWith("/policy")) return roleCode === "SUPER_ADMIN";
+  // If permissions are not loaded yet, do not over-restrict UI (scope gates already applied).
+  if (!perms) return true;
 
-  // Infrastructure (single canonical module under /infrastructure)
-  // Allow platform admins by role. Corporate infra is enabled via flag.
-  const isInfraHref = href.startsWith("/infrastructure");
-  if (isInfraHref) {
-    if (roleCode === "SUPER_ADMIN") return true;
-    if (roleCode === "GLOBAL_ADMIN") return true;
-    if (roleCode === "BRANCH_ADMIN") return true;
-    if (roleCode === "CORPORATE_ADMIN") return ALLOW_CORPORATE_INFRA;
-    return false;
+  // Strong gates for sensitive / admin areas
+  if (href.startsWith("/access")) {
+    return hasAnyPrefix(perms, ["IAM_", "ACCESS_"]);
   }
 
-  // Corporate allowed items (Central Console basics)
+  if (href.startsWith("/policy")) {
+    return hasAnyPrefix(perms, ["POLICY_", "GOV_", "AUDIT_"]) || hasAnyPrefix(perms, ["IAM_"]);
+  }
+
   if (href.startsWith("/branches")) {
-    return ["SUPER_ADMIN", "CORPORATE_ADMIN", "GLOBAL_ADMIN"].includes(roleCode);
+    return hasAnyPrefix(perms, ["ORG_", "BRANCH_", "IAM_"]);
   }
+
   if (href.startsWith("/users")) {
-    return ["SUPER_ADMIN", "CORPORATE_ADMIN", "GLOBAL_ADMIN"].includes(roleCode);
+    return hasAnyPrefix(perms, ["IAM_USER_", "IAM_", "ORG_"]);
+  }
+
+  if (href.startsWith("/dashboard/global")) {
+    return hasAnyPrefix(perms, ["ORG_", "BRANCH_", "IAM_", "REPORT_", "ANALYTICS_", "DASHBOARD_"]);
+  }
+
+  if (href.startsWith("/infrastructure")) {
+    return hasAnyPrefix(perms, [
+      "INFRA_",
+      "SERVICE_",
+      "CATALOG_",
+      "ORDERSET_",
+      "TARIFF_",
+      "CHARGE_",
+      "TAX_",
+      "BILLING_SETUP_",
+      "BILLING_",
+    ]);
   }
 
   return true;
 }
 
-function rewriteHref(label: string, href: string, ctx: { scope: "GLOBAL" | "BRANCH" }) {
+function rewriteHref(label: string, href: string, _ctx: { scope: "GLOBAL" | "BRANCH" }) {
   // Fix “App Users” link so GLOBAL users land on the corporate user screen
   if (label === "App Users") return "/users";
   return href;
 }
 
 function filterNavGroupsForUser(groups: NavGroup[], user: any): NavGroup[] {
-  const roleCode = normRole(user?.roleCode ?? user?.role);
   const scope = inferScopeFromUser(user);
-  const ctx = { roleCode, scope };
-  const platformRole = isPlatformAdminRole(roleCode);
+  const perms = getUserPerms(user);
+  const ctx: NavCtx = { scope, perms };
 
-  // For platform admin roles, keep menu clean (mainly Workspaces; SUPER_ADMIN also gets Governance & Ops for /access)
+  // Keep your existing UX:
+  // - Admin personas see Workspaces first and hide Care Delivery.
+  // - Clinical personas hide Workspaces to keep the menu clean.
+  const persona: "ADMIN" | "CLINICAL" | "UNKNOWN" = !perms
+    ? "UNKNOWN"
+    : hasAnyPrefix(perms, ["IAM_", "INFRA_", "POLICY_", "ORG_", "BRANCH_", "ACCESS_"])
+      ? "ADMIN"
+      : "CLINICAL";
+
   const allowedGroupTitle = (title: string) => {
-    if (platformRole) {
+    // During first paint (before /api/iam/me has hydrated permissions), avoid hiding groups.
+    if (persona === "UNKNOWN") return true;
+
+    if (persona === "ADMIN") {
       if (title === "Workspaces") return true;
-      if (title === "Governance & Ops") return roleCode === "SUPER_ADMIN"; // to expose /access only for super
-      return false; // hide Care Delivery for admin roles
+      if (title === "Governance & Ops") return true;
+      return false; // hide Care Delivery for admin personas
     }
-    // For clinical roles, hide Workspaces to avoid confusion
+
+    // Clinical personas: hide admin workspace group
     if (title === "Workspaces") return false;
     return true;
   };
@@ -467,7 +514,7 @@ function filterNavGroupsForUser(groups: NavGroup[], user: any): NavGroup[] {
     const items: NavNode[] = [];
 
     for (const n of g.items) {
-      const nodeHrefAllowed = allowHrefByRole(n.href, ctx);
+      const nodeHrefAllowed = allowHrefByPerm(n.href, ctx);
 
       // Filter children
       let nextChildren: NavChild[] | undefined = undefined;
@@ -478,13 +525,13 @@ function filterNavGroupsForUser(groups: NavGroup[], user: any): NavGroup[] {
         for (const child of n.children) {
           if (isChildGroup(child)) {
             const groupChildren = child.children
-              .map((c) => ({ ...c, href: rewriteHref(c.label, c.href, ctx) }))
-              .filter((c) => allowHrefByRole(c.href, ctx));
+              .map((c) => ({ ...c, href: rewriteHref(c.label, c.href, { scope }) }))
+              .filter((c) => allowHrefByPerm(c.href, ctx));
 
             if (groupChildren.length) kept.push({ ...child, children: groupChildren });
           } else {
-            const updated = { ...child, href: rewriteHref(child.label, child.href, ctx) };
-            if (allowHrefByRole(updated.href, ctx)) kept.push(updated);
+            const updated = { ...child, href: rewriteHref(child.label, child.href, { scope }) };
+            if (allowHrefByPerm(updated.href, ctx)) kept.push(updated);
           }
         }
 
@@ -674,8 +721,6 @@ export function AppShell({
 
   const scope = resolveRoleScope(user);
   const isGlobalScope = scope === "GLOBAL";
-  const roleCode = normRole(user?.roleCode ?? user?.role);
-  const isSuperAdmin = roleCode === "SUPER_ADMIN";
 
   React.useEffect(() => {
     initActiveBranchSync();
@@ -689,6 +734,9 @@ export function AppShell({
   // Guard: keep users inside their workspace (defense-in-depth; proxy/middleware should also enforce this)
   React.useEffect(() => {
     if (!scope || !pathname) return;
+
+    const perms = getUserPerms(user);
+    const navCtx: NavCtx = { scope: inferScopeFromUser(user), perms };
 
     // BRANCH users: never allow GLOBAL-only workspaces
     if (
@@ -709,11 +757,13 @@ export function AppShell({
       return;
     }
 
-    // Defense in depth: /access is SUPER_ADMIN only
-    if (pathname.startsWith("/access") && !isSuperAdmin) {
+    // If permissions are known and the current route is not allowed, bounce to welcome.
+    // (Backend remains the true authority.)
+    if (!allowHrefByPerm(pathname, navCtx)) {
       router.replace("/welcome");
     }
-  }, [scope, pathname, router, isSuperAdmin]);
+  }, [scope, pathname, router, user]);
+
 
   // Initialize state
   const [collapsed, setCollapsed] = React.useState(false);
@@ -785,29 +835,30 @@ export function AppShell({
   }
 
   const roleCommandActions = React.useMemo<CommandItem[]>(() => {
-    const roleCode = normRole(user?.roleCode ?? user?.role);
     const scope = inferScopeFromUser(user);
-    const ctx = { roleCode, scope };
+    const perms = getUserPerms(user);
+    const ctx: NavCtx = { scope, perms };
 
     return COMMAND_ACTIONS
       .map((a) => ({
         ...a,
-        href: a.href ? rewriteHref(a.label, a.href, ctx) : a.href,
+        href: a.href ? rewriteHref(a.label, a.href, { scope }) : a.href,
       }))
-      .filter((a) => !a.href || allowHrefByRole(a.href, ctx));
+      .filter((a) => !a.href || allowHrefByPerm(a.href, ctx));
   }, [user]);
+
 
   const allNavItems = React.useMemo(() => buildAllNavItems(navGroupsForUser), [navGroupsForUser]);
 
   // Command Center helpers
   const commandNavItems = React.useMemo<CommandItem[]>(() => {
-    const roleCode = normRole(user?.roleCode ?? user?.role);
     const scope = inferScopeFromUser(user);
-    const ctx = { roleCode, scope };
+    const perms = getUserPerms(user);
+    const ctx: NavCtx = { scope, perms };
 
     return allNavItems
-      .map((item) => ({ ...item, href: rewriteHref(item.label, item.href, ctx) }))
-      .filter((item) => allowHrefByRole(item.href, ctx))
+      .map((item) => ({ ...item, href: rewriteHref(item.label, item.href, { scope }) }))
+      .filter((item) => allowHrefByPerm(item.href, ctx))
       .map((item) => ({
         id: `nav:${item.href}`,
         label: item.label,
@@ -818,6 +869,7 @@ export function AppShell({
         href: item.href,
       }));
   }, [user, allNavItems]);
+
 
 
   const commandItems = React.useMemo<CommandItem[]>(() => [...roleCommandActions, ...commandNavItems], [roleCommandActions, commandNavItems]);

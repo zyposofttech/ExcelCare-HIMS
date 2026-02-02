@@ -10,9 +10,17 @@ import type { PrismaClient } from "@zypocare/db";
 import { AuditService } from "../audit/audit.service";
 import type { Principal } from "../auth/access-policy.service";
 import { resolveBranchId } from "../../common/branch-scope.util";
-import { PERM, ROLE } from "./iam.constants";
-import { CreateUserDto, UpdateUserDto, CreateRoleDto, UpdateRoleDto, CreatePermissionDto} from "./iam.dto";
+import { ROLE } from "./iam.constants";
+import {
+  CreatePermissionDto,
+  CreateRoleDto,
+  CreateUserDto,
+  UpdatePermissionDto,
+  UpdateRoleDto,
+  UpdateUserDto,
+} from "./iam.dto";
 import { generateTempPassword, hashPassword } from "./password.util";
+import { RbacSyncService } from "./rbac/rbac-sync.service";
 
 function lowerEmail(e: string) {
   return (e || "").trim().toLowerCase();
@@ -23,7 +31,15 @@ export class IamService {
   constructor(
     @Inject("PRISMA") private prisma: PrismaClient,
     private audit: AuditService,
+    private rbacSync: RbacSyncService,
   ) {}
+
+  private normalizePermissionCode(input: string): string {
+    const raw = String(input ?? "").trim();
+    // Keep dot-form codes case-sensitive. For underscore codes, normalize to uppercase.
+    if (!raw) throw new BadRequestException("Invalid permission code");
+    return raw.includes(".") ? raw : raw.toUpperCase();
+  }
 
   private ensureBranchScope(principal: Principal, branchId: string | null | undefined) {
     if (principal.roleScope === "BRANCH") {
@@ -74,8 +90,6 @@ export class IamService {
   }
 
   async listUsers(principal: Principal, q?: string, branchId?: string) {
-    if (!principal.permissions.includes(PERM.IAM_USER_READ)) throw new ForbiddenException("Missing IAM_USER_READ");
-
     const query = (q || "").trim();
     const where: any = {};
     if (query) {
@@ -127,8 +141,6 @@ export class IamService {
   }
 
   async createUser(principal: Principal, dto: CreateUserDto) {
-    if (!principal.permissions.includes(PERM.IAM_USER_CREATE)) throw new ForbiddenException("Missing IAM_USER_CREATE");
-
     const email = lowerEmail(dto.email);
     if (!email) throw new BadRequestException("Email required");
 
@@ -195,8 +207,6 @@ export class IamService {
   }
 
   async updateUser(principal: Principal, id: string, dto: UpdateUserDto) {
-    if (!principal.permissions.includes(PERM.IAM_USER_UPDATE)) throw new ForbiddenException("Missing IAM_USER_UPDATE");
-
     const existing = await this.prisma.user.findUnique({
       where: { id },
       include: { roleVersion: { include: { roleTemplate: true } } },
@@ -269,10 +279,6 @@ export class IamService {
   }
 
   async resetPassword(principal: Principal, id: string) {
-    if (!principal.permissions.includes(PERM.IAM_USER_RESET_PASSWORD)) {
-      throw new ForbiddenException("Missing IAM_USER_RESET_PASSWORD");
-    }
-
     const existing = await this.prisma.user.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("User not found");
 
@@ -311,11 +317,40 @@ export class IamService {
       orderBy: { code: "asc" },
     });
   }
-  async getUser(principal: Principal, id: string) {
-    if (!principal.permissions.includes(PERM.IAM_USER_READ)) {
-      throw new ForbiddenException("Missing IAM_USER_READ");
+
+  async syncPermissionCatalog(principal: Principal) {
+    return this.rbacSync.syncPermissions();
+  }
+
+  async updatePermissionMetadata(principal: Principal, codeRaw: string, dto: UpdatePermissionDto) {
+    const code = this.normalizePermissionCode(codeRaw);
+
+    const existing = await this.prisma.permission.findUnique({ where: { code } });
+    if (!existing) throw new NotFoundException(`Permission not found: ${code}`);
+
+    const data: any = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.category !== undefined) data.category = dto.category;
+    if (dto.description !== undefined) data.description = dto.description;
+
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException("No metadata fields to update");
     }
 
+    const updated = await this.prisma.permission.update({ where: { code }, data });
+
+    await this.audit.log({
+      actorUserId: principal.userId,
+      action: "IAM_PERMISSION_METADATA_UPDATED",
+      entity: "Permission",
+      entityId: updated.id,
+      meta: { code: updated.code, updated: Object.keys(data) },
+      branchId: principal.branchId ?? null,
+    });
+
+    return updated;
+  }
+  async getUser(principal: Principal, id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
       include: {
@@ -395,10 +430,6 @@ export class IamService {
     principal: Principal,
     params: { entity?: string; entityId?: string; actorUserId?: string; action?: string; branchId?: string; take?: number }
   ) {
-    if (!principal.permissions.includes(PERM.IAM_AUDIT_READ)) {
-       throw new ForbiddenException("Missing IAM_AUDIT_READ");
-    }
-
     const where: any = {};
     
     // Branch isolation for audit logs
@@ -432,12 +463,6 @@ export class IamService {
     });
   }
   async createRole(principal: Principal, dto: CreateRoleDto) {
-    // 1. Permission Check
-    // Ensure you add IAM_ROLE_CREATE to your PERM constants
-    if (!principal.permissions.includes(PERM.IAM_ROLE_CREATE)) { 
-      throw new ForbiddenException("Missing IAM_ROLE_CREATE");
-    }
-
     const code = dto.roleCode.trim().toUpperCase();
 
     const scope = this.normalizeRoleScope(dto.scope);
@@ -493,10 +518,6 @@ export class IamService {
 
   // ✅ ADD THIS METHOD
   async updateRole(principal: Principal, code: string, dto: UpdateRoleDto) {
-    if (!principal.permissions.includes(PERM.IAM_ROLE_UPDATE)) {
-      throw new ForbiddenException("Missing IAM_ROLE_UPDATE");
-    }
-
     const roleCode = code.trim().toUpperCase();
 
     const current = await this.prisma.roleTemplateVersion.findFirst({
@@ -569,11 +590,17 @@ export class IamService {
     return { ok: true };
   }
   async createPermission(principal: Principal, dto: CreatePermissionDto) {
-    if (!principal.permissions.includes(PERM.IAM_PERMISSION_CREATE)) {
-       throw new ForbiddenException("Missing IAM_PERMISSION_CREATE");
+    // Enterprise guardrail: in production, permissions are managed via code-defined
+    // catalog sync + metadata updates, not ad-hoc creation.
+    const allowCreate =
+      process.env.IAM_ALLOW_PERMISSION_CREATE === "true" || process.env.NODE_ENV !== "production";
+    if (!allowCreate) {
+      throw new ForbiddenException(
+        "Permission creation is disabled in production. Use /iam/permissions/sync and metadata updates.",
+      );
     }
 
-    const code = dto.code.trim().toUpperCase();
+    const code = this.normalizePermissionCode(dto.code);
     
     // Check for duplicates
     const existing = await this.prisma.permission.findUnique({ where: { code } });

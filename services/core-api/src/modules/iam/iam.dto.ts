@@ -40,3 +40,9 @@ export class CreatePermissionDto {
   @IsString() @MinLength(2) category!: string;   // e.g. "Clinical"
   @IsOptional() @IsString() description?: string;
 }
+
+export class UpdatePermissionDto {
+  @IsOptional() @IsString() @MinLength(2) name?: string;
+  @IsOptional() @IsString() @MinLength(2) category?: string;
+  @IsOptional() @IsString() description?: string;
+}

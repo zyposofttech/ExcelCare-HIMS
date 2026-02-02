@@ -3,30 +3,83 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-export type AppRole =
-  | "SUPER_ADMIN"
-  | "CORPORATE_ADMIN"
-  | "GLOBAL_ADMIN"
-  | "BRANCH_ADMIN"
-  | "FRONT_OFFICE"
-  | "DOCTOR"
-  | "NURSE"
-  | "BILLING";
+export const SYSTEM_ROLE_CODES = [
+  "SUPER_ADMIN",
+  "CORPORATE_ADMIN",
+  "GLOBAL_ADMIN",
+  "BRANCH_ADMIN",
+] as const;
+export type SystemRoleCode = (typeof SYSTEM_ROLE_CODES)[number];
+// Role codes must be extensible: HIMS will have many roles (pharmacy, lab, housekeeping, etc.)
+export type RoleCode = string;
+
+// Backward compatibility: some older code uses `user.role`
+export type AppRole = SystemRoleCode | string;
+
+export type RoleScope = "GLOBAL" | "BRANCH";
 
 export type AuthUser = {
   id: string;
   name: string;
   email: string;
+
+  // Legacy role field (kept for backward compatibility).
+  // Prefer roleCode for authorization decisions.
   role: AppRole | string;
-  roleCode?: AppRole | string | null;
+
+  // Canonical role code returned by backend (any string, not enum-limited)
+  roleCode?: RoleCode | null;
+
+  roleScope?: RoleScope | string | null;
+  permissions?: string[];
+
   branchId?: string | null;
   branchName?: string | null;
   mustChangePassword?: boolean;
   isActive?: boolean;
-
-  // Optional (if your backend already sends it)
-  roleScope?: "GLOBAL" | "BRANCH" | string | null;
 };
+
+
+export function getRoleCode(user: AuthUser | null | undefined): string {
+  return String(user?.roleCode ?? user?.role ?? "").trim().toUpperCase();
+}
+
+export function getRoleScope(user: AuthUser | null | undefined): RoleScope | null {
+  if (!user) return null;
+
+  const scope = String(user.roleScope ?? "").trim().toUpperCase();
+  if (scope === "GLOBAL" || scope === "BRANCH") return scope as RoleScope;
+
+  // Fallback: branchId implies BRANCH scope
+  if (user.branchId) return "BRANCH";
+
+  // Fallback: known platform roles imply GLOBAL
+  const roleCode = getRoleCode(user);
+  if (roleCode === "SUPER_ADMIN" || roleCode === "CORPORATE_ADMIN" || roleCode === "GLOBAL_ADMIN") {
+    return "GLOBAL";
+  }
+
+  return null;
+}
+
+export function getPermissions(user: AuthUser | null | undefined): string[] {
+  return Array.isArray(user?.permissions) ? user!.permissions! : [];
+}
+
+export function hasPerm(user: AuthUser | null | undefined, perm: string): boolean {
+  if (!perm) return false;
+  return getPermissions(user).includes(perm);
+}
+
+export function hasAnyPerm(user: AuthUser | null | undefined, perms: string[]): boolean {
+  const p = getPermissions(user);
+  return perms.some((x) => p.includes(x));
+}
+
+export function hasAllPerms(user: AuthUser | null | undefined, perms: string[]): boolean {
+  const p = getPermissions(user);
+  return perms.every((x) => p.includes(x));
+}
 
 const REMEMBER_DEVICE_KEY = "zypocare-remember-device";
 
@@ -66,31 +119,10 @@ function inferScopeFromUser(u: AuthUser): "GLOBAL" | "BRANCH" {
   if (u.branchId) return "BRANCH";
   return "GLOBAL";
 }
-// ✅ Exported helper used by Access pages and other UI gating
-export function getRoleCode(user?: AuthUser | null): string {
-  if (!user) return "";
-  const raw = (user as any)?.roleCode ?? user.role ?? "";
-  const r = String(raw).trim().toUpperCase();
-  const map: Record<string, string> = {
-    SUPER: "SUPER_ADMIN",
-    SUPERADMIN: "SUPER_ADMIN",
-    SUPER_ADMIN: "SUPER_ADMIN",
-    CORPORATE: "CORPORATE_ADMIN",
-    CORPORATEADMIN: "CORPORATE_ADMIN",
-    CORPORATE_ADMIN: "CORPORATE_ADMIN",
-    GLOBAL: "GLOBAL_ADMIN",
-    GLOBALADMIN: "GLOBAL_ADMIN",
-    GLOBAL_ADMIN: "GLOBAL_ADMIN",
-    BRANCH: "BRANCH_ADMIN",
-    BRANCHADMIN: "BRANCH_ADMIN",
-    BRANCH_ADMIN: "BRANCH_ADMIN",
-  };
-  return map[r] ?? r;
-}
 
 function setRoleScopeCookies(u: AuthUser) {
-  const roleCode = String(u.role || "").trim().toUpperCase();
-  const scope = inferScopeFromUser(u);
+  const roleCode = getRoleCode(u);
+  const scope = getRoleScope(u) ?? inferScopeFromUser(u);
   setCookie("zypocare_role", roleCode || "UNKNOWN");
   setCookie("zypocare_scope", scope);
 }

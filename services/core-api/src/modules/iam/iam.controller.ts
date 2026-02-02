@@ -1,9 +1,26 @@
-import { Controller, Get, Patch, Post, Body, Param, Query, Req, UnauthorizedException } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Patch,
+  Param,
+  Post,
+  Query,
+  Req,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
-import { Permissions } from "../auth/permissions.decorator";
 import type { Principal } from "../auth/access-policy.service";
+import { Permissions } from "../auth/permissions.decorator";
 import { IamService } from "./iam.service";
-import { CreateUserDto, UpdateUserDto, CreateRoleDto, UpdateRoleDto, CreatePermissionDto } from "./iam.dto";
+import {
+  CreatePermissionDto,
+  CreateRoleDto,
+  CreateUserDto,
+  UpdatePermissionDto,
+  UpdateRoleDto,
+  UpdateUserDto,
+} from "./iam.dto";
 import { PERM } from "./iam.constants";
 
 @ApiTags("iam")
@@ -15,6 +32,12 @@ export class IamController {
     const p = req?.principal as Principal | undefined;
     if (!p) throw new UnauthorizedException("Missing principal on request");
     return p;
+  }
+
+  @Get("me")
+  async me(@Req() req: any) {
+    // No permission required: returns only caller's principal.
+    return { principal: this.principal(req) };
   }
 
   @Get("roles")
@@ -29,6 +52,24 @@ export class IamController {
     return this.iam.listPermissions(this.principal(req));
   }
 
+  @Post("permissions/sync")
+  @Permissions(PERM.IAM_PERMISSION_MANAGE)
+  async syncPermissions(@Req() req: any) {
+    return this.iam.syncPermissionCatalog(this.principal(req));
+  }
+
+  @Patch("permissions/:code")
+  @Permissions(PERM.IAM_PERMISSION_MANAGE)
+  async updatePermission(
+    @Param("code") code: string,
+    @Body() dto: UpdatePermissionDto,
+    @Req() req: any,
+  ) {
+    return this.iam.updatePermissionMetadata(this.principal(req), code, dto);
+  }
+
+  // NOTE: you didn’t guard branches earlier; keeping same behavior.
+  // If you have a perm like PERM.IAM_BRANCH_READ, add @RequirePerms(...) here.
   @Get("branches")
   async branches(@Req() req: any) {
     return this.iam.listBranches(this.principal(req));
@@ -38,7 +79,7 @@ export class IamController {
   async branch(@Param("id") id: string, @Req() req: any) {
     return this.iam.getBranch(this.principal(req), id);
   }
-  
+
   @Get("users")
   @Permissions(PERM.IAM_USER_READ)
   async users(
@@ -105,8 +146,9 @@ export class IamController {
   async updateRole(@Param("code") code: string, @Body() dto: UpdateRoleDto, @Req() req: any) {
     return this.iam.updateRole(this.principal(req), code, dto);
   }
+
   @Post("permissions")
-  @Permissions(PERM.IAM_PERMISSION_CREATE)
+  @Permissions(PERM.IAM_PERMISSION_MANAGE)
   async createPermission(@Body() dto: CreatePermissionDto, @Req() req: any) {
     return this.iam.createPermission(this.principal(req), dto);
   }
