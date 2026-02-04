@@ -166,93 +166,93 @@ export class FacilitySetupService {
   // Readiness (uses only delegates that exist in your Prisma schema)
   // ---------------------------------------------------------------------------
 
- async getBranchReadiness(principal: Principal, branchIdParam?: string) {
-  const branchId = this.resolveBranchId(principal, branchIdParam ?? null);
+  async getBranchReadiness(principal: Principal, branchIdParam?: string) {
+    const branchId = this.resolveBranchId(principal, branchIdParam ?? null);
 
-  // IMPORTANT: Infrastructure single source of truth
-  // Legacy Ward/Room/Bed/OT tables are treated as read-only projections.
-  // Readiness must derive only from LocationNode/Unit/UnitRoom/UnitResource.
+    // IMPORTANT: Infrastructure single source of truth
+    // Legacy Ward/Room/Bed/OT tables are treated as read-only projections.
+    // Readiness must derive only from LocationNode/Unit/UnitRoom/UnitResource.
 
-  const [enabledFacilities, departments, specialties, doctors, otRooms, otTables, beds] = await Promise.all([
-    this.prisma.branchFacility.count({ where: { branchId, isEnabled: true } }),
-    this.prisma.department.count({ where: { branchId, isActive: true } }),
-    this.prisma.specialty.count({ where: { branchId, isActive: true } }),
+    const [enabledFacilities, departments, specialties, doctors, otRooms, otTables, beds] = await Promise.all([
+      this.prisma.branchFacility.count({ where: { branchId, isEnabled: true } }),
+      this.prisma.department.count({ where: { branchId, isActive: true } }),
+      this.prisma.specialty.count({ where: { branchId, isActive: true } }),
 
-    // Staff is enterprise-wide; branch placement lives in StaffAssignment.
-    // Heuristic doctor count: ACTIVE assignments in branch with doctor-like designation.
-    (async () => {
-      const now = new Date();
-      const rows = await this.prisma.staffAssignment.groupBy({
-        by: ["staffId"],
+      // Staff is enterprise-wide; branch placement lives in StaffAssignment.
+      // Heuristic doctor count: ACTIVE assignments in branch with doctor-like designation.
+      (async () => {
+        const now = new Date();
+        const rows = await this.prisma.staffAssignment.groupBy({
+          by: ["staffId"],
+          where: {
+            branchId,
+            status: "ACTIVE",
+            staff: { status: "ACTIVE" },
+            AND: [
+              { effectiveFrom: { lte: now } },
+              { OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] },
+              {
+                OR: [
+                  { designation: { contains: "doctor", mode: "insensitive" } },
+                  { designation: { contains: "consultant", mode: "insensitive" } },
+                  { designation: { contains: "surgeon", mode: "insensitive" } },
+                ],
+              },
+            ],
+          },
+        });
+        return rows.length;
+      })(),
+
+      // OT readiness: either explicit OT rooms under an OT unit, OR OT tables as resources
+      this.prisma.unitRoom.count({
         where: {
           branchId,
-          status: "ACTIVE",
-          staff: { status: "ACTIVE" },
-          AND: [
-            { effectiveFrom: { lte: now } },
-            { OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] },
-            {
-              OR: [
-                { designation: { contains: "doctor", mode: "insensitive" } },
-                { designation: { contains: "consultant", mode: "insensitive" } },
-                { designation: { contains: "surgeon", mode: "insensitive" } },
-              ],
-            },
-          ],
+          isActive: true,
+          unit: { isActive: true, unitType: { code: "OT" } },
         },
-      });
-      return rows.length;
-    })(),
+      }),
 
-    // OT readiness: either explicit OT rooms under an OT unit, OR OT tables as resources
-    this.prisma.unitRoom.count({
-      where: {
-        branchId,
-        isActive: true,
-        unit: { isActive: true, unitType: { code: "OT" } },
-      },
-    }),
+      this.prisma.unitResource.count({
+        where: {
+          branchId,
+          isActive: true,
+          resourceType: "OT_TABLE" as any,
+        },
+      }),
 
-    this.prisma.unitResource.count({
-      where: {
-        branchId,
-        isActive: true,
-        resourceType: "OT_TABLE" as any,
-      },
-    }),
+      // Beds must be represented as UnitResourceType=BED
+      this.prisma.unitResource.count({
+        where: {
+          branchId,
+          isActive: true,
+          resourceType: "BED" as any,
+        },
+      }),
+    ]);
 
-    // Beds must be represented as UnitResourceType=BED
-    this.prisma.unitResource.count({
-      where: {
-        branchId,
-        isActive: true,
-        resourceType: "BED" as any,
-      },
-    }),
-  ]);
+    const otSetup = Math.max(otRooms, otTables);
+    const summary = { enabledFacilities, departments, specialties, doctors, otRooms: otSetup, beds };
 
-  const otSetup = Math.max(otRooms, otTables);
-  const summary = { enabledFacilities, departments, specialties, doctors, otRooms: otSetup, beds };
+    const score =
+      (enabledFacilities > 0 ? 20 : 0) +
+      (departments > 0 ? 20 : 0) +
+      (specialties > 0 ? 20 : 0) +
+      (doctors > 0 ? 20 : 0) +
+      (beds > 0 ? 10 : 0) +
+      (otSetup > 0 ? 10 : 0);
 
-  const score =
-    (enabledFacilities > 0 ? 20 : 0) +
-    (departments > 0 ? 20 : 0) +
-    (specialties > 0 ? 20 : 0) +
-    (doctors > 0 ? 20 : 0) +
-    (beds > 0 ? 10 : 0) +
-    (otSetup > 0 ? 10 : 0);
+    const blockers: string[] = [];
+    if (enabledFacilities === 0) blockers.push("No facilities enabled.");
+    if (departments === 0) blockers.push("No departments created.");
+    if (doctors === 0) blockers.push("No doctors detected (designation missing 'Doctor/Consultant/Surgeon').");
 
-  const blockers: string[] = [];
-  if (enabledFacilities === 0) blockers.push("No facilities enabled.");
-  if (departments === 0) blockers.push("No departments created.");
-  if (doctors === 0) blockers.push("No doctors detected (designation missing 'Doctor/Consultant/Surgeon').");
+    const warnings: string[] = [];
+    if (beds === 0) warnings.push("No beds configured.");
+    if (otSetup === 0) warnings.push("No OT setup configured (no OT rooms or OT tables found).");
 
-  const warnings: string[] = [];
-  if (beds === 0) warnings.push("No beds configured.");
-  if (otSetup === 0) warnings.push("No OT setup configured (no OT rooms or OT tables found).");
-
-  return { score, blockers, warnings, summary };
-}
+    return { score, blockers, warnings, summary };
+  }
 
 
   // ---------------------------------------------------------------------------
@@ -282,7 +282,7 @@ export class FacilitySetupService {
                 designationPrimary: true,
                 assignments: {
                   where: {
-                    branchId: dept.branchId,
+                    branchId, // ✅ FIX
                     status: "ACTIVE",
                     AND: [
                       { effectiveFrom: { lte: new Date() } },
@@ -298,6 +298,7 @@ export class FacilitySetupService {
                     specialty: { select: { id: true, code: true, name: true } },
                   },
                 },
+
               },
             },
           },
@@ -509,7 +510,8 @@ export class FacilitySetupService {
                 designationPrimary: true,
                 assignments: {
                   where: {
-                    branchId: dept.branchId,
+                    // NOTE: cannot reference `dept` here (it's not in scope for Prisma).
+                    branchId,
                     status: "ACTIVE",
                     AND: [
                       { effectiveFrom: { lte: new Date() } },
@@ -538,131 +540,131 @@ export class FacilitySetupService {
     });
   }
   async deactivateDepartment(
-  principal: Principal,
-  departmentId: string,
-  opts: { hard?: boolean } = {},
-) {
-  const row = await this.prisma.department.findUnique({
-    where: { id: departmentId },
-    select: { id: true, branchId: true, isActive: true },
-  });
-  if (!row) throw new NotFoundException("Department not found");
+    principal: Principal,
+    departmentId: string,
+    opts: { hard?: boolean } = {},
+  ) {
+    const row = await this.prisma.department.findUnique({
+      where: { id: departmentId },
+      select: { id: true, branchId: true, isActive: true },
+    });
+    if (!row) throw new NotFoundException("Department not found");
 
-  // Branch scope enforcement
-  this.resolveBranchId(principal, row.branchId);
+    // Branch scope enforcement
+    this.resolveBranchId(principal, row.branchId);
 
-  const hard = !!opts.hard;
+    const hard = !!opts.hard;
 
-  if (hard) {
-    // Strict “unused” checks for hard delete
-    const staffCount = await this.prisma.staffAssignment.count({ where: { departmentId, status: "ACTIVE" } });
-    const unitsCount = await this.prisma.unit.count({ where: { departmentId } });
-    const doctorAssignCount = await this.prisma.departmentDoctor.count({ where: { departmentId } });
-    const mapCount = await this.prisma.departmentSpecialty.count({ where: { departmentId } });
+    if (hard) {
+      // Strict “unused” checks for hard delete
+      const staffCount = await this.prisma.staffAssignment.count({ where: { departmentId, status: "ACTIVE" } });
+      const unitsCount = await this.prisma.unit.count({ where: { departmentId } });
+      const doctorAssignCount = await this.prisma.departmentDoctor.count({ where: { departmentId } });
+      const mapCount = await this.prisma.departmentSpecialty.count({ where: { departmentId } });
 
-    const blockers = [
-      staffCount ? `${staffCount} staff linked` : null,
-      unitsCount ? `${unitsCount} units linked` : null,
-      doctorAssignCount ? `${doctorAssignCount} doctor assignments` : null,
-      mapCount ? `${mapCount} specialty mappings` : null,
-    ].filter(Boolean);
+      const blockers = [
+        staffCount ? `${staffCount} staff linked` : null,
+        unitsCount ? `${unitsCount} units linked` : null,
+        doctorAssignCount ? `${doctorAssignCount} doctor assignments` : null,
+        mapCount ? `${mapCount} specialty mappings` : null,
+      ].filter(Boolean);
 
-    if (blockers.length) {
-      throw new ConflictException(`Cannot hard delete department: ${blockers.join(", ")}`);
+      if (blockers.length) {
+        throw new ConflictException(`Cannot hard delete department: ${blockers.join(", ")}`);
+      }
+
+      await this.prisma.department.delete({ where: { id: departmentId } });
+
+      await this.audit.log({
+        branchId: row.branchId,
+        actorUserId: principal.userId,
+        action: "DEPARTMENT_DELETE_HARD",
+        entity: "Department",
+        entityId: row.id,
+        meta: { hard: true },
+      });
+
+      return { ok: true, hardDeleted: true };
     }
 
-    await this.prisma.department.delete({ where: { id: departmentId } });
+    // Soft deactivate
+    const updated = await this.prisma.department.update({
+      where: { id: departmentId },
+      data: { isActive: false },
+      select: { id: true, branchId: true, isActive: true, name: true, code: true },
+    });
 
     await this.audit.log({
       branchId: row.branchId,
       actorUserId: principal.userId,
-      action: "DEPARTMENT_DELETE_HARD",
+      action: "DEPARTMENT_DEACTIVATE",
       entity: "Department",
-      entityId: row.id,
-      meta: { hard: true },
+      entityId: updated.id,
+      meta: { hard: false },
     });
 
-    return { ok: true, hardDeleted: true };
+    return updated;
   }
 
-  // Soft deactivate
-  const updated = await this.prisma.department.update({
-    where: { id: departmentId },
-    data: { isActive: false },
-    select: { id: true, branchId: true, isActive: true, name: true, code: true },
-  });
+  async deactivateSpecialty(
+    principal: Principal,
+    specialtyId: string,
+    opts: { hard?: boolean } = {},
+  ) {
+    const row = await this.prisma.specialty.findUnique({
+      where: { id: specialtyId },
+      select: { id: true, branchId: true, isActive: true },
+    });
+    if (!row) throw new NotFoundException("Specialty not found");
 
-  await this.audit.log({
-    branchId: row.branchId,
-    actorUserId: principal.userId,
-    action: "DEPARTMENT_DEACTIVATE",
-    entity: "Department",
-    entityId: updated.id,
-    meta: { hard: false },
-  });
+    this.resolveBranchId(principal, row.branchId);
 
-  return updated;
-}
+    const hard = !!opts.hard;
 
-async deactivateSpecialty(
-  principal: Principal,
-  specialtyId: string,
-  opts: { hard?: boolean } = {},
-) {
-  const row = await this.prisma.specialty.findUnique({
-    where: { id: specialtyId },
-    select: { id: true, branchId: true, isActive: true },
-  });
-  if (!row) throw new NotFoundException("Specialty not found");
+    if (hard) {
+      const staffCount = await this.prisma.staffAssignment.count({ where: { specialtyId, status: "ACTIVE" } });
+      const mapCount = await this.prisma.departmentSpecialty.count({ where: { specialtyId } });
 
-  this.resolveBranchId(principal, row.branchId);
+      const blockers = [
+        staffCount ? `${staffCount} staff linked` : null,
+        mapCount ? `${mapCount} department mappings` : null,
+      ].filter(Boolean);
 
-  const hard = !!opts.hard;
+      if (blockers.length) {
+        throw new ConflictException(`Cannot hard delete specialty: ${blockers.join(", ")}`);
+      }
 
-  if (hard) {
-    const staffCount = await this.prisma.staffAssignment.count({ where: { specialtyId, status: "ACTIVE" } });
-    const mapCount = await this.prisma.departmentSpecialty.count({ where: { specialtyId } });
+      await this.prisma.specialty.delete({ where: { id: specialtyId } });
 
-    const blockers = [
-      staffCount ? `${staffCount} staff linked` : null,
-      mapCount ? `${mapCount} department mappings` : null,
-    ].filter(Boolean);
+      await this.audit.log({
+        branchId: row.branchId,
+        actorUserId: principal.userId,
+        action: "SPECIALTY_DELETE_HARD",
+        entity: "Specialty",
+        entityId: row.id,
+        meta: { hard: true },
+      });
 
-    if (blockers.length) {
-      throw new ConflictException(`Cannot hard delete specialty: ${blockers.join(", ")}`);
+      return { ok: true, hardDeleted: true };
     }
 
-    await this.prisma.specialty.delete({ where: { id: specialtyId } });
+    const updated = await this.prisma.specialty.update({
+      where: { id: specialtyId },
+      data: { isActive: false },
+      select: { id: true, branchId: true, isActive: true, name: true, code: true },
+    });
 
     await this.audit.log({
       branchId: row.branchId,
       actorUserId: principal.userId,
-      action: "SPECIALTY_DELETE_HARD",
+      action: "SPECIALTY_DEACTIVATE",
       entity: "Specialty",
-      entityId: row.id,
-      meta: { hard: true },
+      entityId: updated.id,
+      meta: { hard: false },
     });
 
-    return { ok: true, hardDeleted: true };
+    return updated;
   }
-
-  const updated = await this.prisma.specialty.update({
-    where: { id: specialtyId },
-    data: { isActive: false },
-    select: { id: true, branchId: true, isActive: true, name: true, code: true },
-  });
-
-  await this.audit.log({
-    branchId: row.branchId,
-    actorUserId: principal.userId,
-    action: "SPECIALTY_DEACTIVATE",
-    entity: "Specialty",
-    entityId: updated.id,
-    meta: { hard: false },
-  });
-
-  return updated;
-}
 
   // ---------------------------------------------------------------------------
   // Specialties (branch-scoped catalog)

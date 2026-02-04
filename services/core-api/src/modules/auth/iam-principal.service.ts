@@ -21,7 +21,7 @@ export class IamPrincipalService {
   constructor(
     @Inject("PRISMA") private prisma: PrismaClient,
     private readonly redis: RedisService,
-  ) {}
+  ) { }
 
   private now() {
     return Date.now();
@@ -155,17 +155,21 @@ export class IamPrincipalService {
 
     // Multi-branch branchIds derived from active UserRoleBinding rows (if present)
     const now = new Date();
-    const rawBindings = (u as any).roleBindings ?? [];
+    const rawBindings = (fullUser as any).roleBindings ?? [];
     const activeBindings = Array.isArray(rawBindings)
       ? rawBindings.filter((b: any) =>
-          !!b.branchId &&
-          (!b.effectiveFrom || new Date(b.effectiveFrom).getTime() <= now.getTime()) &&
-          (!b.effectiveTo || new Date(b.effectiveTo).getTime() >= now.getTime()),
-        )
+        !!b.branchId &&
+        (!b.effectiveFrom || new Date(b.effectiveFrom).getTime() <= now.getTime()) &&
+        (!b.effectiveTo || new Date(b.effectiveTo).getTime() >= now.getTime()),
+      )
       : [];
+
     const branchIds = Array.from(new Set(activeBindings.map((b: any) => b.branchId)));
     const primaryBinding = activeBindings.find((b: any) => b.isPrimary) ?? activeBindings[0] ?? null;
-    const effectiveBranchId = primaryBinding?.branchId ?? (u.branchId ?? null);
+
+    // ✅ FIX: use `u`, not `fullUser`
+    const effectiveBranchId = primaryBinding?.branchId ?? (fullUser.branchId ?? null);
+
 
     return {
       userId: fullUser.id,
@@ -357,10 +361,10 @@ export class IamPrincipalService {
     const rawBindings = (u as any).roleBindings ?? [];
     const activeBindings = Array.isArray(rawBindings)
       ? rawBindings.filter((b: any) =>
-          !!b.branchId &&
-          (!b.effectiveFrom || new Date(b.effectiveFrom).getTime() <= now.getTime()) &&
-          (!b.effectiveTo || new Date(b.effectiveTo).getTime() >= now.getTime()),
-        )
+        !!b.branchId &&
+        (!b.effectiveFrom || new Date(b.effectiveFrom).getTime() <= now.getTime()) &&
+        (!b.effectiveTo || new Date(b.effectiveTo).getTime() >= now.getTime()),
+      )
       : [];
     const branchIds = Array.from(new Set(activeBindings.map((b: any) => b.branchId)));
     const primaryBinding = activeBindings.find((b: any) => b.isPrimary) ?? activeBindings[0] ?? null;

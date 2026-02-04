@@ -349,12 +349,36 @@ export class StaffService {
       staffId,
     } as any);
 
+    // Resolve the persisted roleVersionId (IamService.createUser returns minimal payload in this codebase)
+    let roleVersionId: string | null = null;
+    const persisted = await this.ctx.prisma.user.findUnique({ where: { id: created.userId }, select: { roleVersionId: true } });
+    roleVersionId = persisted?.roleVersionId ?? null;
+
+    // Fallback: if roleVersionId still missing, resolve latest ACTIVE version for the roleCode
+    if (!roleVersionId) {
+      const tpl = await this.ctx.prisma.roleTemplate.findUnique({ where: { code: roleCode } });
+      if (tpl) {
+        const rv = await this.ctx.prisma.roleTemplateVersion.findFirst({
+          where: { roleTemplateId: tpl.id, status: "ACTIVE" },
+          orderBy: { version: "desc" },
+          select: { id: true },
+        });
+        roleVersionId = rv?.id ?? null;
+      }
+    }
+
+    if (!roleVersionId) {
+      // Best-effort cleanup: delete user if we can't establish the role version for bindings
+      await this.ctx.prisma.user.delete({ where: { id: created.userId } }).catch(() => null);
+      throw new BadRequestException("Unable to resolve roleVersionId for the provided roleCode");
+    }
+
     // Create bindings per branch assignment (Option 2)
     try {
       await this.ctx.prisma.userRoleBinding.createMany({
         data: plan.bindings.map((b) => ({
           userId: created.userId,
-          roleVersionId: created.roleVersionId,
+          roleVersionId,
           scope: "BRANCH" as any,
           branchId: b.branchId,
           staffAssignmentId: b.staffAssignmentId,
