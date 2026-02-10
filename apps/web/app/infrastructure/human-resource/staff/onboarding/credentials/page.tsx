@@ -96,7 +96,8 @@ export default function HrStaffOnboardingCredentialsPage() {
   // Ensure stable draftId
   React.useEffect(() => {
     if (draftId) return;
-    router.replace("/infrastructure/staff/onboarding/start" as any);
+    router.replace("/infrastructure/human-resource/staff/onboarding/personal" as any);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId]);
 
@@ -304,7 +305,7 @@ export default function HrStaffOnboardingCredentialsPage() {
   function onSaveAndNext() {
     try {
       saveDraftOrThrow();
-      router.push(withDraftId("/infrastructure/staff/onboarding/assignments", draftId) as any);
+      router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/assignments", draftId) as any);
     } catch {
       // handled via toast
     }
@@ -320,7 +321,7 @@ export default function HrStaffOnboardingCredentialsPage() {
           <Button
             variant="outline"
             className="border-zc-border"
-            onClick={() => router.push(withDraftId("/infrastructure/staff/onboarding/employment", draftId) as any)}
+            onClick={() => router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/employment", draftId) as any)}
           >
             Back
           </Button>
@@ -339,7 +340,7 @@ export default function HrStaffOnboardingCredentialsPage() {
       <div className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-zc-foreground">Step 5: Credentials</div>
+            <div className="text-sm font-medium text-zc-foreground">Step 4: Credentials</div>
             <div className="mt-1 text-xs text-zc-muted">
               Clinical staff must add at least one credential. Evidence links are optional placeholders (upload wiring can be added later).
             </div>

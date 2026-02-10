@@ -245,7 +245,8 @@ export default function HrStaffOnboardingHealthPage() {
   // Ensure draftId
   React.useEffect(() => {
     if (draftId) return;
-    router.replace("/infrastructure/staff/onboarding/start" as any);
+    router.replace("/infrastructure/human-resource/staff/onboarding/personal" as any);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId]);
 
@@ -440,7 +441,7 @@ export default function HrStaffOnboardingHealthPage() {
   function onSaveAndNext() {
     try {
       saveDraftOrThrow();
-      router.push(withDraftId("/infrastructure/staff/onboarding/insurance", draftId) as any);
+      router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/insurance", draftId) as any);
     } catch {
       // handled
     }
@@ -468,7 +469,7 @@ export default function HrStaffOnboardingHealthPage() {
           <Button
             variant="outline"
             className="border-zc-border"
-            onClick={() => router.push(withDraftId("/infrastructure/staff/onboarding/background", draftId) as any)}
+            onClick={() => router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/background", draftId) as any)}
           >
             Back
           </Button>
@@ -487,7 +488,7 @@ export default function HrStaffOnboardingHealthPage() {
       <div className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-zc-foreground">Employee Health Record</div>
+            <div className="text-sm font-medium text-zc-foreground">Step 7: Employee Health Record</div>
             <div className="mt-1 text-xs text-zc-muted">
               Captures the exact structure from workflow: pre-employment medical, vaccinations, exposures, injuries, and fitness certificates.
             </div>
@@ -514,7 +515,7 @@ export default function HrStaffOnboardingHealthPage() {
 
         <div className={cn("grid gap-4", loading ? "opacity-60" : "opacity-100")}>
           {/* Pre-employment + periodic medical */}
-          <Card className="border-zc-border">
+          <Card className="border-zc-border bg-zc-panel">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm">Medical examinations</CardTitle>
               <CardDescription>Pre-employment medical + periodic checkup frequency (months).</CardDescription>
@@ -632,7 +633,7 @@ export default function HrStaffOnboardingHealthPage() {
 
           {/* History + exposures */}
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="border-zc-border">
+            <Card className="border-zc-border bg-zc-panel">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Medical history</CardTitle>
                 <CardDescription>Chronic conditions, allergies, blood group.</CardDescription>
@@ -683,7 +684,7 @@ export default function HrStaffOnboardingHealthPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-zc-border">
+            <Card className="border-zc-border bg-zc-panel">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Occupational exposure</CardTitle>
                 <CardDescription>Risk flags (blood/radiation/chemical/biological).</CardDescription>
@@ -718,7 +719,7 @@ export default function HrStaffOnboardingHealthPage() {
           </div>
 
           {/* Vaccinations */}
-          <Card className="border-zc-border">
+          <Card className="border-zc-border bg-zc-panel">
             <CardHeader className="pb-2">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
@@ -1047,7 +1048,7 @@ export default function HrStaffOnboardingHealthPage() {
           </Card>
 
           {/* Fitness certificates */}
-          <Card className="border-zc-border">
+          <Card className="border-zc-border bg-zc-panel">
             <CardHeader className="pb-2">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
@@ -1318,7 +1319,7 @@ export default function HrStaffOnboardingHealthPage() {
           </Card>
 
           {/* Injuries (optional) */}
-          <Card className="border-zc-border">
+          <Card className="border-zc-border bg-zc-panel">
             <CardHeader className="pb-2">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>

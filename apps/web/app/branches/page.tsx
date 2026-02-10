@@ -135,7 +135,7 @@ function validateCode(code: string): string | null {
   const v = normalizeCode(code);
   if (!v) return "Branch code is required";
   if (!/^[A-Z0-9][A-Z0-9-]{1,31}$/.test(v)) {
-    return "Code must be 2â€“32 chars, letters/numbers/hyphen (example: BLR-EC)";
+    return "Code must be 2-32 chars, letters/numbers/hyphen (example: BLR-EC)";
   }
   return null;
 }
@@ -335,7 +335,7 @@ function ModalShell({
               {description ? <div className="mt-1 text-sm text-zc-muted">{description}</div> : null}
             </div>
             <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
-              âœ•
+              X
             </Button>
           </div>
         </div>
@@ -532,7 +532,7 @@ function ToggleActiveConfirmDialog({
             Cancel
           </Button>
           <Button variant={nextActive ? "success" : "secondary"} onClick={onConfirm} disabled={busy}>
-            {busy ? "Updatingâ€¦" : nextActive ? "Reactivate" : "Deactivate"}
+            {busy ? "Updating..." : nextActive ? "Reactivate" : "Deactivate"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -562,7 +562,7 @@ function BranchEditorModal({
   const [err, setErr] = React.useState<string | null>(null);
   const [manualCode, setManualCode] = React.useState(false);
 
-  // â”€â”€â”€ AI Auto-fill â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- AI Auto-fill ---
   const autoFill = useAutoFill(800);
 
   const [form, setForm] = React.useState<BranchForm>({
@@ -676,7 +676,7 @@ function BranchEditorModal({
     if (next && next !== form.code) setForm((s) => ({ ...s, code: next }));
   }, [open, mode, manualCode, form.name, form.city, form.code]);
 
-  // â”€â”€â”€ AI Auto-fill trigger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // --- AI Auto-fill trigger ---
   React.useEffect(() => {
     if (!open) return;
     // Trigger auto-fill when city, bedCount, or name changes
@@ -915,7 +915,7 @@ function BranchEditorModal({
           </DialogTitle>
           <DialogDescription>
             {mode === "create"
-              ? "Create the branch master (legal, contact, compliance & settings). Then configure Facilities â†’ Departments â†’ Specialties."
+              ? "Create the branch master (legal, contact, compliance & settings). Then configure Facilities to Departments to Specialties."
               : "Update branch identity, statutory numbers, contact and settings."}
           </DialogDescription>
         </DialogHeader>
@@ -1130,36 +1130,36 @@ function BranchEditorModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label>Logo URL</Label>
-                <Input value={form.logoUrl} onChange={(e) => set("logoUrl", e.target.value)} placeholder="https://â€¦" />
+                <Input value={form.logoUrl} onChange={(e) => set("logoUrl", e.target.value)} placeholder="https://..." />
                 <p className="text-[11px] text-zc-muted">Used for reports and letterheads.</p>
               </div>
 
               <div className="grid gap-2">
                 <Label>Website</Label>
-                <Input value={form.website} onChange={(e) => set("website", e.target.value)} placeholder="https://â€¦" />
+                <Input value={form.website} onChange={(e) => set("website", e.target.value)} placeholder="https://..." />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label>Facebook</Label>
-                <Input value={form.facebook} onChange={(e) => set("facebook", e.target.value)} placeholder="https://facebook.com/â€¦" />
+                <Input value={form.facebook} onChange={(e) => set("facebook", e.target.value)} placeholder="https://facebook.com/..." />
               </div>
               <div className="grid gap-2">
                 <Label>Instagram</Label>
-                <Input value={form.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="https://instagram.com/â€¦" />
+                <Input value={form.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="https://instagram.com/..." />
               </div>
               <div className="grid gap-2">
                 <Label>LinkedIn</Label>
-                <Input value={form.linkedin} onChange={(e) => set("linkedin", e.target.value)} placeholder="https://linkedin.com/â€¦" />
+                <Input value={form.linkedin} onChange={(e) => set("linkedin", e.target.value)} placeholder="https://linkedin.com/..." />
               </div>
               <div className="grid gap-2">
                 <Label>X (Twitter)</Label>
-                <Input value={form.x} onChange={(e) => set("x", e.target.value)} placeholder="https://x.com/â€¦" />
+                <Input value={form.x} onChange={(e) => set("x", e.target.value)} placeholder="https://x.com/..." />
               </div>
               <div className="grid gap-2 sm:col-span-2">
                 <Label>YouTube</Label>
-                <Input value={form.youtube} onChange={(e) => set("youtube", e.target.value)} placeholder="https://youtube.com/â€¦" />
+                <Input value={form.youtube} onChange={(e) => set("youtube", e.target.value)} placeholder="https://youtube.com/..." />
               </div>
             </div>
           </div>
@@ -1237,7 +1237,7 @@ function BranchEditorModal({
                 <Textarea
                   value={form.workingHoursText}
                   onChange={(e) => set("workingHoursText", e.target.value)}
-                  placeholder="e.g. Monâ€“Sat 9:00â€“18:00; Sunday closed"
+                  placeholder="e.g. Mon-Sat 9:00-18:00; Sunday closed"
                   className="min-h-[72px]"
                 />
               </div>
@@ -1246,7 +1246,7 @@ function BranchEditorModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/20 p-3">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-zc-text">Emergency 24Ã—7</div>
+                  <div className="text-sm font-semibold text-zc-text">Emergency 24x7</div>
                   <div className="text-xs text-zc-muted">Marks branch as always open for emergency services.</div>
                 </div>
                 <Switch checked={form.emergency24x7} onCheckedChange={(v) => set("emergency24x7", v)} />
@@ -1432,7 +1432,7 @@ export default function BranchesPage() {
                 <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Total Branches</div>
                 <div className="mt-1 text-lg font-bold text-blue-700 dark:text-blue-300">{rows.length}</div>
                 <div className="mt-1 text-[11px] text-blue-700/80 dark:text-blue-300/80">
-                  Active: <span className="font-semibold tabular-nums">{activeBranches}</span> â€¢ Inactive: <span className="font-semibold tabular-nums">{inactiveBranches}</span>
+                  Active: <span className="font-semibold tabular-nums">{activeBranches}</span> | Inactive: <span className="font-semibold tabular-nums">{inactiveBranches}</span>
                 </div>
               </div>
 
@@ -1456,7 +1456,7 @@ export default function BranchesPage() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") e.preventDefault();
                   }}
-                  placeholder="Search by code, name, legal entity, city, GSTIN, PANâ€¦"
+                  placeholder="Search by code, name, legal entity, city, GSTIN, PAN..."
                   className="pl-10"
                 />
               </div>
@@ -1480,7 +1480,7 @@ export default function BranchesPage() {
         <Card className="overflow-hidden">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Branch Registry</CardTitle>
-            <CardDescription className="text-sm">Use Facility Setup to configure Facilities â†’ Departments â†’ Specialties â†’ Mapping.</CardDescription>
+            <CardDescription className="text-sm">Use Facility Setup to configure Facilities to Departments to Specialties to Mapping.</CardDescription>
           </CardHeader>
           <Separator />
 
@@ -1501,7 +1501,7 @@ export default function BranchesPage() {
                 {!filtered.length ? (
                   <tr>
                     <td colSpan={6} className="px-4 py-10 text-center text-sm text-zc-muted">
-                      {loading ? "Loading branchesâ€¦" : "No branches found."}
+                      {loading ? "Loading branches..." : "No branches found."}
                     </td>
                   </tr>
                 ) : null}
@@ -1617,7 +1617,7 @@ export default function BranchesPage() {
             <div className="min-w-0">
               <div className="text-sm font-semibold text-zc-text">Recommended setup order</div>
               <div className="mt-1 text-sm text-zc-muted">
-                1) Create Branch (Legal/Contact/Compliance/Settings) â†’ 2) Facility Setup (Facilities â†’ Departments â†’ Specialties â†’ Mapping) â†’ 3) Branch Admin config (later).
+                1) Create Branch (Legal/Contact/Compliance/Settings), then 2) Facility Setup (Facilities to Departments to Specialties to Mapping), then 3) Branch Admin config (later).
               </div>
             </div>
           </div>

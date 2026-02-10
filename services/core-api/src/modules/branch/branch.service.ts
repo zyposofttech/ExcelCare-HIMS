@@ -9,6 +9,7 @@ type BranchCountsRaw = Partial<{
   departments: number;
   patients: number;
   branchFacilities: number;
+  specialties: number;
   Specialty: number;
 
   // Core clinical/admin relations (delete protection)
@@ -90,7 +91,7 @@ function normalizeCounts(
     beds: derived?.beds ?? 0,
 
     facilities: raw.branchFacilities ?? 0,
-    specialties: (raw as any).Specialty ?? 0,
+    specialties: (raw as any).specialties ?? (raw as any).Specialty ?? 0,
 
     locationNodes: raw.locationNodes ?? 0,
     units: raw.units ?? 0,
@@ -833,7 +834,7 @@ export class BranchService {
       ["encounters", (c as any).Encounter ?? 0],
       ["admissions", (c as any).Admission ?? 0],
       ["facilities", (c as any).branchFacilities ?? 0],
-      ["specialties", (c as any).Specialty ?? 0],
+      ["specialties", (c as any).specialties ?? (c as any).Specialty ?? 0],
       ["tariffPlans", (c as any).tariffPlans ?? 0],
       ["assets", (c as any).assets ?? 0],
       ["statutoryCases", (c as any).statutoryCases ?? 0],

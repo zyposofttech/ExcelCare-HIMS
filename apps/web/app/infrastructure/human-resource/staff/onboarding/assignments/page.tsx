@@ -81,7 +81,7 @@ export default function HrStaffOnboardingAssignmentsPage() {
   // Ensure stable draftId in URL
   React.useEffect(() => {
     if (draftId) return;
-    router.replace("/infrastructure/staff/onboarding/start" as any);
+    router.replace("/infrastructure/human-resource/staff/onboarding/personal" as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId]);
 
@@ -295,7 +295,7 @@ export default function HrStaffOnboardingAssignmentsPage() {
   function onSaveAndNext() {
     try {
       saveDraftOrThrow();
-      router.push(withDraftId("/infrastructure/staff/onboarding/system-access", draftId) as any);
+      router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/system-access", draftId) as any);
     } catch {
       // handled via toast
     }
@@ -311,7 +311,7 @@ export default function HrStaffOnboardingAssignmentsPage() {
           <Button
             variant="outline"
             className="border-zc-border"
-            onClick={() => router.push(withDraftId("/infrastructure/staff/onboarding/credentials", draftId) as any)}
+            onClick={() => router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/credentials", draftId) as any)}
           >
             Back
           </Button>

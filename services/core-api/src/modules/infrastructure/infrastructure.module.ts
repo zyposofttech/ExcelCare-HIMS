@@ -60,6 +60,8 @@ import { TariffPlansService } from "./tariff-plans/tariff-plans.service";
 
 import { StaffController } from "./staff/staff.controller";
 import { StaffService } from "./staff/staff.service";
+import { InfraFilesController } from "./files/files.controller";
+import { InfraFilesService } from "./files/files.service";
 
 @Module({
   imports: [
@@ -89,7 +91,8 @@ import { StaffService } from "./staff/staff.service";
     TaxCodesController,
     ServiceAvailabilityController,
     TariffPlansController,
-    StaffController
+    StaffController,
+    InfraFilesController
   ],
   providers: [
     LocationService,
@@ -108,7 +111,8 @@ import { StaffService } from "./staff/staff.service";
     TaxCodesService,
     ServiceAvailabilityService,
     TariffPlansService,
-    StaffService
+    StaffService,
+    InfraFilesService
   ],
 })
 export class InfrastructureModule {}

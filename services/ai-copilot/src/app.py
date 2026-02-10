@@ -359,12 +359,12 @@ def ai_smart_defaults(inp: SmartDefaultsInput):
 
 
 @app.get("/v1/ai/health-check")
-async def ai_health_check(branchId: str = Query(...)):
+async def ai_health_check(branchId: str = Query(...), bust: str = Query(None)):
     """Run all engines and return unified branch health status."""
     now = time.time()
 
-    # Check cache
-    if branchId in _health_cache:
+    # Check cache (skip if bust param provided — means data just changed)
+    if not bust and branchId in _health_cache:
         cached_at, cached_result = _health_cache[branchId]
         if now - cached_at < HEALTH_CACHE_TTL:
             return cached_result
@@ -394,11 +394,10 @@ async def ai_health_check(branchId: str = Query(...)):
     else:
         overall = "CRITICAL"
 
-    # Build top issues for sidebar badges — ensure every area is represented
+    # Build top issues for sidebar badges — include ALL consistency + NABH issues
     top_issues: list[dict[str, Any]] = []
-    seen_areas: set[str] = set()
 
-    def _append_issue(issue: Any, sev: str) -> None:
+    def _append_consistency_issue(issue: Any, sev: str) -> None:
         top_issues.append({
             "id": issue.id,
             "severity": sev,
@@ -407,13 +406,26 @@ async def ai_health_check(branchId: str = Query(...)):
             "fixHint": issue.fixHint,
             "area": _issue_area(issue.category),
         })
-        seen_areas.add(issue.category)
 
-    # Include ALL blockers and warnings (not just first 5)
+    # Consistency issues
     for issue in consistency.blockers:
-        _append_issue(issue, "BLOCKER")
+        _append_consistency_issue(issue, "BLOCKER")
     for issue in consistency.warnings:
-        _append_issue(issue, "WARNING")
+        _append_consistency_issue(issue, "WARNING")
+
+    # NABH issues — extract from chapter results (they have id, description, fixHint)
+    for chapter in nabh.chapters:
+        for check in chapter.checks:
+            if check.status == "FAIL":
+                sev = "BLOCKER" if check.severity == "BLOCKER" else "WARNING"
+                top_issues.append({
+                    "id": f"nabh-{check.id}",
+                    "severity": sev,
+                    "title": check.description,
+                    "category": "NABH",
+                    "fixHint": check.fixHint,
+                    "area": _nabh_area(check.id),
+                })
 
     result = {
         "branchId": branchId,
@@ -448,6 +460,23 @@ def _issue_area(category: str) -> str:
         "RESOURCE": "resources",
     }
     return mapping.get(category, "infrastructure")
+
+
+def _nabh_area(check_id: str) -> str:
+    """Map NABH check ID to frontend navigation area based on chapter."""
+    _NABH_AREA_MAP: dict[str, str] = {
+        "NABH-1": "units",       # Access & Assessment → units (OPD/ER)
+        "NABH-2": "resources",   # Care of Patients → beds/resources
+        "NABH-3": "rooms",       # Infection Control → rooms
+        "NABH-4": "rooms",       # Patient Rights → rooms (amenities)
+        "NABH-5": "locations",   # Hospital Infrastructure → locations
+        "NABH-6": "resources",   # Human Resources → resources
+        "NABH-7": "rooms",       # Information Management → rooms
+        "NABH-8": "rooms",       # Quality Improvement → rooms
+        "NABH-9": "locations",   # Safety → locations (fire zones etc.)
+    }
+    prefix = check_id.rsplit(".", 1)[0] if "." in check_id else check_id
+    return _NABH_AREA_MAP.get(prefix, "infrastructure")
 
 
 # ── Page-Level Insights ─────────────────────────────────────────────────

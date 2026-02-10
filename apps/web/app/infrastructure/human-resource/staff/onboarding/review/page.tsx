@@ -446,7 +446,7 @@ export default function Page() {
       clearDraft(draftId);
 
       toast({ title: "Onboarding finalized", description: "Staff updated and onboarding child records created." });
-      router.push(`/infrastructure/staff/onboarding/done?draftId=${encodeURIComponent(draftId)}` as any);
+      router.push(`/infrastructure/human-resource/staff/onboarding/done?draftId=${encodeURIComponent(draftId)}` as any);
     } catch (e: any) {
       const apiErr = e as ApiError<any>;
       const msg = apiErr?.message || e?.message || "Unexpected error";
@@ -466,7 +466,7 @@ export default function Page() {
         <div className="rounded-md border border-zc-border bg-zc-panel/40 p-4 text-sm text-zc-muted">
           Missing draftId in URL. Start from the Initiate step.
           <div className="mt-3">
-            <Button className="bg-zc-accent text-white hover:bg-zc-accent/90" onClick={() => router.push("/infrastructure/staff/onboarding/start" as any)}>Go to Start</Button>
+            <Button className="bg-zc-accent text-white hover:bg-zc-accent/90" onClick={() => router.push("/infrastructure/human-resource/staff/onboarding/start" as any)}>Go to Start</Button>
           </div>
         </div>
       </OnboardingShell>
@@ -483,7 +483,7 @@ export default function Page() {
           <Button
             variant="outline"
             className="border-zc-border"
-            onClick={() => router.push(`/infrastructure/staff/onboarding/photo-biometric?draftId=${encodeURIComponent(draftId)}` as any)}
+            onClick={() => router.push(`/infrastructure/human-resource/staff/onboarding/photo-biometric?draftId=${encodeURIComponent(draftId)}` as any)}
             disabled={loading || submitting}
           >
             Back

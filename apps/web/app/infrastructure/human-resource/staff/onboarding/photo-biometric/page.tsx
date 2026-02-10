@@ -161,7 +161,7 @@ export default function Page() {
 
   const onSaveAndNext = React.useCallback(() => {
     if (!save(true)) return;
-    router.push(withDraftId("/infrastructure/staff/onboarding/review", draftId) as any);
+    router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/review", draftId) as any);
   }, [draftId, router, save]);
 
   if (!draftId) {
@@ -172,7 +172,7 @@ export default function Page() {
         description="Photo, signature and biometric enrollment (for attendance/access control)."
         footer={
           <div className="flex items-center justify-between">
-            <Button variant="outline" className="border-zc-border" onClick={() => router.push("/infrastructure/staff/onboarding/start" as any)}
+            <Button variant="outline" className="border-zc-border" onClick={() => router.push("/infrastructure/human-resource/staff/onboarding/start" as any)}
             >
               Back
             </Button>
@@ -196,7 +196,7 @@ export default function Page() {
           <Button
             variant="outline"
             className="border-zc-border"
-            onClick={() => router.push(withDraftId("/infrastructure/staff/onboarding/financial", draftId) as any)}
+            onClick={() => router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/financial", draftId) as any)}
             disabled={loading}
           >
             Back

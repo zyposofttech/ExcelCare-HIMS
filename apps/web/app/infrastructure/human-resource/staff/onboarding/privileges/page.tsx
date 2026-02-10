@@ -150,7 +150,8 @@ export default function HrStaffOnboardingPrivilegesPage() {
   // Ensure draftId
   React.useEffect(() => {
     if (draftId) return;
-    router.replace("/infrastructure/staff/onboarding/start" as any);
+    router.replace("/infrastructure/human-resource/staff/onboarding/personal" as any);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId]);
 
@@ -488,7 +489,7 @@ export default function HrStaffOnboardingPrivilegesPage() {
   function onSaveAndNext() {
     try {
       saveDraftOrThrow();
-      router.push(withDraftId("/infrastructure/staff/onboarding/system-access", draftId) as any);
+      router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/system-access", draftId) as any);
     } catch {
       // handled
     }
@@ -504,7 +505,7 @@ export default function HrStaffOnboardingPrivilegesPage() {
           <Button
             variant="outline"
             className="border-zc-border"
-            onClick={() => router.push(withDraftId("/infrastructure/staff/onboarding/credentials", draftId) as any)}
+            onClick={() => router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/credentials", draftId) as any)}
           >
             Back
           </Button>
@@ -523,7 +524,7 @@ export default function HrStaffOnboardingPrivilegesPage() {
       <div className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-zc-foreground">Step 9: Clinical privileges</div>
+            <div className="text-sm font-medium text-zc-foreground">Step 5: Clinical privileges</div>
             <div className="mt-1 text-xs text-zc-muted">
               Doctors only. You can add privileges now (recommended) or skip and finalize later in the full Privilege Management module.
             </div>

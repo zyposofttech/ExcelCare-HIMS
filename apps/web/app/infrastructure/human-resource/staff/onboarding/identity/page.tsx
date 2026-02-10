@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -7,15 +9,17 @@ import { OnboardingShell } from "../_components/OnboardingShell";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/components/ui/use-toast";
 
 import { cn } from "@/lib/cn";
-import { toast } from "@/components/ui/use-toast";
+import { apiFetch } from "@/lib/api";
 
 type IdentityDocType = "AADHAAR" | "PAN" | "PASSPORT" | "DRIVING_LICENSE" | "VOTER_ID" | "OTHER";
 type VerificationStatus = "PENDING" | "VERIFIED" | "REJECTED";
@@ -36,7 +40,14 @@ type IdentityDocumentDraft = {
   verification_status: VerificationStatus;
   verification_notes?: string;
 
-  evidence_urls?: string[]; // urls, one per line in UI
+  evidence_urls?: string[]; // server URLs, generated automatically after upload
+};
+
+type PhotoDraft = {
+  photo_url?: string | null;
+  signature_url?: string | null;
+  stamp_url?: string | null;
+  notes?: string | null;
 };
 
 type StaffOnboardingDraft = {
@@ -50,6 +61,16 @@ type StaffOnboardingDraft = {
 
 type FieldErrorMap = Record<string, string>;
 
+type UploadResp = {
+  url: string;
+  key?: string;
+  mime?: string;
+  sizeBytes?: number;
+  checksumSha256?: string;
+};
+
+const BASE = "/infrastructure/human-resource/staff/onboarding";
+
 const DOC_LABEL: Record<IdentityDocType, string> = {
   AADHAAR: "Aadhaar",
   PAN: "PAN",
@@ -60,15 +81,15 @@ const DOC_LABEL: Record<IdentityDocType, string> = {
 };
 
 const DOC_HELP: Record<IdentityDocType, string> = {
-  AADHAAR: "12 digits",
-  PAN: "10 chars (e.g., ABCDE1234F)",
-  PASSPORT: "Usually 8–9 alphanumeric",
-  DRIVING_LICENSE: "State RTO format varies",
-  VOTER_ID: "EPIC format varies",
-  OTHER: "Any valid government/organization ID",
+  AADHAAR: "Upload front + back (optional). Number = 12 digits.",
+  PAN: "Upload scan (optional). PAN = ABCDE1234F.",
+  PASSPORT: "Upload scan (optional).",
+  DRIVING_LICENSE: "Upload scan (optional).",
+  VOTER_ID: "Upload scan (optional).",
+  OTHER: "Upload scan (optional).",
 };
 
-export default function HrStaffOnboardingIdentityPage() {
+export default function IdentityPage() {
   const router = useRouter();
   const sp = useSearchParams();
   const draftId = sp.get("draftId");
@@ -77,28 +98,36 @@ export default function HrStaffOnboardingIdentityPage() {
   const [dirty, setDirty] = React.useState(false);
   const [errors, setErrors] = React.useState<FieldErrorMap>({});
 
-  const [consent, setConsent] = React.useState<boolean>(false);
+  const [consent, setConsent] = React.useState(false);
   const [docs, setDocs] = React.useState<IdentityDocumentDraft[]>([]);
 
-  // Ensure a stable draftId in URL
-  React.useEffect(() => {
-    if (draftId) return;
-    router.replace("/infrastructure/staff/onboarding/start" as any);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftId]);
+  const [photo, setPhoto] = React.useState<PhotoDraft>({
+    photo_url: "",
+    signature_url: "",
+    stamp_url: "",
+    notes: "",
+  });
 
-// Load draft
+  const [uploading, setUploading] = React.useState<{
+    photo: boolean;
+    sign: boolean;
+    doc: Record<string, boolean>; // docId -> uploading
+  }>({ photo: false, sign: false, doc: {} });
+
   React.useEffect(() => {
-    if (!draftId) return;
+    if (!draftId) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     try {
       const draft = readDraft(draftId);
       const pd: any = draft.personal_details ?? {};
 
-      const existingDocsRaw = pd.identity_documents;
-      const existingDocs: IdentityDocumentDraft[] = Array.isArray(existingDocsRaw)
-        ? existingDocsRaw
+      const raw = pd.identity_documents;
+      const parsed: IdentityDocumentDraft[] = Array.isArray(raw)
+        ? raw
             .filter((x: any) => x && typeof x === "object")
             .map((x: any) => ({
               id: String(x.id || makeId()),
@@ -109,17 +138,25 @@ export default function HrStaffOnboardingIdentityPage() {
               issued_on: x.issued_on ? String(x.issued_on).slice(0, 10) : undefined,
               valid_to: x.valid_to ? String(x.valid_to).slice(0, 10) : undefined,
               is_primary: !!x.is_primary,
-              verification_status: (String(x.verification_status || "PENDING").toUpperCase() as VerificationStatus) || "PENDING",
+              verification_status:
+                (String(x.verification_status || "PENDING").toUpperCase() as VerificationStatus) || "PENDING",
               verification_notes: x.verification_notes ? String(x.verification_notes) : undefined,
-              evidence_urls: Array.isArray(x.evidence_urls) ? x.evidence_urls.map((u: any) => String(u).trim()).filter(Boolean) : [],
+              evidence_urls: Array.isArray(x.evidence_urls)
+                ? x.evidence_urls.map((u: any) => String(u).trim()).filter(Boolean)
+                : [],
             }))
         : [];
 
-      // normalize primary selection if needed
-      const normalized = normalizePrimary(existingDocs);
-
-      setDocs(normalized);
+      setDocs(normalizePrimary(parsed));
       setConsent(!!pd.identity_consent_acknowledged);
+
+      const pb = (pd.photo_biometric ?? {}) as any;
+      setPhoto({
+        photo_url: pb.photo_url ?? "",
+        signature_url: pb.signature_url ?? "",
+        stamp_url: pb.stamp_url ?? "",
+        notes: pb.notes ?? "",
+      });
 
       setDirty(false);
       setErrors({});
@@ -138,26 +175,24 @@ export default function HrStaffOnboardingIdentityPage() {
   }
 
   function addDoc() {
-    const id = makeId();
-    setDocs((prev) => {
-      const next: IdentityDocumentDraft[] = [
+    setDocs((prev) =>
+      normalizePrimary([
         ...prev,
         {
-          id,
+          id: makeId(),
           doc_type: "AADHAAR",
           doc_number: "",
           name_on_document: "",
           issuing_authority: "",
           issued_on: "",
           valid_to: "",
-          is_primary: prev.length === 0, // first one becomes primary
+          is_primary: prev.length === 0,
           verification_status: "PENDING",
           verification_notes: "",
           evidence_urls: [],
         },
-      ];
-      return normalizePrimary(next);
-    });
+      ]),
+    );
     setDirty(true);
   }
 
@@ -171,19 +206,58 @@ export default function HrStaffOnboardingIdentityPage() {
     setDirty(true);
   }
 
-  function updateEvidence(idx: number, multiline: string) {
-    const urls = String(multiline || "")
-      .split("\n")
-      .map((x) => x.trim())
-      .filter(Boolean);
+  function updatePhoto<K extends keyof PhotoDraft>(k: K, v: PhotoDraft[K]) {
+    setPhoto((p) => ({ ...p, [k]: v }));
+    setDirty(true);
+  }
 
-    const d = docs[idx];
-    setDocAt(idx, { ...d, evidence_urls: urls });
-    setErrors((e) => {
-      const next = { ...e };
-      delete next[`docs.${idx}.evidence_urls`];
-      return next;
+  function addEvidenceToDoc(docId: string, url: string) {
+    setDocs((prev) =>
+      prev.map((d) => {
+        if (d.id !== docId) return d;
+        const current = Array.isArray(d.evidence_urls) ? d.evidence_urls : [];
+        if (current.includes(url)) return d;
+        return { ...d, evidence_urls: [...current, url] };
+      }),
+    );
+    setDirty(true);
+  }
+
+  function removeEvidenceFromDoc(docId: string, url: string) {
+    setDocs((prev) =>
+      prev.map((d) => {
+        if (d.id !== docId) return d;
+        const current = Array.isArray(d.evidence_urls) ? d.evidence_urls : [];
+        return { ...d, evidence_urls: current.filter((x) => x !== url) };
+      }),
+    );
+    setDirty(true);
+  }
+
+  async function uploadStaffAsset(kind: "PROFILE_PHOTO" | "SIGNATURE" | "IDENTITY_DOC", file: File): Promise<string> {
+    if (!draftId) throw new Error("draftId missing");
+
+    const max = 5 * 1024 * 1024;
+    const mime = (file.type || "").toLowerCase();
+
+    if (!["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(mime)) {
+      throw new Error("Only JPG/PNG/WEBP images are allowed.");
+    }
+    if (file.size > max) throw new Error("Max file size is 5MB.");
+
+    const fd = new FormData();
+    fd.append("contextId", draftId);
+    fd.append("kind", kind);
+    fd.append("file", file);
+
+    const res = await apiFetch<UploadResp>("/api/infrastructure/files/upload", {
+      method: "POST",
+      body: fd,
+      showLoader: false,
     });
+
+    if (!res?.url) throw new Error("Upload failed: server did not return URL.");
+    return res.url;
   }
 
   function validate(): FieldErrorMap {
@@ -195,13 +269,12 @@ export default function HrStaffOnboardingIdentityPage() {
     }
 
     const primaryCount = docs.filter((d) => d.is_primary).length;
-    if (primaryCount !== 1) {
-      e["docs.primary"] = "Exactly one document must be marked as Primary.";
-    }
+    if (primaryCount !== 1) e["docs.primary"] = "Exactly one document must be marked as Primary.";
 
     docs.forEach((d, idx) => {
       const type = d.doc_type;
       const num = String(d.doc_number || "").trim();
+
       if (!type) e[`docs.${idx}.doc_type`] = "Document type is required.";
       if (!num) e[`docs.${idx}.doc_number`] = "Document number is required.";
       else {
@@ -209,7 +282,6 @@ export default function HrStaffOnboardingIdentityPage() {
         if (msg) e[`docs.${idx}.doc_number`] = msg;
       }
 
-      // Optional but quality checks
       const issued = String(d.issued_on || "").trim();
       const validTo = String(d.valid_to || "").trim();
       if (issued && !isISODate(issued)) e[`docs.${idx}.issued_on`] = "Use YYYY-MM-DD format.";
@@ -223,10 +295,7 @@ export default function HrStaffOnboardingIdentityPage() {
       }
     });
 
-    if (!consent) {
-      e["consent"] = "Consent acknowledgement is required.";
-    }
-
+    if (!consent) e["consent"] = "Consent acknowledgement is required.";
     return e;
   }
 
@@ -258,8 +327,22 @@ export default function HrStaffOnboardingIdentityPage() {
         valid_to: cleanDateOpt(d.valid_to),
         verification_notes: cleanOpt(d.verification_notes),
         evidence_urls: Array.isArray(d.evidence_urls) ? d.evidence_urls.map((u) => String(u).trim()).filter(Boolean) : [],
-      }))
+      })),
     );
+
+    const nextPhotoBlock = {
+      photo_url: String(photo.photo_url || "").trim() || null,
+      signature_url: String(photo.signature_url || "").trim() || null,
+      stamp_url: String(photo.stamp_url || "").trim() || null,
+
+      biometric_enrolled: false,
+      biometric_enrollment_id: null,
+      biometric_device_id: null,
+      enrolled_at: null,
+      attendance_id: null,
+
+      notes: String(photo.notes || "").trim() || null,
+    };
 
     const nextDraft: StaffOnboardingDraft = {
       ...existing,
@@ -267,44 +350,36 @@ export default function HrStaffOnboardingIdentityPage() {
         ...pd,
         identity_consent_acknowledged: true,
         identity_documents: normalizedDocs,
+        photo_biometric: nextPhotoBlock,
       },
     };
 
     writeDraft(draftId, nextDraft);
     setDirty(false);
-
-    toast({ title: "Saved", description: "Identity documents saved to draft." });
+    toast({ title: "Saved", description: "Identity + uploads saved to draft." });
   }
 
   function onSave() {
     try {
       saveDraftOrThrow();
-    } catch {
-      // handled
-    }
+    } catch {}
   }
 
   function onSaveAndNext() {
     try {
       saveDraftOrThrow();
-      router.push(withDraftId("/infrastructure/staff/onboarding/professional", draftId) as any);
-    } catch {
-      // handled
-    }
+      router.push(withDraftId(`${BASE}/employment`, draftId) as any);
+    } catch {}
   }
 
   return (
     <OnboardingShell
       stepKey="identity"
-      title="Identity & KYC"
-      description="Capture primary identity documents with validation and evidence links."
+      title="Identity details"
+      description="Capture KYC + upload photo/signature + upload Aadhaar/PAN scans (URL generated automatically)."
       footer={
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <Button
-            variant="outline"
-            className="border-zc-border"
-            onClick={() => router.push(withDraftId("/infrastructure/staff/onboarding/address", draftId) as any)}
-          >
+          <Button variant="outline" className="border-zc-border" onClick={() => router.push(withDraftId(`${BASE}/personal`, draftId) as any)}>
             Back
           </Button>
 
@@ -320,11 +395,12 @@ export default function HrStaffOnboardingIdentityPage() {
       }
     >
       <div className="space-y-4">
+        {/* Top summary */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-zc-foreground">Step 5: Identity documents</div>
+            <div className="text-sm font-medium text-zc-foreground">Identity + uploads</div>
             <div className="mt-1 text-xs text-zc-muted">
-              Add at least one ID. Mark exactly one as Primary. Evidence URLs are optional (one per line).
+              Upload photo/signature using the buttons. For Aadhaar/PAN, upload scans inside the document card.
             </div>
             {errors["docs"] ? (
               <div className="mt-2 rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300">
@@ -334,15 +410,9 @@ export default function HrStaffOnboardingIdentityPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {docs.length ? (
-              <Badge variant="secondary" className="border border-zc-border">
-                Documents: {docs.length}
-              </Badge>
-            ) : (
-              <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400" variant="secondary">
-                Add a document
-              </Badge>
-            )}
+            <Badge variant="secondary" className="border border-zc-border">
+              Documents: {docs.length}
+            </Badge>
 
             {dirty ? (
               <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400" variant="secondary">
@@ -363,9 +433,7 @@ export default function HrStaffOnboardingIdentityPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-sm font-medium text-zc-foreground">Consent acknowledgement</div>
-              <div className="mt-1 text-xs text-zc-muted">
-                Confirm that the staff member has provided consent to store and process identity information.
-              </div>
+              <div className="mt-1 text-xs text-zc-muted">Confirm staff consent for storing/processing identity information.</div>
               {errors["consent"] ? <div className="mt-2 text-xs text-red-500">{errors["consent"]}</div> : null}
             </div>
             <div className="flex items-center gap-2">
@@ -386,10 +454,110 @@ export default function HrStaffOnboardingIdentityPage() {
           </div>
         </div>
 
-        {/* Docs list */}
+        {/* Uploads (fixed UI: no default file input) */}
+        <Card className={cn("border-zc-border bg-zc-panel", loading ? "opacity-60" : "opacity-100")}>
+          <CardHeader>
+            <CardTitle className="text-sm">Profile photo & signature upload</CardTitle>
+            <CardDescription>Use the Upload buttons (no browser “Choose File” UI).</CardDescription>
+          </CardHeader>
+
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            {/* Profile Photo */}
+            <div className="grid gap-2">
+              <Label className="text-xs text-zc-muted">Profile photo</Label>
+
+              {photo.photo_url ? (
+                <div className="rounded-md border border-zc-border bg-zc-panel/40 p-2">
+                  <img src={String(photo.photo_url)} alt="Profile" className="h-28 w-28 rounded-md object-cover" />
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" className="h-8 border-zc-border" onClick={() => updatePhoto("photo_url", "")}>
+                      Remove
+                    </Button>
+                    <a href={String(photo.photo_url)} target="_blank" rel="noreferrer" className="text-xs text-zc-accent underline underline-offset-2">
+                      Open
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-md border border-zc-border bg-zc-panel/40 p-3 text-xs text-zc-muted">No photo uploaded.</div>
+              )}
+
+              <UploadButton
+                label={uploading.photo ? "Uploading…" : "Upload photo"}
+                disabled={!draftId || uploading.photo}
+                onPick={async (file) => {
+                  try {
+                    setUploading((p) => ({ ...p, photo: true }));
+                    const url = await uploadStaffAsset("PROFILE_PHOTO", file);
+                    updatePhoto("photo_url", url);
+                    toast({ title: "Uploaded", description: "Profile photo uploaded successfully." });
+                  } catch (err: any) {
+                    toast({ variant: "destructive", title: "Upload failed", description: err?.message ?? "Could not upload photo." });
+                  } finally {
+                    setUploading((p) => ({ ...p, photo: false }));
+                  }
+                }}
+              />
+            </div>
+
+            {/* Signature */}
+            <div className="grid gap-2">
+              <Label className="text-xs text-zc-muted">Signature</Label>
+
+              {photo.signature_url ? (
+                <div className="rounded-md border border-zc-border bg-zc-panel/40 p-2">
+                  <img
+                    src={String(photo.signature_url)}
+                    alt="Signature"
+                    className="h-28 w-full max-w-[320px] rounded-md object-contain bg-white"
+                  />
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" className="h-8 border-zc-border" onClick={() => updatePhoto("signature_url", "")}>
+                      Remove
+                    </Button>
+                    <a href={String(photo.signature_url)} target="_blank" rel="noreferrer" className="text-xs text-zc-accent underline underline-offset-2">
+                      Open
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-md border border-zc-border bg-zc-panel/40 p-3 text-xs text-zc-muted">No signature uploaded.</div>
+              )}
+
+              <UploadButton
+                label={uploading.sign ? "Uploading…" : "Upload signature"}
+                disabled={!draftId || uploading.sign}
+                onPick={async (file) => {
+                  try {
+                    setUploading((p) => ({ ...p, sign: true }));
+                    const url = await uploadStaffAsset("SIGNATURE", file);
+                    updatePhoto("signature_url", url);
+                    toast({ title: "Uploaded", description: "Signature uploaded successfully." });
+                  } catch (err: any) {
+                    toast({ variant: "destructive", title: "Upload failed", description: err?.message ?? "Could not upload signature." });
+                  } finally {
+                    setUploading((p) => ({ ...p, sign: false }));
+                  }
+                }}
+              />
+            </div>
+
+            <div className="md:col-span-2 grid gap-2">
+              <Label className="text-xs text-zc-muted">Notes (optional)</Label>
+              <Textarea
+                className="border-zc-border"
+                value={String(photo.notes ?? "")}
+                onChange={(e) => updatePhoto("notes", e.target.value)}
+                placeholder="Any notes about capture…"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Documents */}
         <div className="grid gap-3">
           <div className="flex items-center justify-between">
-            <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Documents</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Identity documents</div>
             <Button type="button" className="bg-zc-accent text-white hover:bg-zc-accent/90" onClick={addDoc} disabled={loading}>
               Add document
             </Button>
@@ -413,6 +581,9 @@ export default function HrStaffOnboardingIdentityPage() {
                 const validToErr = errors[`docs.${idx}.valid_to`];
                 const notesErr = errors[`docs.${idx}.verification_notes`];
 
+                const docUploading = !!uploading.doc[d.id];
+                const evidences = Array.isArray(d.evidence_urls) ? d.evidence_urls : [];
+
                 return (
                   <div key={d.id} className="rounded-md border border-zc-border bg-zc-panel/40 p-3">
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -421,6 +592,7 @@ export default function HrStaffOnboardingIdentityPage() {
                           <Badge variant="secondary" className="border border-zc-border">
                             {typeLabel}
                           </Badge>
+
                           {isPrimary ? (
                             <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" variant="secondary">
                               Primary
@@ -438,8 +610,8 @@ export default function HrStaffOnboardingIdentityPage() {
                               d.verification_status === "VERIFIED"
                                 ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                                 : d.verification_status === "REJECTED"
-                                ? "bg-red-500/10 text-red-600 dark:text-red-400"
-                                : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                                  ? "bg-red-500/10 text-red-600 dark:text-red-400"
+                                  : "bg-amber-500/15 text-amber-600 dark:text-amber-400",
                             )}
                           >
                             {d.verification_status}
@@ -450,33 +622,76 @@ export default function HrStaffOnboardingIdentityPage() {
 
                       <div className="flex items-center gap-2">
                         {!isPrimary ? (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="h-8 border-zc-border px-3 text-xs"
-                            onClick={() => markPrimary(d.id)}
-                          >
+                          <Button type="button" variant="outline" className="h-8 border-zc-border px-3 text-xs" onClick={() => markPrimary(d.id)}>
                             Make primary
                           </Button>
                         ) : null}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 border-zc-border px-3 text-xs"
-                          onClick={() => removeDoc(d.id)}
-                        >
+                        <Button type="button" variant="outline" className="h-8 border-zc-border px-3 text-xs" onClick={() => removeDoc(d.id)}>
                           Remove
                         </Button>
                       </div>
                     </div>
 
+                    {/* ✅ Upload Aadhaar/PAN scan (fixed UI) */}
+                    <div className="mt-3 rounded-md border border-zc-border bg-zc-panel p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs font-medium text-zc-foreground">Upload document scan</div>
+                        <UploadButton
+                          label={docUploading ? "Uploading…" : "Upload scan"}
+                          disabled={!draftId || docUploading}
+                          onPick={async (file) => {
+                            try {
+                              setUploading((p) => ({ ...p, doc: { ...p.doc, [d.id]: true } }));
+                              const url = await uploadStaffAsset("IDENTITY_DOC", file);
+                              addEvidenceToDoc(d.id, url);
+                              toast({ title: "Uploaded", description: "Document scan uploaded successfully." });
+                            } catch (err: any) {
+                              toast({ variant: "destructive", title: "Upload failed", description: err?.message ?? "Could not upload document scan." });
+                            } finally {
+                              setUploading((p) => ({ ...p, doc: { ...p.doc, [d.id]: false } }));
+                            }
+                          }}
+                        />
+                      </div>
+
+                      {evidences.length ? (
+                        <div className="mt-3 grid gap-2">
+                          {evidences.map((url) => (
+                            <div key={url} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zc-border bg-zc-panel/40 px-3 py-2">
+                              <div className="min-w-0 text-xs text-zc-muted truncate">{url}</div>
+                              <div className="flex items-center gap-2">
+                                <a
+                                  href={url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-xs text-zc-accent underline underline-offset-2"
+                                >
+                                  Open
+                                </a>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-7 border-zc-border px-2 text-xs"
+                                  onClick={() => removeEvidenceFromDoc(d.id, url)}
+                                >
+                                  Remove
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-xs text-zc-muted">No scans uploaded yet (optional).</div>
+                      )}
+                    </div>
+
+                    {/* Document fields */}
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
                       <Field label="Document type" required error={errors[`docs.${idx}.doc_type`]}>
                         <Select
                           value={d.doc_type}
                           onValueChange={(v) => {
                             const doc_type = (String(v).toUpperCase() as IdentityDocType) || "OTHER";
-                            // reset number only if it becomes invalid? keep user value; just normalize later
                             setDocAt(idx, { ...d, doc_type });
                             setErrors((e) => {
                               const next = { ...e };
@@ -516,22 +731,12 @@ export default function HrStaffOnboardingIdentityPage() {
                         />
                       </Field>
 
-                      <Field label="Name on document" error={errors[`docs.${idx}.name_on_document`]}>
-                        <Input
-                          className="border-zc-border"
-                          value={d.name_on_document ?? ""}
-                          onChange={(e) => setDocAt(idx, { ...d, name_on_document: e.target.value })}
-                          placeholder="Optional"
-                        />
+                      <Field label="Name on document">
+                        <Input className="border-zc-border" value={d.name_on_document ?? ""} onChange={(e) => setDocAt(idx, { ...d, name_on_document: e.target.value })} placeholder="Optional" />
                       </Field>
 
-                      <Field label="Issuing authority" error={errors[`docs.${idx}.issuing_authority`]}>
-                        <Input
-                          className="border-zc-border"
-                          value={d.issuing_authority ?? ""}
-                          onChange={(e) => setDocAt(idx, { ...d, issuing_authority: e.target.value })}
-                          placeholder="Optional"
-                        />
+                      <Field label="Issuing authority">
+                        <Input className="border-zc-border" value={d.issuing_authority ?? ""} onChange={(e) => setDocAt(idx, { ...d, issuing_authority: e.target.value })} placeholder="Optional" />
                       </Field>
 
                       <Field label="Issued on" error={issuedErr} help="YYYY-MM-DD">
@@ -590,29 +795,12 @@ export default function HrStaffOnboardingIdentityPage() {
                         </Select>
                       </Field>
 
-                      <Field
-                        label="Verification notes"
-                        error={notesErr}
-                        help={d.verification_status === "REJECTED" ? "Required when rejected" : "Optional"}
-                      >
+                      <Field label="Verification notes" error={notesErr} help={d.verification_status === "REJECTED" ? "Required when rejected" : "Optional"}>
                         <Textarea
                           className={cn("border-zc-border", notesErr ? "border-red-500" : "")}
                           value={d.verification_notes ?? ""}
                           onChange={(e) => setDocAt(idx, { ...d, verification_notes: e.target.value })}
                           placeholder={d.verification_status === "REJECTED" ? "Reason for rejection" : "Optional"}
-                        />
-                      </Field>
-
-                      <Field
-                        label="Evidence URLs"
-                        help="One per line (optional)"
-                        error={errors[`docs.${idx}.evidence_urls`]}
-                      >
-                        <Textarea
-                          className="border-zc-border"
-                          value={(d.evidence_urls ?? []).join("\n")}
-                          onChange={(e) => updateEvidence(idx, e.target.value)}
-                          placeholder="https://... (one per line)"
                         />
                       </Field>
                     </div>
@@ -622,19 +810,12 @@ export default function HrStaffOnboardingIdentityPage() {
             </div>
           )}
         </div>
-
-        <div className="rounded-md border border-zc-border bg-zc-panel/40 p-3 text-xs text-zc-muted">
-          <div className="font-medium text-zc-foreground">Next step</div>
-          <div className="mt-1">
-            Professional details: <span className="font-mono">/onboarding/professional</span>
-          </div>
-        </div>
       </div>
     </OnboardingShell>
   );
 }
 
-/* ---------- UI helpers ---------- */
+/* ---------------- UI helpers ---------------- */
 
 function Field({
   label,
@@ -663,7 +844,49 @@ function Field({
   );
 }
 
-/* ---------- draft storage ---------- */
+function UploadButton({
+  label,
+  disabled,
+  onPick,
+}: {
+  label: string;
+  disabled?: boolean;
+  onPick: (file: File) => Promise<void> | void;
+}) {
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        ref={inputRef}
+        type="file"
+        className="hidden"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={async (e) => {
+          const f = e.currentTarget.files?.[0];
+          if (!f) return;
+          try {
+            await onPick(f);
+          } finally {
+            e.currentTarget.value = "";
+          }
+        }}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        className="h-8 border-zc-border"
+        disabled={disabled}
+        onClick={() => inputRef.current?.click()}
+      >
+        {label}
+      </Button>
+      <span className="text-xs text-zc-muted">JPG / PNG / WEBP · max 5MB</span>
+    </div>
+  );
+}
+
+/* ---------------- draft storage ---------------- */
 
 function withDraftId(href: string, draftId: string | null): string {
   if (!draftId) return href;
@@ -691,20 +914,15 @@ function readDraft(draftId: string): StaffOnboardingDraft {
 function writeDraft(draftId: string, draft: StaffOnboardingDraft) {
   try {
     localStorage.setItem(storageKey(draftId), JSON.stringify(draft));
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
-/* ---------- validation / normalization ---------- */
+/* ---------------- identity helpers ---------------- */
 
 function normalizePrimary(list: IdentityDocumentDraft[]): IdentityDocumentDraft[] {
   if (!list.length) return list;
-
   const primaryCount = list.filter((d) => d.is_primary).length;
   if (primaryCount === 1) return list;
-
-  // If none or multiple, force first as primary
   const firstId = list[0].id;
   return list.map((d) => ({ ...d, is_primary: d.id === firstId }));
 }
@@ -712,49 +930,32 @@ function normalizePrimary(list: IdentityDocumentDraft[]): IdentityDocumentDraft[
 function validateDocNumber(type: IdentityDocType, raw: string): string | null {
   const v = normalizeDocNumber(type, raw);
 
-  if (type === "AADHAAR") {
-    if (!/^\d{12}$/.test(v)) return "Aadhaar must be exactly 12 digits.";
-  }
-
-  if (type === "PAN") {
-    // PAN: 5 letters + 4 digits + 1 letter
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(v)) return "PAN must match pattern ABCDE1234F.";
-  }
+  if (type === "AADHAAR" && !/^\d{12}$/.test(v)) return "Aadhaar must be exactly 12 digits.";
+  if (type === "PAN" && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(v)) return "PAN must match pattern ABCDE1234F.";
 
   if (type === "PASSPORT") {
-    // India passports commonly 1 letter + 7 digits. Allow broader to avoid false rejects.
     if (v.length < 6 || v.length > 12) return "Passport number looks invalid (length).";
     if (!/^[A-Z0-9]+$/.test(v)) return "Passport number must be alphanumeric.";
   }
 
   if (type === "DRIVING_LICENSE") {
-    // Highly variable; enforce basic sanity
     if (v.length < 5) return "Driving license number looks too short.";
     if (v.length > 25) return "Driving license number looks too long.";
   }
 
   if (type === "VOTER_ID") {
-    // EPIC often 3 letters + 7 digits, but varies
     if (v.length < 6 || v.length > 20) return "Voter ID looks invalid (length).";
     if (!/^[A-Z0-9]+$/.test(v)) return "Voter ID must be alphanumeric.";
   }
 
-  if (type === "OTHER") {
-    if (v.length < 3) return "Document number looks too short.";
-  }
-
+  if (type === "OTHER" && v.length < 3) return "Document number looks too short.";
   return null;
 }
 
 function normalizeDocNumber(type: IdentityDocType, raw: string): string {
   const s = String(raw || "").trim();
   if (!s) return "";
-
-  if (type === "AADHAAR") {
-    return s.replace(/[^\d]/g, "").slice(0, 12);
-  }
-
-  // PAN, Passport, DL, Voter: keep alphanum uppercase
+  if (type === "AADHAAR") return s.replace(/[^\d]/g, "").slice(0, 12);
   return s.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
 }
 
@@ -773,23 +974,10 @@ function cleanDateOpt(v: any): string | undefined {
   return s.length >= 10 ? s.slice(0, 10) : s;
 }
 
-function isEmail(v: string) {
-  const s = String(v ?? "").trim();
-  if (!s) return false;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
-}
-
-function normalizePhone(v: string) {
-  return String(v ?? "").replace(/[^\d]/g, "").slice(-10);
-}
-
 function makeId(): string {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const c: any = globalThis.crypto;
     if (c && typeof c.randomUUID === "function") return c.randomUUID();
-  } catch {
-    // ignore
-  }
+  } catch {}
   return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }

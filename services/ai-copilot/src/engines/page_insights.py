@@ -334,6 +334,17 @@ def _unit_types_insights(ctx: BranchContext) -> list[PageInsight]:
             actionHint="Enable ICU unit type and create ICU units",
         ))
 
+    # Summary when everything looks good
+    if not insights:
+        total_types = len(types_info)
+        total_units = sum(info.get("count", 0) for info in types_info.values())
+        insights.append(PageInsight(
+            id="ut-summary",
+            level="info",
+            message=f"{total_types} unit {'type' if total_types == 1 else 'types'} enabled with {total_units} total {'unit' if total_units == 1 else 'units'} across all types.",
+            entityCount=total_types,
+        ))
+
     return insights
 
 
@@ -384,6 +395,18 @@ def _units_insights(ctx: BranchContext) -> list[PageInsight]:
             message=f"{len(no_location)} {'unit is' if len(no_location) == 1 else 'units are'} not linked to a physical location.",
             actionHint="Assign locations to units",
             entityCount=len(no_location),
+        ))
+
+    # Summary when everything looks good
+    if not insights:
+        active = [u for u in units if u.isActive]
+        total_rooms = sum(len(u.rooms) for u in active)
+        total_res = sum(u.resources.total for u in active)
+        insights.append(PageInsight(
+            id="unit-summary",
+            level="info",
+            message=f"{len(active)} active {'unit' if len(active) == 1 else 'units'} with {total_rooms} rooms and {total_res} resources configured.",
+            entityCount=len(active),
         ))
 
     return insights
@@ -437,6 +460,15 @@ def _rooms_insights(ctx: BranchContext) -> list[PageInsight]:
             message=f"{rooms_no_resources} rooms are in units with no resources (beds/equipment).",
             actionHint="Add resources to rooms",
             entityCount=rooms_no_resources,
+        ))
+
+    # Summary when everything looks good
+    if not insights:
+        insights.append(PageInsight(
+            id="rooms-summary",
+            level="info",
+            message=f"{total_rooms} rooms configured across {len(ctx.units.units)} units. All ICU rooms have required amenities.",
+            entityCount=total_rooms,
         ))
 
     return insights
@@ -500,5 +532,15 @@ def _resources_insights(ctx: BranchContext) -> list[PageInsight]:
                 actionHint="Add resources to empty units",
                 entityCount=len(units_with_zero),
             ))
+
+    # Summary when everything looks good
+    if not insights:
+        beds = sum(u.resources.beds for u in ctx.units.units)
+        insights.append(PageInsight(
+            id="res-summary",
+            level="info",
+            message=f"{total_resources} resources configured across {len(resource_by_unit)} units ({beds} beds).",
+            entityCount=total_resources,
+        ))
 
     return insights

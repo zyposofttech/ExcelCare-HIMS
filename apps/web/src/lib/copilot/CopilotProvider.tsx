@@ -70,15 +70,18 @@ export function CopilotProvider({ children }: { children: React.ReactNode }) {
   const [widgetOpen, setWidgetOpen] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState("chat");
 
-  // Fetch health status
-  const fetchHealth = React.useCallback(async () => {
+  // Fetch health status (bustCache = true to skip server-side cache after mutations)
+  const fetchHealth = React.useCallback(async (bustCache = false) => {
     if (!branchId) return;
     setHealthLoading(true);
     try {
-      const data = await apiFetch<BranchHealthStatus>(
-        `/api/ai/health-check?branchId=${branchId}`,
-        { showLoader: false, branch: "none" }
-      );
+      const url = bustCache
+        ? `/api/ai/health-check?branchId=${branchId}&bust=${Date.now()}`
+        : `/api/ai/health-check?branchId=${branchId}`;
+      const data = await apiFetch<BranchHealthStatus>(url, {
+        showLoader: false,
+        branch: "none",
+      });
       setHealth(data);
       // Broadcast to sidebar badges via sessionStorage + custom event
       try {
@@ -97,15 +100,15 @@ export function CopilotProvider({ children }: { children: React.ReactNode }) {
     if (!isReady || !branchId) return;
 
     fetchHealth();
-    const interval = setInterval(fetchHealth, HEALTH_REFRESH_MS);
+    const interval = setInterval(() => fetchHealth(), HEALTH_REFRESH_MS);
     return () => clearInterval(interval);
   }, [isReady, branchId, fetchHealth]);
 
-  // Re-fetch health when infrastructure data changes (e.g. create/update/delete)
+  // Re-fetch health when infrastructure data changes — bust cache for fresh data
   React.useEffect(() => {
     const handler = () => {
       // Small debounce — wait 1.5s after mutation for DB to settle
-      setTimeout(() => fetchHealth(), 1500);
+      setTimeout(() => fetchHealth(true), 1500);
     };
     window.addEventListener("zc:data-changed", handler);
     return () => window.removeEventListener("zc:data-changed", handler);

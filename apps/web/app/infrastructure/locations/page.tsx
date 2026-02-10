@@ -130,7 +130,7 @@ function typeTone(t: LocationType): keyof typeof pillTones {
 }
 
 function fmtDateTime(v?: string | null) {
-  if (!v) return "â€”";
+  if (!v) return "-";
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return v;
   return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(d);
@@ -494,7 +494,7 @@ export default function InfrastructureLocationsPage() {
     if (n.type === "BUILDING") return { label: "Floors", count: n.floors?.length ?? 0 };
     if (n.type === "FLOOR") return { label: "Zones", count: n.zones?.length ?? 0 };
     if (n.type === "ZONE") return { label: "Areas", count: n.areas?.length ?? 0 };
-    return { label: "â€”", count: 0 };
+    return { label: "-", count: 0 };
   }
 
   function nodeChildren(n: LocationNode) {
@@ -583,7 +583,7 @@ export default function InfrastructureLocationsPage() {
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zc-muted">
                 <CalendarClock className="h-4 w-4" />
                 <span>From: {fmtDateTime(node.effectiveFrom)}</span>
-                <span className="text-zc-muted/60">â€¢</span>
+                <span className="text-zc-muted/60">|</span>
                 <span>To: {fmtDateTime(node.effectiveTo)}</span>
               </div>
             </div>
@@ -628,7 +628,7 @@ export default function InfrastructureLocationsPage() {
 
                 <div className="min-w-0">
                   <div className="mt-1 text-3xl font-semibold tracking-tight">
-                    Locations (Campus → Building → Floor → Zone → Area)
+                    Locations (Campus to Building to Floor to Zone to Area)
                   </div>
 
                   <div className="mt-2 max-w-3xl text-sm leading-6 text-zc-muted">
@@ -764,14 +764,14 @@ export default function InfrastructureLocationsPage() {
                               }}
                             >
                               <SelectTrigger className="h-11 rounded-xl bg-zc-card border-zc-border">
-                                <SelectValue placeholder="Select a branchâ€¦" />
+                                <SelectValue placeholder="Select a branch..." />
                               </SelectTrigger>
                               <SelectContent>
                                 {branches.map((b) => (
                                   <SelectItem key={b.id} value={b.id}>
                                     {b.name}{" "}
                                     <span className="font-mono text-xs text-zc-muted">({b.code})</span>{" "}
-                                    <span className="text-xs text-zc-muted">â€¢ {b.city}</span>
+                                    <span className="text-xs text-zc-muted">| {b.city}</span>
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -835,7 +835,7 @@ export default function InfrastructureLocationsPage() {
                         </CardTitle>
 
                         <CardDescription className="mt-2">
-                          Use â€œReviseâ€ for effective-dated changes. Retire sets an end date (effectiveTo).
+                          Use "Revise" for effective-dated changes. Retire sets an end date (effectiveTo).
                         </CardDescription>
                       </CardHeader>
 
@@ -845,7 +845,7 @@ export default function InfrastructureLocationsPage() {
                           <Input
                             value={q}
                             onChange={(e) => setQ(e.target.value)}
-                            placeholder="Search by code or nameâ€¦"
+                            placeholder="Search by code or name..."
                             className="h-9 border-0 bg-transparent px-0 focus-visible:ring-0"
                           />
                         </div>
@@ -983,7 +983,7 @@ export default function InfrastructureLocationsPage() {
                                     <span className="font-mono">
                                       {selectedNode.gpsLat != null && selectedNode.gpsLng != null
                                         ? `${selectedNode.gpsLat}, ${selectedNode.gpsLng}`
-                                        : "â€”"}
+                                        : "-"}
                                     </span>
                                   </div>
                                 ) : null}
@@ -991,7 +991,7 @@ export default function InfrastructureLocationsPage() {
                                 {selectedNode.type === "FLOOR" ? (
                                   <div className="flex items-center justify-between">
                                     <span>Floor Number</span>
-                                    <span className="font-mono">{selectedNode.floorNumber ?? "â€”"}</span>
+                                    <span className="font-mono">{selectedNode.floorNumber ?? "-"}</span>
                                   </div>
                                 ) : null}
 
@@ -1012,7 +1012,7 @@ export default function InfrastructureLocationsPage() {
 
                                 <div className="flex items-center justify-between">
                                   <span>Fire Zone</span>
-                                  <span className="font-mono">{selectedNode.fireZone || "â€”"}</span>
+                                  <span className="font-mono">{selectedNode.fireZone || "-"}</span>
                                 </div>
                               </div>
                             </div>
@@ -1393,9 +1393,9 @@ function CreateDialog({
           <div className="rounded-2xl border border-zc-border bg-zc-panel/15 p-4 text-sm text-zc-muted">
             <div className="font-semibold text-zc-text">Code preview</div>
             <div className="mt-2">
-              Segment: <span className="font-mono text-zc-text">{code || "â€”"}</span>
-              <span className="mx-2 text-zc-muted/60">â†’</span>
-              Full: <span className="font-mono text-zc-text">{fullPreview || "â€”"}</span>
+              Segment: <span className="font-mono text-zc-text">{code || "-"}</span>
+              <span className="mx-2 text-zc-muted/60">|</span>
+              Full: <span className="font-mono text-zc-text">{fullPreview || "-"}</span>
             </div>
             <div className="mt-2 text-xs">
               You enter only the <span className="font-semibold text-zc-text">segment</span> (B01/F01/01/A01). Backend composes full code.
@@ -1604,16 +1604,16 @@ function ReviseDialog({
               <span className="text-sm font-semibold text-zc-text">{node.name}</span>
             </div>
             <div className="mt-2 text-xs text-zc-muted">
-              Effective: {fmtDateTime(node.effectiveFrom)} â†’ {fmtDateTime(node.effectiveTo)}
+              Effective: {fmtDateTime(node.effectiveFrom)} to {fmtDateTime(node.effectiveTo)}
             </div>
           </div>
 
           <div className="rounded-2xl border border-zc-border bg-zc-panel/15 p-4 text-sm text-zc-muted">
             <div className="font-semibold text-zc-text">Code preview</div>
             <div className="mt-2">
-              Segment: <span className="font-mono text-zc-text">{code || "â€”"}</span>
-              <span className="mx-2 text-zc-muted/60">â†’</span>
-              Full: <span className="font-mono text-zc-text">{fullPreview || "â€”"}</span>
+              Segment: <span className="font-mono text-zc-text">{code || "-"}</span>
+              <span className="mx-2 text-zc-muted/60">|</span>
+              Full: <span className="font-mono text-zc-text">{fullPreview || "-"}</span>
             </div>
           </div>
 

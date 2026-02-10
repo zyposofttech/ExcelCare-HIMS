@@ -11,84 +11,31 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 import { cn } from "@/lib/cn";
 import { toast } from "@/components/ui/use-toast";
 
-/**
- * Workflow doc alignment (Step 9): Clinical Privileges (Doctors only)
- * We store draft payload in:
- *   medical_details.clinical_privileges: ClinicalPrivilegeDraft[]
- * (snake_case keys to stay consistent with the backend DTO conventions)
- */
+type VerificationStatus = "NOT_INITIATED" | "IN_PROGRESS" | "VERIFIED" | "REJECTED" | "EXPIRED";
 
-type PrivilegeType =
-  | "ADMITTING"
-  | "SURGICAL"
-  | "ANESTHESIA"
-  | "PRESCRIPTION"
-  | "PROCEDURE"
-  | "SUPERVISION"
-  | "TEACHING"
-  | "TELEMEDICINE"
-  | "EMERGENCY"
-  | "ICU"
-  | "NICU"
-  | "HIGH_RISK_OB"
-  | "INTERVENTIONAL"
-  | "ENDOSCOPY"
-  | "DIAGNOSTIC"
-  | "PAIN_MANAGEMENT";
+type BackgroundVerificationDraft = {
+  status?: VerificationStatus;
+  verified_by?: string; // agency name
+  verification_date?: string; // YYYY-MM-DD
+  report_url?: string;
+  remarks?: string;
+  cleared_for_employment?: boolean;
+};
 
-type ReviewCycle = "MONTHLY" | "QUARTERLY" | "SEMI_ANNUAL" | "ANNUAL" | "BIENNIAL";
-
-type PrivilegeStatus = "ACTIVE" | "SUSPENDED" | "REVOKED" | "EXPIRED" | "PENDING_REVIEW" | "PROVISIONAL";
-
-type ClinicalPrivilegeDraft = {
-  id: string;
-
-  privilege_type: PrivilegeType | string;
-  privilege_name: string;
-  privilege_description?: string;
-
-  departments: string[]; // Department codes/names (draft as strings; can be mapped later)
-  specialties: string[]; // Specialty codes/names
-  procedures: string[]; // Procedure names/codes
-
-  granted_by: string; // Staff name/code for grantor (draft)
-  granted_by_role?: string;
-  granted_date?: string; // YYYY-MM-DD
-
-  effective_date?: string; // YYYY-MM-DD
+type PoliceVerificationDraft = {
+  status?: VerificationStatus;
+  police_station?: string;
+  application_number?: string;
+  application_date?: string; // YYYY-MM-DD
+  verification_date?: string; // YYYY-MM-DD
+  certificate_url?: string;
   expiry_date?: string; // YYYY-MM-DD
-  is_lifetime: boolean;
-
-  review_required: boolean;
-  review_cycle: ReviewCycle;
-  last_review_date?: string;
-  next_review_date?: string;
-  reviewed_by?: string;
-  review_remarks?: string;
-
-  conditions: string[]; // e.g. "Under supervision first 10 cases"
-  restrictions: string[]; // e.g. "Not for pediatric patients"
-  supervision_required: boolean;
-  supervisor?: string;
-
-  competency_assessment_required: boolean;
-  last_assessment_date?: string;
-  assessment_score?: number | null;
-  assessor?: string;
-
-  minimum_case_volume?: number | null;
-  current_case_volume?: number | null;
-
-  status: PrivilegeStatus;
-  is_active: boolean;
-
-  credential_documents: string[]; // URLs / refs (one per line)
+  remarks?: string;
 };
 
 type StaffOnboardingDraft = {
@@ -97,34 +44,14 @@ type StaffOnboardingDraft = {
   employment_details?: Record<string, any>;
   medical_details?: Record<string, any>;
   system_access?: Record<string, any>;
-  assignments?: any[];
+
+  background_verification?: BackgroundVerificationDraft;
+  police_verification?: PoliceVerificationDraft;
 };
 
 type FieldErrorMap = Record<string, string>;
 
-const PRIVILEGE_TYPES: PrivilegeType[] = [
-  "ADMITTING",
-  "SURGICAL",
-  "ANESTHESIA",
-  "PRESCRIPTION",
-  "PROCEDURE",
-  "SUPERVISION",
-  "TEACHING",
-  "TELEMEDICINE",
-  "EMERGENCY",
-  "ICU",
-  "NICU",
-  "HIGH_RISK_OB",
-  "INTERVENTIONAL",
-  "ENDOSCOPY",
-  "DIAGNOSTIC",
-  "PAIN_MANAGEMENT",
-];
-
-const REVIEW_CYCLES: ReviewCycle[] = ["MONTHLY", "QUARTERLY", "SEMI_ANNUAL", "ANNUAL", "BIENNIAL"];
-const PRIV_STATUS: PrivilegeStatus[] = ["ACTIVE", "PROVISIONAL", "PENDING_REVIEW", "SUSPENDED", "REVOKED", "EXPIRED"];
-
-export default function HrStaffOnboardingPrivilegesPage() {
+export default function HrStaffOnboardingBackgroundPage() {
   const router = useRouter();
   const sp = useSearchParams();
   const draftId = sp.get("draftId");
@@ -132,319 +59,136 @@ export default function HrStaffOnboardingPrivilegesPage() {
   const [loading, setLoading] = React.useState(true);
   const [dirty, setDirty] = React.useState(false);
   const [errors, setErrors] = React.useState<FieldErrorMap>({});
-  const [items, setItems] = React.useState<ClinicalPrivilegeDraft[]>([]);
 
-  const staffCategory = React.useMemo(() => {
-    if (!draftId) return "";
-    const d = readDraft(draftId);
-    const sc =
-      d?.employment_details?.professional_details?.staff_category ??
-      d?.employment_details?.staff_category ??
-      d?.employment_details?.category ??
-      "";
-    return String(sc || "").toUpperCase();
-  }, [draftId]);
+  const [bgv, setBgv] = React.useState<BackgroundVerificationDraft>({
+    status: "NOT_INITIATED",
+    verified_by: "",
+    verification_date: "",
+    report_url: "",
+    remarks: "",
+    cleared_for_employment: false,
+  });
 
-  const isDoctor = staffCategory === "DOCTOR";
+  const [police, setPolice] = React.useState<PoliceVerificationDraft>({
+    status: "NOT_INITIATED",
+    police_station: "",
+    application_number: "",
+    application_date: "",
+    verification_date: "",
+    certificate_url: "",
+    expiry_date: "",
+    remarks: "",
+  });
 
-  // Ensure draftId
+  // Ensure a stable draftId in URL
   React.useEffect(() => {
     if (draftId) return;
-    router.replace("/infrastructure/staff/onboarding/start" as any);
+    const id = makeDraftId();
+    const u = new URL(window.location.href);
+    u.searchParams.set("draftId", id);
+    router.replace((u.pathname + "?" + u.searchParams.toString()) as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId]);
 
-// Load draft
+  // Load draft
   React.useEffect(() => {
-    if (!draftId) return;
+    const id = draftId;
+    if (!id) return;
 
     setLoading(true);
     try {
-      const draft = readDraft(draftId);
-      const md: any = draft.medical_details ?? {};
-      const raw = md.clinical_privileges;
+      const d = readDraft(id);
 
-      const list: ClinicalPrivilegeDraft[] = Array.isArray(raw)
-        ? raw
-            .filter((x: any) => x && typeof x === "object")
-            .map((x: any) => ({
-              id: String(x.id || makeId()),
+      const dBgv = (d.background_verification ?? {}) as BackgroundVerificationDraft;
+      const dPolice = (d.police_verification ?? {}) as PoliceVerificationDraft;
 
-              privilege_type: String(x.privilege_type || "ADMITTING").toUpperCase(),
-              privilege_name: String(x.privilege_name || "").trim(),
-              privilege_description: x.privilege_description ? String(x.privilege_description) : "",
+      setBgv({
+        status: (dBgv.status as VerificationStatus) ?? "NOT_INITIATED",
+        verified_by: dBgv.verified_by ?? "",
+        verification_date: dBgv.verification_date ?? "",
+        report_url: dBgv.report_url ?? "",
+        remarks: dBgv.remarks ?? "",
+        cleared_for_employment: !!dBgv.cleared_for_employment,
+      });
 
-              departments: Array.isArray(x.departments) ? x.departments.map((v: any) => String(v).trim()).filter(Boolean) : [],
-              specialties: Array.isArray(x.specialties) ? x.specialties.map((v: any) => String(v).trim()).filter(Boolean) : [],
-              procedures: Array.isArray(x.procedures) ? x.procedures.map((v: any) => String(v).trim()).filter(Boolean) : [],
-
-              granted_by: String(x.granted_by || "").trim(),
-              granted_by_role: x.granted_by_role ? String(x.granted_by_role).trim() : "",
-              granted_date: x.granted_date ? String(x.granted_date).slice(0, 10) : "",
-
-              effective_date: x.effective_date ? String(x.effective_date).slice(0, 10) : "",
-              expiry_date: x.expiry_date ? String(x.expiry_date).slice(0, 10) : "",
-              is_lifetime: !!x.is_lifetime,
-
-              review_required: x.review_required === undefined ? true : !!x.review_required,
-              review_cycle: (String(x.review_cycle || "ANNUAL").toUpperCase() as ReviewCycle) || "ANNUAL",
-              last_review_date: x.last_review_date ? String(x.last_review_date).slice(0, 10) : "",
-              next_review_date: x.next_review_date ? String(x.next_review_date).slice(0, 10) : "",
-              reviewed_by: x.reviewed_by ? String(x.reviewed_by).trim() : "",
-              review_remarks: x.review_remarks ? String(x.review_remarks) : "",
-
-              conditions: Array.isArray(x.conditions) ? x.conditions.map((v: any) => String(v).trim()).filter(Boolean) : [],
-              restrictions: Array.isArray(x.restrictions) ? x.restrictions.map((v: any) => String(v).trim()).filter(Boolean) : [],
-              supervision_required: !!x.supervision_required,
-              supervisor: x.supervisor ? String(x.supervisor).trim() : "",
-
-              competency_assessment_required: !!x.competency_assessment_required,
-              last_assessment_date: x.last_assessment_date ? String(x.last_assessment_date).slice(0, 10) : "",
-              assessment_score:
-                x.assessment_score === null || x.assessment_score === undefined || x.assessment_score === ""
-                  ? null
-                  : Number(x.assessment_score),
-              assessor: x.assessor ? String(x.assessor).trim() : "",
-
-              minimum_case_volume:
-                x.minimum_case_volume === null || x.minimum_case_volume === undefined || x.minimum_case_volume === ""
-                  ? null
-                  : Number(x.minimum_case_volume),
-              current_case_volume:
-                x.current_case_volume === null || x.current_case_volume === undefined || x.current_case_volume === ""
-                  ? null
-                  : Number(x.current_case_volume),
-
-              status: (String(x.status || "ACTIVE").toUpperCase() as PrivilegeStatus) || "ACTIVE",
-              is_active: x.is_active === undefined ? true : !!x.is_active,
-
-              credential_documents: Array.isArray(x.credential_documents)
-                ? x.credential_documents.map((v: any) => String(v).trim()).filter(Boolean)
-                : [],
-            }))
-        : [];
-
-      setItems(list);
-      setDirty(false);
-      setErrors({});
+      setPolice({
+        status: (dPolice.status as VerificationStatus) ?? "NOT_INITIATED",
+        police_station: dPolice.police_station ?? "",
+        application_number: dPolice.application_number ?? "",
+        application_date: dPolice.application_date ?? "",
+        verification_date: dPolice.verification_date ?? "",
+        certificate_url: dPolice.certificate_url ?? "",
+        expiry_date: dPolice.expiry_date ?? "",
+        remarks: dPolice.remarks ?? "",
+      });
     } finally {
       setLoading(false);
+      setDirty(false);
+      setErrors({});
     }
   }, [draftId]);
 
-  function setAt(idx: number, next: ClinicalPrivilegeDraft) {
-    setItems((prev) => {
-      const copy = [...prev];
-      copy[idx] = next;
-      return copy;
+  function updateBgv<K extends keyof BackgroundVerificationDraft>(key: K, value: BackgroundVerificationDraft[K]) {
+    setBgv((prev) => ({ ...prev, [key]: value }));
+    setDirty(true);
+    setErrors((e) => {
+      const n = { ...e };
+      delete n[`bgv.${String(key)}`];
+      return n;
     });
+  }
+
+  function updatePolice<K extends keyof PoliceVerificationDraft>(key: K, value: PoliceVerificationDraft[K]) {
+    setPolice((prev) => ({ ...prev, [key]: value }));
     setDirty(true);
-  }
-
-  function addPrivilege() {
-    const id = makeId();
-    setItems((prev) => [
-      ...prev,
-      {
-        id,
-        privilege_type: "ADMITTING",
-        privilege_name: "Admitting privilege",
-        privilege_description: "",
-
-        departments: [],
-        specialties: [],
-        procedures: [],
-
-        granted_by: "",
-        granted_by_role: "",
-        granted_date: "",
-
-        effective_date: "",
-        expiry_date: "",
-        is_lifetime: true,
-
-        review_required: true,
-        review_cycle: "ANNUAL",
-        last_review_date: "",
-        next_review_date: "",
-        reviewed_by: "",
-        review_remarks: "",
-
-        conditions: [],
-        restrictions: [],
-        supervision_required: false,
-        supervisor: "",
-
-        competency_assessment_required: false,
-        last_assessment_date: "",
-        assessment_score: null,
-        assessor: "",
-
-        minimum_case_volume: null,
-        current_case_volume: null,
-
-        status: "ACTIVE",
-        is_active: true,
-
-        credential_documents: [],
-      },
-    ]);
-    setDirty(true);
-  }
-
-  function removePrivilege(id: string) {
-    setItems((prev) => prev.filter((p) => p.id !== id));
-    setDirty(true);
-  }
-
-  function toList(csv: string) {
-    return String(csv || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }
-
-  function toLines(txt: string) {
-    return String(txt || "")
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    setErrors((e) => {
+      const n = { ...e };
+      delete n[`police.${String(key)}`];
+      return n;
+    });
   }
 
   function validate(): FieldErrorMap {
     const e: FieldErrorMap = {};
 
-    // Doctors: privileges are strongly recommended, but not hard-required at onboarding time.
-    // If privileges are entered, validate each record.
-    items.forEach((p, idx) => {
-      const pref = `items.${idx}`;
+    // --- Background verification rules (practical + aligns with workflow intent)
+    if (!bgv.status) e["bgv.status"] = "Status is required.";
 
-      const t = String(p.privilege_type || "").trim();
-      const n = String(p.privilege_name || "").trim();
+    if (bgv.status === "VERIFIED") {
+      if (!String(bgv.verified_by ?? "").trim()) e["bgv.verified_by"] = "Agency / verified by is required when verified.";
+      if (!String(bgv.verification_date ?? "").trim()) e["bgv.verification_date"] = "Verification date is required when verified.";
+      if (bgv.verification_date && !isValidYmd(bgv.verification_date)) e["bgv.verification_date"] = "Invalid date.";
+    }
 
-      if (!t) e[`${pref}.privilege_type`] = "Type is required.";
-      if (!n) e[`${pref}.privilege_name`] = "Privilege name is required.";
+    if (bgv.status === "REJECTED") {
+      if (!String(bgv.remarks ?? "").trim()) e["bgv.remarks"] = "Remarks are required when rejected.";
+    }
 
-      // Core dates and authorization
-      if (!String(p.effective_date || "").trim()) e[`${pref}.effective_date`] = "Effective date is required.";
-      if (!p.is_lifetime && !String(p.expiry_date || "").trim()) e[`${pref}.expiry_date`] = "Expiry date is required (or set Lifetime).";
+    if (bgv.report_url && !looksLikeUrl(bgv.report_url)) e["bgv.report_url"] = "Please enter a valid URL (or leave blank).";
 
-      const gd = String(p.granted_date || "").trim();
-      if (gd && !isISODate(gd)) e[`${pref}.granted_date`] = "Use YYYY-MM-DD.";
-      const eff = String(p.effective_date || "").trim();
-      if (eff && !isISODate(eff)) e[`${pref}.effective_date`] = "Use YYYY-MM-DD.";
-      const exp = String(p.expiry_date || "").trim();
-      if (exp && !isISODate(exp)) e[`${pref}.expiry_date`] = "Use YYYY-MM-DD.";
-      if (eff && exp && eff > exp) e[`${pref}.expiry_date`] = "Expiry cannot be before effective date.";
+    // --- Police verification rules
+    if (!police.status) e["police.status"] = "Status is required.";
 
-      if (!String(p.granted_by || "").trim()) e[`${pref}.granted_by`] = "Granted by is required.";
+    if (police.status === "VERIFIED") {
+      if (!String(police.police_station ?? "").trim()) e["police.police_station"] = "Police station is required when verified.";
+      if (!String(police.verification_date ?? "").trim()) e["police.verification_date"] = "Verification date is required when verified.";
+      if (police.verification_date && !isValidYmd(police.verification_date)) e["police.verification_date"] = "Invalid date.";
+    }
 
-      // Procedure type should have at least one procedure
-      if (String(p.privilege_type || "").toUpperCase() === "PROCEDURE" && (!p.procedures || p.procedures.length === 0)) {
-        e[`${pref}.procedures`] = "Add at least one procedure for PROCEDURE privileges.";
-      }
+    if (police.status === "REJECTED") {
+      if (!String(police.remarks ?? "").trim()) e["police.remarks"] = "Remarks are required when rejected.";
+    }
 
-      if (p.supervision_required && !String(p.supervisor || "").trim()) {
-        e[`${pref}.supervisor`] = "Supervisor is required when supervision is required.";
-      }
-
-      if (p.review_required && !p.review_cycle) {
-        e[`${pref}.review_cycle`] = "Review cycle is required when review is required.";
-      }
-
-      if (p.competency_assessment_required) {
-        const score = p.assessment_score;
-        if (score !== null && score !== undefined && String(score) !== "") {
-          const nScore = Number(score);
-          if (Number.isNaN(nScore) || nScore < 0 || nScore > 100) e[`${pref}.assessment_score`] = "Score must be 0–100.";
-        }
-      }
-
-      const mv = p.minimum_case_volume;
-      if (mv !== null && mv !== undefined && String(mv) !== "") {
-        const nMv = Number(mv);
-        if (Number.isNaN(nMv) || nMv < 0) e[`${pref}.minimum_case_volume`] = "Minimum case volume must be ≥ 0.";
-      }
-    });
+    if (police.application_date && !isValidYmd(police.application_date)) e["police.application_date"] = "Invalid date.";
+    if (police.expiry_date && !isValidYmd(police.expiry_date)) e["police.expiry_date"] = "Invalid date.";
+    if (police.certificate_url && !looksLikeUrl(police.certificate_url)) e["police.certificate_url"] = "Please enter a valid URL (or leave blank).";
 
     return e;
   }
 
-  function normalize(p: ClinicalPrivilegeDraft): ClinicalPrivilegeDraft {
-    const t = String(p.privilege_type || "").toUpperCase();
-    const defaultName =
-      t === "ADMITTING"
-        ? "Admitting privilege"
-        : t === "PRESCRIPTION"
-        ? "Prescription privilege"
-        : t === "SURGICAL"
-        ? "Surgical privilege"
-        : t === "ANESTHESIA"
-        ? "Anesthesia privilege"
-        : t === "PROCEDURE"
-        ? "Procedure privilege"
-        : t
-        ? `${t.replace(/_/g, " ").toLowerCase()} privilege`
-        : "";
-
-    return {
-      ...p,
-      privilege_type: (t as any) || p.privilege_type,
-      privilege_name: String(p.privilege_name || "").trim() || defaultName,
-      privilege_description: cleanOpt(p.privilege_description) ?? "",
-
-      departments: Array.isArray(p.departments) ? p.departments.map((x) => String(x).trim()).filter(Boolean) : [],
-      specialties: Array.isArray(p.specialties) ? p.specialties.map((x) => String(x).trim()).filter(Boolean) : [],
-      procedures: Array.isArray(p.procedures) ? p.procedures.map((x) => String(x).trim()).filter(Boolean) : [],
-
-      granted_by: String(p.granted_by || "").trim(),
-      granted_by_role: cleanOpt(p.granted_by_role) ?? "",
-      granted_date: cleanDateOpt(p.granted_date) ?? "",
-
-      effective_date: cleanDateOpt(p.effective_date) ?? "",
-      expiry_date: p.is_lifetime ? "" : cleanDateOpt(p.expiry_date) ?? "",
-      is_lifetime: !!p.is_lifetime,
-
-      review_required: !!p.review_required,
-      review_cycle: (String(p.review_cycle || "ANNUAL").toUpperCase() as ReviewCycle) || "ANNUAL",
-      last_review_date: cleanDateOpt(p.last_review_date) ?? "",
-      next_review_date: cleanDateOpt(p.next_review_date) ?? "",
-      reviewed_by: cleanOpt(p.reviewed_by) ?? "",
-      review_remarks: cleanOpt(p.review_remarks) ?? "",
-
-      conditions: Array.isArray(p.conditions) ? p.conditions.map((x) => String(x).trim()).filter(Boolean) : [],
-      restrictions: Array.isArray(p.restrictions) ? p.restrictions.map((x) => String(x).trim()).filter(Boolean) : [],
-      supervision_required: !!p.supervision_required,
-      supervisor: p.supervision_required ? (cleanOpt(p.supervisor) ?? "") : "",
-
-      competency_assessment_required: !!p.competency_assessment_required,
-      last_assessment_date: cleanDateOpt(p.last_assessment_date) ?? "",
-      assessment_score:
-        p.assessment_score === null || p.assessment_score === undefined || String(p.assessment_score) === ""
-          ? null
-          : Number(p.assessment_score),
-      assessor: cleanOpt(p.assessor) ?? "",
-
-      minimum_case_volume:
-        p.minimum_case_volume === null || p.minimum_case_volume === undefined || String(p.minimum_case_volume) === ""
-          ? null
-          : Number(p.minimum_case_volume),
-      current_case_volume:
-        p.current_case_volume === null || p.current_case_volume === undefined || String(p.current_case_volume) === ""
-          ? null
-          : Number(p.current_case_volume),
-
-      status: (String(p.status || "ACTIVE").toUpperCase() as PrivilegeStatus) || "ACTIVE",
-      is_active: !!p.is_active,
-
-      credential_documents: Array.isArray(p.credential_documents)
-        ? p.credential_documents.map((x) => String(x).trim()).filter(Boolean)
-        : [],
-    };
-  }
-
   function saveDraftOrThrow() {
-    if (!draftId) return;
+    const id = draftId;
+    if (!id) return;
 
     const nextErrors = validate();
     setErrors(nextErrors);
@@ -452,65 +196,85 @@ export default function HrStaffOnboardingPrivilegesPage() {
     if (Object.keys(nextErrors).length) {
       toast({
         variant: "destructive",
-        title: "Fix required fields",
-        description: "Please fix the highlighted items to continue.",
+        title: "Fix highlighted fields",
+        description: "Some values are missing/invalid based on the selected verification status.",
       });
       throw new Error("validation_failed");
     }
 
-    const existing = readDraft(draftId);
-    const md: any = existing.medical_details ?? {};
-
-    const normalized = items.map(normalize);
-
+    const existing = readDraft(id);
     const nextDraft: StaffOnboardingDraft = {
       ...existing,
-      medical_details: {
-        ...md,
-        clinical_privileges: normalized,
+      background_verification: {
+        status: bgv.status ?? "NOT_INITIATED",
+        verified_by: cleanStr(bgv.verified_by),
+        verification_date: cleanDate(bgv.verification_date),
+        report_url: cleanStr(bgv.report_url),
+        remarks: cleanStr(bgv.remarks),
+        cleared_for_employment: !!bgv.cleared_for_employment,
+      },
+      police_verification: {
+        status: police.status ?? "NOT_INITIATED",
+        police_station: cleanStr(police.police_station),
+        application_number: cleanStr(police.application_number),
+        application_date: cleanDate(police.application_date),
+        verification_date: cleanDate(police.verification_date),
+        certificate_url: cleanStr(police.certificate_url),
+        expiry_date: cleanDate(police.expiry_date),
+        remarks: cleanStr(police.remarks),
       },
     };
 
-    writeDraft(draftId, nextDraft);
+    writeDraft(id, nextDraft);
     setDirty(false);
 
-    toast({ title: "Saved", description: "Clinical privileges saved to draft." });
+    toast({
+      title: "Saved",
+      description: "Background + police verification saved to draft.",
+    });
   }
 
-  function onSave() {
+  function onSaveOnly() {
     try {
       saveDraftOrThrow();
     } catch {
-      // handled
+      // toast already shown
     }
   }
 
   function onSaveAndNext() {
     try {
       saveDraftOrThrow();
-      router.push(withDraftId("/infrastructure/staff/onboarding/system-access", draftId) as any);
+      router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/health", draftId) as any);
     } catch {
       // handled
     }
   }
 
+  const bgvBadge = statusBadge(bgv.status ?? "NOT_INITIATED");
+  const policeBadge = statusBadge(police.status ?? "NOT_INITIATED");
+
   return (
     <OnboardingShell
-      stepKey="privileges"
-      title="Clinical privileges"
-      description="Privilege grants (admitting/procedure/etc.), approvals, validity and review cycles."
+      stepKey="background"
+      title="Background verification"
+      description="BGV and police verification status, reports, validity and audit."
       footer={
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <Button
-            variant="outline"
-            className="border-zc-border"
-            onClick={() => router.push(withDraftId("/infrastructure/staff/onboarding/credentials", draftId) as any)}
-          >
-            Back
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              className="border-zc-border"
+              onClick={() =>
+                router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/system-access", draftId) as any)
+              }
+            >
+              Back
+            </Button>
+          </div>
 
           <div className="flex items-center gap-2">
-            <Button variant="outline" className="border-zc-border" onClick={onSave} disabled={loading}>
+            <Button variant="outline" className="border-zc-border" onClick={onSaveOnly} disabled={loading}>
               Save
             </Button>
             <Button className="bg-zc-accent text-white hover:bg-zc-accent/90" onClick={onSaveAndNext} disabled={loading}>
@@ -523,15 +287,19 @@ export default function HrStaffOnboardingPrivilegesPage() {
       <div className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-zc-foreground">Step 9: Clinical privileges</div>
+            <div className="text-sm font-medium text-zc-foreground">Background & police verification</div>
             <div className="mt-1 text-xs text-zc-muted">
-              Doctors only. You can add privileges now (recommended) or skip and finalize later in the full Privilege Management module.
+              Track verification lifecycle: not initiated → in progress → verified / rejected / expired. When set to
+              “Verified”, key dates/authority become mandatory.
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="border border-zc-border">
-              Staff category: {staffCategory || "—"}
+            <Badge variant="secondary" className={cn("border border-zc-border", bgvBadge.className)}>
+              BGV: {bgvBadge.label}
+            </Badge>
+            <Badge variant="secondary" className={cn("border border-zc-border", policeBadge.className)}>
+              Police: {policeBadge.label}
             </Badge>
 
             {dirty ? (
@@ -546,608 +314,222 @@ export default function HrStaffOnboardingPrivilegesPage() {
           </div>
         </div>
 
-        {!isDoctor ? (
-          <div className="rounded-md border border-zc-border bg-zc-panel/40 p-3 text-sm text-zc-muted">
-            This step is intended for <span className="text-zc-foreground">Doctors</span>. Your current staff category is{" "}
-            <span className="text-zc-foreground">{staffCategory || "—"}</span>. You can proceed without adding privileges.
-          </div>
-        ) : null}
-
         <Separator className="bg-zc-border" />
 
-        <div className="flex items-center justify-between">
-          <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Privilege grants</div>
-          <Button className="bg-zc-accent text-white hover:bg-zc-accent/90" onClick={addPrivilege} disabled={loading}>
-            + Add privilege
-          </Button>
-        </div>
-
-        {items.length === 0 ? (
-          <div className="rounded-md border border-zc-border bg-zc-panel/40 p-3 text-sm text-zc-muted">
-            No privileges added yet.
-          </div>
-        ) : (
+        <div className={cn("grid gap-4", loading ? "opacity-60" : "opacity-100")}>
+          {/* Background verification */}
           <div className="grid gap-3">
-            {items.map((p, idx) => {
-              const pref = `items.${idx}`;
-              const typeErr = errors[`${pref}.privilege_type`];
-              const nameErr = errors[`${pref}.privilege_name`];
-              const effErr = errors[`${pref}.effective_date`];
-              const expErr = errors[`${pref}.expiry_date`];
-              const grantErr = errors[`${pref}.granted_by`];
-              const procErr = errors[`${pref}.procedures`];
-              const supErr = errors[`${pref}.supervisor`];
-              const scoreErr = errors[`${pref}.assessment_score`];
-              const mvErr = errors[`${pref}.minimum_case_volume`];
-              const rcErr = errors[`${pref}.review_cycle`];
+            <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Background verification (BGV)</div>
 
-              return (
-                <div key={p.id} className="rounded-md border border-zc-border bg-zc-panel/40 p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="secondary" className="border border-zc-border">
-                          Privilege #{idx + 1}
-                        </Badge>
-                        <Badge
-                          variant="secondary"
-                          className={cn(
-                            "border border-zc-border",
-                            p.status === "ACTIVE"
-                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                              : p.status === "PROVISIONAL" || p.status === "PENDING_REVIEW"
-                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                              : "bg-red-500/10 text-red-600 dark:text-red-400"
-                          )}
-                        >
-                          {p.status}
-                        </Badge>
-                        {p.is_active ? (
-                          <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" variant="secondary">
-                            Active
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-zc-border/40 text-zc-muted" variant="secondary">
-                            Inactive
-                          </Badge>
-                        )}
-                      </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <Field label="Status" required error={errors["bgv.status"]}>
+                <Select value={bgv.status ?? ""} onValueChange={(v) => updateBgv("status", v as VerificationStatus)}>
+                  <SelectTrigger className={cn("border-zc-border", errors["bgv.status"] ? "border-red-500" : "")}>
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NOT_INITIATED">Not initiated</SelectItem>
+                    <SelectItem value="IN_PROGRESS">In progress</SelectItem>
+                    <SelectItem value="VERIFIED">Verified</SelectItem>
+                    <SelectItem value="REJECTED">Rejected</SelectItem>
+                    <SelectItem value="EXPIRED">Expired</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
 
-                      <div className="mt-1 text-xs text-zc-muted">
-                        Type + scope + validity + grantor + review cycle (aligned to workflow doc).
-                      </div>
-                    </div>
+              <Field
+                label="Verified by (Agency)"
+                required={bgv.status === "VERIFIED"}
+                error={errors["bgv.verified_by"]}
+              >
+                <Input
+                  className={cn("border-zc-border", errors["bgv.verified_by"] ? "border-red-500" : "")}
+                  value={bgv.verified_by ?? ""}
+                  onChange={(e) => updateBgv("verified_by", e.target.value)}
+                  placeholder="e.g., ABC BGV Services"
+                />
+              </Field>
 
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-8 border-zc-border px-3 text-xs"
-                      onClick={() => removePrivilege(p.id)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
+              <Field
+                label="Verification date"
+                required={bgv.status === "VERIFIED"}
+                error={errors["bgv.verification_date"]}
+              >
+                <Input
+                  type="date"
+                  className={cn("border-zc-border", errors["bgv.verification_date"] ? "border-red-500" : "")}
+                  value={bgv.verification_date ?? ""}
+                  onChange={(e) => updateBgv("verification_date", e.target.value)}
+                />
+              </Field>
+            </div>
 
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    <Field label="Type" required error={typeErr}>
-                      <Select
-                        value={String(p.privilege_type || "")}
-                        onValueChange={(v) => {
-                          const t = String(v).toUpperCase();
-                          const suggested =
-                            t === "ADMITTING"
-                              ? "Admitting privilege"
-                              : t === "PRESCRIPTION"
-                              ? "Prescription privilege"
-                              : t === "SURGICAL"
-                              ? "Surgical privilege"
-                              : t === "ANESTHESIA"
-                              ? "Anesthesia privilege"
-                              : t === "PROCEDURE"
-                              ? "Procedure privilege"
-                              : "";
-                          setAt(idx, {
-                            ...p,
-                            privilege_type: t,
-                            privilege_name: p.privilege_name?.trim() ? p.privilege_name : suggested,
-                          });
-                          setErrors((e) => {
-                            const n = { ...e };
-                            delete n[`${pref}.privilege_type`];
-                            delete n[`${pref}.procedures`];
-                            return n;
-                          });
-                        }}
-                      >
-                        <SelectTrigger className={cn("border-zc-border", typeErr ? "border-red-500" : "")}>
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PRIVILEGE_TYPES.map((t) => (
-                            <SelectItem key={t} value={t}>
-                              {t}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
+            <div className="grid gap-3 md:grid-cols-3">
+              <Field label="Report URL" error={errors["bgv.report_url"]}>
+                <Input
+                  className={cn("border-zc-border", errors["bgv.report_url"] ? "border-red-500" : "")}
+                  value={bgv.report_url ?? ""}
+                  onChange={(e) => updateBgv("report_url", e.target.value)}
+                  placeholder="https://..."
+                />
+              </Field>
 
-                    <Field label="Privilege name" required error={nameErr}>
-                      <Input
-                        className={cn("border-zc-border", nameErr ? "border-red-500" : "")}
-                        value={p.privilege_name ?? ""}
-                        onChange={(e) => {
-                          setAt(idx, { ...p, privilege_name: e.target.value });
-                          setErrors((er) => {
-                            const n = { ...er };
-                            delete n[`${pref}.privilege_name`];
-                            return n;
-                          });
-                        }}
-                        placeholder="e.g., Admitting privilege"
-                      />
-                    </Field>
-
-                    <Field label="Departments" help="Comma separated">
-                      <Input
-                        className="border-zc-border"
-                        value={(p.departments ?? []).join(", ")}
-                        onChange={(e) => setAt(idx, { ...p, departments: toList(e.target.value) })}
-                        placeholder="e.g., Cardiology, ICU"
-                      />
-                    </Field>
-
-                    <Field label="Specialties" help="Comma separated">
-                      <Input
-                        className="border-zc-border"
-                        value={(p.specialties ?? []).join(", ")}
-                        onChange={(e) => setAt(idx, { ...p, specialties: toList(e.target.value) })}
-                        placeholder="e.g., Interventional Cardiology"
-                      />
-                    </Field>
-
-                    <Field label="Procedures" help="Comma separated" error={procErr}>
-                      <Input
-                        className={cn("border-zc-border", procErr ? "border-red-500" : "")}
-                        value={(p.procedures ?? []).join(", ")}
-                        onChange={(e) => {
-                          setAt(idx, { ...p, procedures: toList(e.target.value) });
-                          setErrors((er) => {
-                            const n = { ...er };
-                            delete n[`${pref}.procedures`];
-                            return n;
-                          });
-                        }}
-                        placeholder="e.g., Angioplasty, Pacemaker implantation"
-                      />
-                    </Field>
-
-                    <Field label="Description" help="Optional">
-                      <Textarea
-                        className="border-zc-border"
-                        value={p.privilege_description ?? ""}
-                        onChange={(e) => setAt(idx, { ...p, privilege_description: e.target.value })}
-                        placeholder="Optional notes about scope"
-                      />
-                    </Field>
-                  </div>
-
-                  <Separator className="my-3 bg-zc-border" />
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Field label="Effective from" required error={effErr} help="YYYY-MM-DD">
-                      <Input
-                        className={cn("border-zc-border", effErr ? "border-red-500" : "")}
-                        value={p.effective_date ?? ""}
-                        onChange={(e) => {
-                          setAt(idx, { ...p, effective_date: e.target.value });
-                          setErrors((er) => {
-                            const n = { ...er };
-                            delete n[`${pref}.effective_date`];
-                            return n;
-                          });
-                        }}
-                        placeholder="YYYY-MM-DD"
-                      />
-                    </Field>
-
-                    <div className="grid gap-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <Label className="text-xs text-zc-muted">Validity</Label>
-                        <span className="text-[10px] text-zc-muted">Lifetime or expiry date</span>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="flex items-center gap-2 rounded-md border border-zc-border bg-transparent px-3 py-2">
-                          <Switch
-                            checked={p.is_lifetime}
-                            onCheckedChange={(v) => {
-                              setAt(idx, { ...p, is_lifetime: v, expiry_date: v ? "" : p.expiry_date });
-                              setDirty(true);
-                              setErrors((er) => {
-                                const n = { ...er };
-                                delete n[`${pref}.expiry_date`];
-                                return n;
-                              });
-                            }}
-                          />
-                          <span className="text-xs text-zc-muted">Lifetime</span>
-                        </div>
-
-                        <div className="min-w-[220px] flex-1">
-                          <Input
-                            className={cn("border-zc-border", expErr ? "border-red-500" : "")}
-                            value={p.is_lifetime ? "" : p.expiry_date ?? ""}
-                            onChange={(e) => {
-                              setAt(idx, { ...p, expiry_date: e.target.value });
-                              setErrors((er) => {
-                                const n = { ...er };
-                                delete n[`${pref}.expiry_date`];
-                                return n;
-                              });
-                            }}
-                            placeholder={p.is_lifetime ? "—" : "YYYY-MM-DD"}
-                            disabled={p.is_lifetime}
-                          />
-                          {expErr ? <div className="mt-1 text-xs text-red-500">{expErr}</div> : null}
-                        </div>
-                      </div>
-                    </div>
-
-                    <Field label="Granted by" required error={grantErr} help="Name / employee code">
-                      <Input
-                        className={cn("border-zc-border", grantErr ? "border-red-500" : "")}
-                        value={p.granted_by ?? ""}
-                        onChange={(e) => {
-                          setAt(idx, { ...p, granted_by: e.target.value });
-                          setErrors((er) => {
-                            const n = { ...er };
-                            delete n[`${pref}.granted_by`];
-                            return n;
-                          });
-                        }}
-                        placeholder="e.g., Dr. Anil Kumar (HOD)"
-                      />
-                    </Field>
-
-                    <Field label="Grantor role" help="Optional">
-                      <Input
-                        className="border-zc-border"
-                        value={p.granted_by_role ?? ""}
-                        onChange={(e) => setAt(idx, { ...p, granted_by_role: e.target.value })}
-                        placeholder="e.g., HOD / Medical Superintendent"
-                      />
-                    </Field>
-
-                    <Field label="Granted date" help="YYYY-MM-DD">
-                      <Input
-                        className={cn("border-zc-border", errors[`${pref}.granted_date`] ? "border-red-500" : "")}
-                        value={p.granted_date ?? ""}
-                        onChange={(e) => {
-                          setAt(idx, { ...p, granted_date: e.target.value });
-                          setErrors((er) => {
-                            const n = { ...er };
-                            delete n[`${pref}.granted_date`];
-                            return n;
-                          });
-                        }}
-                        placeholder="YYYY-MM-DD"
-                      />
-                      {errors[`${pref}.granted_date`] ? (
-                        <div className="text-xs text-red-500">{errors[`${pref}.granted_date`]}</div>
-                      ) : null}
-                    </Field>
-
-                    <Field label="Status" required>
-                      <Select
-                        value={p.status}
-                        onValueChange={(v) => setAt(idx, { ...p, status: String(v).toUpperCase() as PrivilegeStatus })}
-                      >
-                        <SelectTrigger className="border-zc-border">
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PRIV_STATUS.map((s) => (
-                            <SelectItem key={s} value={s}>
-                              {s}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-
-                    <div className="grid gap-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <Label className="text-xs text-zc-muted">Active</Label>
-                      </div>
-                      <div className="flex items-center justify-between rounded-md border border-zc-border bg-transparent px-3 py-2">
-                        <span className="text-xs text-zc-muted">is_active</span>
-                        <Switch
-                          checked={!!p.is_active}
-                          onCheckedChange={(v) => setAt(idx, { ...p, is_active: v })}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <Separator className="my-3 bg-zc-border" />
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-md border border-zc-border bg-transparent p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Review cycle</div>
-                        <div className="flex items-center gap-2">
-                          <Label className="text-xs text-zc-muted">Required</Label>
-                          <Switch
-                            checked={!!p.review_required}
-                            onCheckedChange={(v) => {
-                              setAt(idx, { ...p, review_required: v });
-                              setErrors((er) => {
-                                const n = { ...er };
-                                delete n[`${pref}.review_cycle`];
-                                return n;
-                              });
-                            }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="mt-3 grid gap-3">
-                        <Field label="Review cycle" error={rcErr} help="If review required">
-                          <Select
-                            value={p.review_cycle}
-                            onValueChange={(v) => {
-                              setAt(idx, { ...p, review_cycle: String(v).toUpperCase() as ReviewCycle });
-                              setErrors((er) => {
-                                const n = { ...er };
-                                delete n[`${pref}.review_cycle`];
-                                return n;
-                              });
-                            }}
-                          >
-                            <SelectTrigger className={cn("border-zc-border", rcErr ? "border-red-500" : "")} disabled={!p.review_required}>
-                              <SelectValue placeholder="Select cycle" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {REVIEW_CYCLES.map((c) => (
-                                <SelectItem key={c} value={c}>
-                                  {c}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </Field>
-
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <Field label="Last review" help="YYYY-MM-DD">
-                            <Input
-                              className="border-zc-border"
-                              value={p.last_review_date ?? ""}
-                              onChange={(e) => setAt(idx, { ...p, last_review_date: e.target.value })}
-                              placeholder="YYYY-MM-DD"
-                              disabled={!p.review_required}
-                            />
-                          </Field>
-                          <Field label="Next review" help="YYYY-MM-DD">
-                            <Input
-                              className="border-zc-border"
-                              value={p.next_review_date ?? ""}
-                              onChange={(e) => setAt(idx, { ...p, next_review_date: e.target.value })}
-                              placeholder="YYYY-MM-DD"
-                              disabled={!p.review_required}
-                            />
-                          </Field>
-                        </div>
-
-                        <Field label="Reviewed by" help="Name/code">
-                          <Input
-                            className="border-zc-border"
-                            value={p.reviewed_by ?? ""}
-                            onChange={(e) => setAt(idx, { ...p, reviewed_by: e.target.value })}
-                            placeholder="Optional"
-                            disabled={!p.review_required}
-                          />
-                        </Field>
-
-                        <Field label="Review remarks" help="Optional">
-                          <Textarea
-                            className="border-zc-border"
-                            value={p.review_remarks ?? ""}
-                            onChange={(e) => setAt(idx, { ...p, review_remarks: e.target.value })}
-                            placeholder="Optional"
-                            disabled={!p.review_required}
-                          />
-                        </Field>
-                      </div>
-                    </div>
-
-                    <div className="rounded-md border border-zc-border bg-transparent p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Conditions & checks</div>
-                      </div>
-
-                      <div className="mt-3 grid gap-3">
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <div className="grid gap-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <Label className="text-xs text-zc-muted">Supervision required</Label>
-                            </div>
-                            <div className="flex items-center justify-between rounded-md border border-zc-border px-3 py-2">
-                              <span className="text-xs text-zc-muted">supervision_required</span>
-                              <Switch
-                                checked={!!p.supervision_required}
-                                onCheckedChange={(v) => {
-                                  setAt(idx, { ...p, supervision_required: v, supervisor: v ? p.supervisor : "" });
-                                  setErrors((er) => {
-                                    const n = { ...er };
-                                    delete n[`${pref}.supervisor`];
-                                    return n;
-                                  });
-                                }}
-                              />
-                            </div>
-                          </div>
-
-                          <Field label="Supervisor" error={supErr} help="Required if supervision required">
-                            <Input
-                              className={cn("border-zc-border", supErr ? "border-red-500" : "")}
-                              value={p.supervisor ?? ""}
-                              onChange={(e) => {
-                                setAt(idx, { ...p, supervisor: e.target.value });
-                                setErrors((er) => {
-                                  const n = { ...er };
-                                  delete n[`${pref}.supervisor`];
-                                  return n;
-                                });
-                              }}
-                              placeholder="Name/code"
-                              disabled={!p.supervision_required}
-                            />
-                          </Field>
-                        </div>
-
-                        <Field label="Conditions" help="Comma separated">
-                          <Input
-                            className="border-zc-border"
-                            value={(p.conditions ?? []).join(", ")}
-                            onChange={(e) => setAt(idx, { ...p, conditions: toList(e.target.value) })}
-                            placeholder="e.g., Under supervision first 10 cases"
-                          />
-                        </Field>
-
-                        <Field label="Restrictions" help="Comma separated">
-                          <Input
-                            className="border-zc-border"
-                            value={(p.restrictions ?? []).join(", ")}
-                            onChange={(e) => setAt(idx, { ...p, restrictions: toList(e.target.value) })}
-                            placeholder="e.g., Not for pediatric patients"
-                          />
-                        </Field>
-
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <div className="grid gap-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <Label className="text-xs text-zc-muted">Competency assessment required</Label>
-                            </div>
-                            <div className="flex items-center justify-between rounded-md border border-zc-border px-3 py-2">
-                              <span className="text-xs text-zc-muted">competency_assessment_required</span>
-                              <Switch
-                                checked={!!p.competency_assessment_required}
-                                onCheckedChange={(v) =>
-                                  setAt(idx, {
-                                    ...p,
-                                    competency_assessment_required: v,
-                                    last_assessment_date: v ? p.last_assessment_date : "",
-                                    assessment_score: v ? p.assessment_score : null,
-                                    assessor: v ? p.assessor : "",
-                                  })
-                                }
-                              />
-                            </div>
-                          </div>
-
-                          <Field label="Last assessment" help="YYYY-MM-DD">
-                            <Input
-                              className="border-zc-border"
-                              value={p.last_assessment_date ?? ""}
-                              onChange={(e) => setAt(idx, { ...p, last_assessment_date: e.target.value })}
-                              placeholder="YYYY-MM-DD"
-                              disabled={!p.competency_assessment_required}
-                            />
-                          </Field>
-
-                          <Field label="Assessment score" error={scoreErr} help="0–100">
-                            <Input
-                              className={cn("border-zc-border", scoreErr ? "border-red-500" : "")}
-                              value={p.assessment_score === null || p.assessment_score === undefined ? "" : String(p.assessment_score)}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setAt(idx, { ...p, assessment_score: v === "" ? null : Number(v) });
-                                setErrors((er) => {
-                                  const n = { ...er };
-                                  delete n[`${pref}.assessment_score`];
-                                  return n;
-                                });
-                              }}
-                              inputMode="numeric"
-                              placeholder="Optional"
-                              disabled={!p.competency_assessment_required}
-                            />
-                          </Field>
-
-                          <Field label="Assessor" help="Name/code">
-                            <Input
-                              className="border-zc-border"
-                              value={p.assessor ?? ""}
-                              onChange={(e) => setAt(idx, { ...p, assessor: e.target.value })}
-                              placeholder="Optional"
-                              disabled={!p.competency_assessment_required}
-                            />
-                          </Field>
-                        </div>
-
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <Field label="Minimum case volume" error={mvErr} help="Per review period">
-                            <Input
-                              className={cn("border-zc-border", mvErr ? "border-red-500" : "")}
-                              value={p.minimum_case_volume === null || p.minimum_case_volume === undefined ? "" : String(p.minimum_case_volume)}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setAt(idx, { ...p, minimum_case_volume: v === "" ? null : Number(v) });
-                                setErrors((er) => {
-                                  const n = { ...er };
-                                  delete n[`${pref}.minimum_case_volume`];
-                                  return n;
-                                });
-                              }}
-                              inputMode="numeric"
-                              placeholder="Optional"
-                            />
-                          </Field>
-
-                          <Field label="Current case volume" help="Optional">
-                            <Input
-                              className="border-zc-border"
-                              value={p.current_case_volume === null || p.current_case_volume === undefined ? "" : String(p.current_case_volume)}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setAt(idx, { ...p, current_case_volume: v === "" ? null : Number(v) });
-                              }}
-                              inputMode="numeric"
-                              placeholder="Optional"
-                            />
-                          </Field>
-                        </div>
-
-                        <Field label="Supporting documents" help="One URL/ref per line">
-                          <Textarea
-                            className="border-zc-border"
-                            value={(p.credential_documents ?? []).join("\n")}
-                            onChange={(e) => setAt(idx, { ...p, credential_documents: toLines(e.target.value) })}
-                            placeholder="https://... (one per line)"
-                          />
-                        </Field>
-                      </div>
-                    </div>
-                  </div>
+              <Field label="Cleared for employment">
+                <div className="flex items-center gap-2 rounded-md border border-zc-border bg-zc-panel/30 px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={!!bgv.cleared_for_employment}
+                    onChange={(e) => updateBgv("cleared_for_employment", e.target.checked)}
+                  />
+                  <span className="text-sm text-zc-foreground">Cleared</span>
+                  <span className="text-xs text-zc-muted">(recommended true only when BGV is verified)</span>
                 </div>
-              );
-            })}
-          </div>
-        )}
+              </Field>
 
-        <div className="rounded-md border border-zc-border bg-zc-panel/40 p-3 text-xs text-zc-muted">
-          <div className="font-medium text-zc-foreground">Next step</div>
-          <div className="mt-1">
-            System Access: <span className="font-mono">/onboarding/system-access</span>
+              <div />
+            </div>
+
+            <Field
+              label="Remarks"
+              required={bgv.status === "REJECTED"}
+              error={errors["bgv.remarks"]}
+              help={bgv.status === "REJECTED" ? "Mandatory for rejected cases" : "Optional"}
+            >
+              <Textarea
+                className={cn("min-h-[84px] border-zc-border", errors["bgv.remarks"] ? "border-red-500" : "")}
+                value={bgv.remarks ?? ""}
+                onChange={(e) => updateBgv("remarks", e.target.value)}
+                placeholder="Notes, exceptions, clarifications..."
+              />
+            </Field>
+          </div>
+
+          <Separator className="bg-zc-border" />
+
+          {/* Police verification */}
+          <div className="grid gap-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Police verification</div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <Field label="Status" required error={errors["police.status"]}>
+                <Select value={police.status ?? ""} onValueChange={(v) => updatePolice("status", v as VerificationStatus)}>
+                  <SelectTrigger className={cn("border-zc-border", errors["police.status"] ? "border-red-500" : "")}>
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NOT_INITIATED">Not initiated</SelectItem>
+                    <SelectItem value="IN_PROGRESS">In progress</SelectItem>
+                    <SelectItem value="VERIFIED">Verified</SelectItem>
+                    <SelectItem value="REJECTED">Rejected</SelectItem>
+                    <SelectItem value="EXPIRED">Expired</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field
+                label="Police station"
+                required={police.status === "VERIFIED"}
+                error={errors["police.police_station"]}
+              >
+                <Input
+                  className={cn("border-zc-border", errors["police.police_station"] ? "border-red-500" : "")}
+                  value={police.police_station ?? ""}
+                  onChange={(e) => updatePolice("police_station", e.target.value)}
+                  placeholder="e.g., Indiranagar PS"
+                />
+              </Field>
+
+              <Field label="Application number" error={errors["police.application_number"]}>
+                <Input
+                  className={cn("border-zc-border", errors["police.application_number"] ? "border-red-500" : "")}
+                  value={police.application_number ?? ""}
+                  onChange={(e) => updatePolice("application_number", e.target.value)}
+                  placeholder="Optional"
+                />
+              </Field>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <Field label="Application date" error={errors["police.application_date"]}>
+                <Input
+                  type="date"
+                  className={cn("border-zc-border", errors["police.application_date"] ? "border-red-500" : "")}
+                  value={police.application_date ?? ""}
+                  onChange={(e) => updatePolice("application_date", e.target.value)}
+                />
+              </Field>
+
+              <Field
+                label="Verification date"
+                required={police.status === "VERIFIED"}
+                error={errors["police.verification_date"]}
+              >
+                <Input
+                  type="date"
+                  className={cn("border-zc-border", errors["police.verification_date"] ? "border-red-500" : "")}
+                  value={police.verification_date ?? ""}
+                  onChange={(e) => updatePolice("verification_date", e.target.value)}
+                />
+              </Field>
+
+              <Field label="Expiry date" error={errors["police.expiry_date"]} help="Optional; some certificates expire">
+                <Input
+                  type="date"
+                  className={cn("border-zc-border", errors["police.expiry_date"] ? "border-red-500" : "")}
+                  value={police.expiry_date ?? ""}
+                  onChange={(e) => updatePolice("expiry_date", e.target.value)}
+                />
+              </Field>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <Field label="Certificate URL" error={errors["police.certificate_url"]}>
+                <Input
+                  className={cn("border-zc-border", errors["police.certificate_url"] ? "border-red-500" : "")}
+                  value={police.certificate_url ?? ""}
+                  onChange={(e) => updatePolice("certificate_url", e.target.value)}
+                  placeholder="https://..."
+                />
+              </Field>
+
+              <div className="md:col-span-2" />
+            </div>
+
+            <Field
+              label="Remarks"
+              required={police.status === "REJECTED"}
+              error={errors["police.remarks"]}
+              help={police.status === "REJECTED" ? "Mandatory for rejected cases" : "Optional"}
+            >
+              <Textarea
+                className={cn("min-h-[84px] border-zc-border", errors["police.remarks"] ? "border-red-500" : "")}
+                value={police.remarks ?? ""}
+                onChange={(e) => updatePolice("remarks", e.target.value)}
+                placeholder="Notes, exceptions, clarifications..."
+              />
+            </Field>
+          </div>
+
+          <Separator className="bg-zc-border" />
+
+          <div className="rounded-md border border-zc-border bg-zc-panel/40 p-3 text-xs text-zc-muted">
+            <div className="font-medium text-zc-foreground">Notes</div>
+            <ul className="mt-1 list-disc space-y-1 pl-5">
+              <li>
+                Draft keys saved as <span className="font-mono">background_verification</span> and{" "}
+                <span className="font-mono">police_verification</span> (snake_case) to keep backend mapping clean.
+              </li>
+              <li>
+                When a status is set to <span className="font-semibold">Verified</span>, authority + date become required.
+                When <span className="font-semibold">Rejected</span>, remarks become required.
+              </li>
+            </ul>
           </div>
         </div>
       </div>
     </OnboardingShell>
   );
 }
-
-/* ---------- UI helper ---------- */
 
 function Field({
   label,
@@ -1176,7 +558,64 @@ function Field({
   );
 }
 
-/* ---------- draft storage ---------- */
+function statusBadge(status: VerificationStatus) {
+  switch (status) {
+    case "VERIFIED":
+      return { label: "Verified", className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" };
+    case "IN_PROGRESS":
+      return { label: "In progress", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400" };
+    case "REJECTED":
+      return { label: "Rejected", className: "bg-red-500/15 text-red-600 dark:text-red-400" };
+    case "EXPIRED":
+      return { label: "Expired", className: "bg-red-500/15 text-red-600 dark:text-red-400" };
+    case "NOT_INITIATED":
+    default:
+      return { label: "Not initiated", className: "text-zc-muted" };
+  }
+}
+
+function cleanStr(v: any): string | undefined {
+  const s = String(v ?? "").trim();
+  return s ? s : undefined;
+}
+
+function cleanDate(v: any): string | undefined {
+  const s = String(v ?? "").trim();
+  return s ? s : undefined;
+}
+
+function looksLikeUrl(v: string): boolean {
+  const s = String(v || "").trim();
+  if (!s) return true;
+  try {
+    // allow http(s) + internal URLs
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isValidYmd(v: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(v + "T00:00:00Z");
+  if (Number.isNaN(d.getTime())) return false;
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}` === v;
+}
+
+function makeDraftId(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c: any = globalThis.crypto;
+    if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  } catch {
+    // ignore
+  }
+  return `draft_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
 
 function withDraftId(href: string, draftId: string | null): string {
   if (!draftId) return href;
@@ -1207,32 +646,4 @@ function writeDraft(draftId: string, draft: StaffOnboardingDraft) {
   } catch {
     // ignore
   }
-}
-
-/* ---------- misc ---------- */
-
-function isISODate(v: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(v || "").trim());
-}
-
-function cleanOpt(v: any): string | undefined {
-  const s = String(v ?? "").trim();
-  return s ? s : undefined;
-}
-
-function cleanDateOpt(v: any): string | undefined {
-  const s = String(v ?? "").trim();
-  if (!s) return undefined;
-  return s.length >= 10 ? s.slice(0, 10) : s;
-}
-
-function makeId(): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c: any = globalThis.crypto;
-    if (c && typeof c.randomUUID === "function") return c.randomUUID();
-  } catch {
-    // ignore
-  }
-  return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }

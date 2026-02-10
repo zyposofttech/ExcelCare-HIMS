@@ -31,14 +31,14 @@ export default function Page() {
           <Button
             variant="outline"
             className="border-zc-border"
-            onClick={() => router.push(withDraftId("/infrastructure/staff/onboarding/review", staffId) as any)}
+            onClick={() => router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/review", staffId) as any)}
           >
             Back
           </Button>
 
           <div className="flex items-center gap-2">
             <Button asChild variant="outline" className="border-zc-border" disabled={!staffId} title={staffId ? "Open staff profile" : "Missing staff id"}>
-              <Link href={(staffId ? `/infrastructure/staff/${encodeURIComponent(staffId)}` : "#") as any}>View Staff Profile</Link>
+              <Link href={(staffId ? `/infrastructure/human-resource/staff/${encodeURIComponent(staffId)}` : "#") as any}>View Staff Profile</Link>
             </Button>
             <Button className="bg-zc-accent text-white hover:bg-zc-accent/90" onClick={() => router.push("/infrastructure/staff" as any)}>Return to Directory</Button>
           </div>
@@ -71,13 +71,13 @@ export default function Page() {
             <div className="text-sm font-medium text-zc-foreground">Common actions</div>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button asChild variant="outline" className="border-zc-border" disabled={!staffId}>
-                <Link href={(staffId ? `/infrastructure/staff/${encodeURIComponent(staffId)}#documents` : "#") as any}>Documents</Link>
+                <Link href={(staffId ? `/infrastructure/human-resource/staff/${encodeURIComponent(staffId)}#documents` : "#") as any}>Documents</Link>
               </Button>
               <Button asChild variant="outline" className="border-zc-border" disabled={!staffId}>
-                <Link href={(staffId ? `/infrastructure/staff/${encodeURIComponent(staffId)}#credentials` : "#") as any}>Credentials</Link>
+                <Link href={(staffId ? `/infrastructure/human-resource/staff/${encodeURIComponent(staffId)}#credentials` : "#") as any}>Credentials</Link>
               </Button>
               <Button asChild variant="outline" className="border-zc-border" disabled={!staffId}>
-                <Link href={(staffId ? `/infrastructure/staff/${encodeURIComponent(staffId)}#assignments` : "#") as any}>Assignments</Link>
+                <Link href={(staffId ? `/infrastructure/human-resource/staff/${encodeURIComponent(staffId)}#assignments` : "#") as any}>Assignments</Link>
               </Button>
             </div>
           </div>

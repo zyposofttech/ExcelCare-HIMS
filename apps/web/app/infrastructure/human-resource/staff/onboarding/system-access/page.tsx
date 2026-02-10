@@ -89,7 +89,8 @@ export default function HrStaffOnboardingSystemAccessPage() {
   // Ensure stable draftId in URL (wizard relies on it)
   React.useEffect(() => {
     if (draftId) return;
-    router.replace("/infrastructure/staff/onboarding/start" as any);
+    router.replace("/infrastructure/human-resource/staff/onboarding/personal" as any);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId]);
 
@@ -349,7 +350,7 @@ export default function HrStaffOnboardingSystemAccessPage() {
   function onSaveAndNext() {
     try {
       saveDraftOrThrow();
-      router.push(withDraftId("/infrastructure/staff/onboarding/review", draftId) as any);
+      router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/review", draftId) as any);
     } catch {
       // handled
     }
@@ -367,7 +368,7 @@ export default function HrStaffOnboardingSystemAccessPage() {
           <Button
             variant="outline"
             className="border-zc-border"
-            onClick={() => router.push(withDraftId("/infrastructure/staff/onboarding/assignments", draftId) as any)}
+            onClick={() => router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/assignments", draftId) as any)}
           >
             Back
           </Button>
@@ -387,7 +388,7 @@ export default function HrStaffOnboardingSystemAccessPage() {
         {/* Header row */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-zc-foreground">Step 7: System access</div>
+            <div className="text-sm font-medium text-zc-foreground">Step 8: System access</div>
             <div className="mt-1 text-xs text-zc-muted">
               Enable access only if this staff should login to the system. Select role template codes for RBAC bindings.
             </div>
@@ -439,7 +440,7 @@ export default function HrStaffOnboardingSystemAccessPage() {
         ) : null}
 
         {/* Card 1: Toggle + mode */}
-        <Card className="border-zc-border">
+        <Card className="border-zc-border bg-zc-panel">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Access toggle</CardTitle>
             <CardDescription>Enable login access and select how to provision the user account.</CardDescription>
@@ -523,7 +524,7 @@ export default function HrStaffOnboardingSystemAccessPage() {
         </Card>
 
         {/* Card 2: Link/create */}
-        <Card className="border-zc-border">
+        <Card className="border-zc-border bg-zc-panel">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">User account</CardTitle>
             <CardDescription>Link an existing user or capture minimal fields to create a new user.</CardDescription>
@@ -606,7 +607,7 @@ export default function HrStaffOnboardingSystemAccessPage() {
         </Card>
 
         {/* Card 3: Roles */}
-        <Card className="border-zc-border">
+        <Card className="border-zc-border bg-zc-panel">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Role templates</CardTitle>
             <CardDescription>These codes bind staff ↔ role templates (used by your tightened backend contract).</CardDescription>
@@ -660,7 +661,7 @@ export default function HrStaffOnboardingSystemAccessPage() {
         </Card>
 
         {/* Card 4: Notes */}
-        <Card className="border-zc-border">
+        <Card className="border-zc-border bg-zc-panel">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Notes</CardTitle>
             <CardDescription>Optional notes for HR / IT while provisioning access.</CardDescription>
