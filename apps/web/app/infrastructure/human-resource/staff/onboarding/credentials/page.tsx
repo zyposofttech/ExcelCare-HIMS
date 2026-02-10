@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { OnboardingShell } from "../_components/OnboardingShell";
+import { EvidenceUpload } from "../_components/EvidenceUpload";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,9 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-
+import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/cn";
-import { toast } from "@/components/ui/use-toast";
 
 type CredentialType =
   | "MEDICAL_REGISTRATION"
@@ -34,9 +34,9 @@ type CredentialDraft = {
   id: string;
 
   credential_type: CredentialType;
-  title?: string; // e.g., "MBBS", "B.Sc Nursing", "Aadhar"
-  issuing_authority?: string; // e.g., "MCI / State Medical Council"
-  credential_number?: string; // registration / ID number
+  title?: string;
+  issuing_authority?: string;
+  credential_number?: string;
 
   issued_on?: string; // YYYY-MM-DD
   valid_from?: string; // YYYY-MM-DD
@@ -45,35 +45,107 @@ type CredentialDraft = {
   verification_status?: VerificationStatus;
   verification_notes?: string;
 
-  evidence_urls?: string[]; // URLs or storage keys
+  evidence_urls?: string[]; // generated automatically via upload
 };
 
 type StaffOnboardingDraft = {
   personal_details?: Record<string, any>;
   contact_details?: Record<string, any>;
   employment_details?: Record<string, any>;
-  medical_details?: {
-    credentials?: CredentialDraft[];
-  };
+  medical_details?: { credentials?: CredentialDraft[] };
   system_access?: Record<string, any>;
+  assignments?: any[];
 };
 
 type FieldErrorMap = Record<string, string>;
+
+const STORAGE_PREFIX = "hrStaffOnboardingDraft:";
+const storageKey = (draftId: string) => `${STORAGE_PREFIX}${draftId}`;
+
+function safeParse<T>(s: string | null): T | null {
+  if (!s) return null;
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return null;
+  }
+}
+
+function readDraft(draftId: string): StaffOnboardingDraft {
+  if (typeof window === "undefined") return {};
+  return safeParse<StaffOnboardingDraft>(localStorage.getItem(storageKey(draftId))) ?? {};
+}
+
+function writeDraft(draftId: string, patch: Partial<StaffOnboardingDraft>) {
+  const prev = readDraft(draftId);
+  const next: StaffOnboardingDraft = {
+    ...prev,
+    ...patch,
+    medical_details: { ...(prev.medical_details ?? {}), ...(patch.medical_details ?? {}) },
+  };
+  localStorage.setItem(storageKey(draftId), JSON.stringify(next));
+}
+
+function makeId(): string {
+  const c: any = typeof crypto !== "undefined" ? crypto : null;
+  if (c?.randomUUID) return c.randomUUID();
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function isValidYmd(v?: string) {
+  if (!v) return true;
+  return /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+function needsNumber(t: CredentialType) {
+  return (
+    t === "MEDICAL_REGISTRATION" ||
+    t === "NURSING_REGISTRATION" ||
+    t === "PHARMACY_REGISTRATION" ||
+    t === "PARAMEDICAL_REGISTRATION" ||
+    t === "GOVT_ID"
+  );
+}
+
+function labelCredentialType(t: CredentialType) {
+  switch (t) {
+    case "MEDICAL_REGISTRATION":
+      return "Medical Registration";
+    case "NURSING_REGISTRATION":
+      return "Nursing Registration";
+    case "PHARMACY_REGISTRATION":
+      return "Pharmacy Registration";
+    case "PARAMEDICAL_REGISTRATION":
+      return "Paramedical Registration";
+    case "EDUCATION":
+      return "Education";
+    case "TRAINING":
+      return "Training";
+    case "EXPERIENCE":
+      return "Experience";
+    case "GOVT_ID":
+      return "Government ID";
+    case "IMMUNIZATION":
+      return "Immunization";
+    default:
+      return "Other";
+  }
+}
 
 export default function HrStaffOnboardingCredentialsPage() {
   const router = useRouter();
   const sp = useSearchParams();
   const draftId = sp.get("draftId");
+  const { toast } = useToast();
 
   const [loading, setLoading] = React.useState(true);
   const [dirty, setDirty] = React.useState(false);
-
   const [errors, setErrors] = React.useState<FieldErrorMap>({});
 
   const [credentials, setCredentials] = React.useState<CredentialDraft[]>([]);
   const [editingId, setEditingId] = React.useState<string | null>(null);
 
-  const emptyForm: CredentialDraft = React.useMemo(
+  const emptyForm = React.useMemo<CredentialDraft>(
     () => ({
       id: makeId(),
       credential_type: "MEDICAL_REGISTRATION",
@@ -87,36 +159,26 @@ export default function HrStaffOnboardingCredentialsPage() {
       verification_notes: "",
       evidence_urls: [],
     }),
-    []
+    [],
   );
 
-  const [form, setForm] = React.useState<CredentialDraft>(emptyForm);
-  const [evidenceCsv, setEvidenceCsv] = React.useState<string>("");
+  const [form, setForm] = React.useState<CredentialDraft>({ ...emptyForm, id: makeId() });
 
-  // Ensure stable draftId
   React.useEffect(() => {
     if (draftId) return;
     router.replace("/infrastructure/human-resource/staff/onboarding/personal" as any);
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId]);
 
-// Load draft from localStorage
   React.useEffect(() => {
-    const id = draftId;
-    if (!id) return;
-
+    if (!draftId) return;
     setLoading(true);
     try {
-      const draft = readDraft(id);
-      const list = (draft.medical_details?.credentials ?? []) as CredentialDraft[];
+      const d = readDraft(draftId);
+      const list = d.medical_details?.credentials ?? [];
       setCredentials(Array.isArray(list) ? list : []);
-
-      // reset editor
       setEditingId(null);
-      const next = { ...emptyForm, id: makeId() };
-      setForm(next);
-      setEvidenceCsv("");
+      setForm({ ...emptyForm, id: makeId(), evidence_urls: [] });
       setErrors({});
       setDirty(false);
     } finally {
@@ -132,7 +194,7 @@ export default function HrStaffOnboardingCredentialsPage() {
   }, [draftId]);
 
   function update<K extends keyof CredentialDraft>(key: K, value: CredentialDraft[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((p) => ({ ...p, [key]: value }));
     setDirty(true);
     setErrors((e) => {
       const next = { ...e };
@@ -143,21 +205,9 @@ export default function HrStaffOnboardingCredentialsPage() {
 
   function validateCredential(c: CredentialDraft): FieldErrorMap {
     const e: FieldErrorMap = {};
-
     if (!c.credential_type) e.credential_type = "Credential type is required.";
 
-    // Minimal required fields for clean downstream API:
-    // - type
-    // - number (strongly recommended for registrations/IDs)
-    // - issuing authority (recommended)
-    const needsNumber =
-      c.credential_type === "MEDICAL_REGISTRATION" ||
-      c.credential_type === "NURSING_REGISTRATION" ||
-      c.credential_type === "PHARMACY_REGISTRATION" ||
-      c.credential_type === "PARAMEDICAL_REGISTRATION" ||
-      c.credential_type === "GOVT_ID";
-
-    if (needsNumber && !String(c.credential_number ?? "").trim()) {
+    if (needsNumber(c.credential_type) && !String(c.credential_number ?? "").trim()) {
       e.credential_number = "Credential/Registration number is required for this type.";
     }
 
@@ -174,58 +224,61 @@ export default function HrStaffOnboardingCredentialsPage() {
     return e;
   }
 
+  // ✅ FIXED: Add new always resets + remounts the form
   function startAdd() {
     setEditingId(null);
-    const next = { ...emptyForm, id: makeId() };
-    setForm(next);
-    setEvidenceCsv("");
+    setForm({
+      ...emptyForm,
+      id: makeId(), // ✅ new key
+      evidence_urls: [], // ✅ reset
+    });
     setErrors({});
+    setDirty(true);
+
+    requestAnimationFrame(() => {
+      document.getElementById("credential-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   function startEdit(id: string) {
     const existing = credentials.find((x) => x.id === id);
     if (!existing) return;
-    setEditingId(id);
 
-    const normalized: CredentialDraft = {
+    setEditingId(id);
+    setForm({
       ...existing,
       issued_on: existing.issued_on ? String(existing.issued_on).slice(0, 10) : "",
       valid_from: existing.valid_from ? String(existing.valid_from).slice(0, 10) : "",
       valid_to: existing.valid_to ? String(existing.valid_to).slice(0, 10) : "",
       evidence_urls: Array.isArray(existing.evidence_urls) ? existing.evidence_urls : [],
-    };
-
-    setForm(normalized);
-    setEvidenceCsv((normalized.evidence_urls ?? []).join(", "));
+      id: existing.id, // keep stable while editing
+    });
     setErrors({});
     setDirty(false);
+
+    requestAnimationFrame(() => {
+      document.getElementById("credential-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   function removeCredential(id: string) {
     setCredentials((prev) => prev.filter((x) => x.id !== id));
-    setDirty(true);
     if (editingId === id) startAdd();
+    setDirty(true);
   }
 
   function upsertCredential() {
-    const parsedEvidence = evidenceCsv
-      .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean);
-
     const candidate: CredentialDraft = {
       ...form,
       title: form.title?.trim() || undefined,
       issuing_authority: form.issuing_authority?.trim() || undefined,
       credential_number: form.credential_number?.trim() || undefined,
-
       issued_on: form.issued_on?.trim() ? form.issued_on.trim() : undefined,
       valid_from: form.valid_from?.trim() ? form.valid_from.trim() : undefined,
       valid_to: form.valid_to?.trim() ? form.valid_to.trim() : undefined,
-
       verification_status: form.verification_status ?? "PENDING",
       verification_notes: form.verification_notes?.trim() || undefined,
-      evidence_urls: parsedEvidence.length ? parsedEvidence : [],
+      evidence_urls: Array.isArray(form.evidence_urls) ? form.evidence_urls : [],
     };
 
     const ve = validateCredential(candidate);
@@ -240,28 +293,26 @@ export default function HrStaffOnboardingCredentialsPage() {
     }
 
     setCredentials((prev) => {
-      const idx = prev.findIndex((x) => x.id === (editingId ?? candidate.id));
+      const targetId = editingId ?? candidate.id;
+      const idx = prev.findIndex((x) => x.id === targetId);
       if (idx >= 0) {
         const copy = prev.slice();
         copy[idx] = { ...candidate, id: prev[idx].id };
         return copy;
       }
-      return [...prev, candidate];
+      return [...prev, { ...candidate, id: candidate.id || makeId() }];
     });
 
     toast({ title: editingId ? "Updated" : "Added", description: "Credential saved in this draft step." });
 
-    // reset editor
+    // reset to clean add form (and force remount)
     setEditingId(null);
-    const next = { ...emptyForm, id: makeId() };
-    setForm(next);
-    setEvidenceCsv("");
+    setForm({ ...emptyForm, id: makeId(), evidence_urls: [] });
     setErrors({});
     setDirty(true);
   }
 
   function validateStepOrThrow() {
-    // If clinical, must have at least one credential before proceeding.
     if (isClinical && credentials.length === 0) {
       toast({
         variant: "destructive",
@@ -273,64 +324,69 @@ export default function HrStaffOnboardingCredentialsPage() {
   }
 
   function saveDraftOrThrow() {
-    const id = draftId;
-    if (!id) return;
-
+    if (!draftId) return;
     validateStepOrThrow();
 
-    const existing = readDraft(id);
-
-    const nextDraft: StaffOnboardingDraft = {
+    const existing = readDraft(draftId);
+    writeDraft(draftId, {
       ...existing,
       medical_details: {
         ...(existing.medical_details ?? {}),
-        credentials: credentials,
+        credentials,
       },
-    };
+    });
 
-    writeDraft(id, nextDraft);
     setDirty(false);
-
     toast({ title: "Saved", description: "Credentials saved to draft." });
   }
 
   function onSaveOnly() {
     try {
       saveDraftOrThrow();
-    } catch {
-      // handled via toast
-    }
+    } catch {}
   }
 
   function onSaveAndNext() {
     try {
       saveDraftOrThrow();
-      router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/assignments", draftId) as any);
-    } catch {
-      // handled via toast
-    }
+      router.push(
+        `/infrastructure/human-resource/staff/onboarding/assignments?draftId=${encodeURIComponent(draftId ?? "")}` as any,
+      );
+    } catch {}
   }
 
   return (
     <OnboardingShell
       stepKey="credentials"
       title="Credentials"
-      description="Add licenses, registrations, certificates, ID proofs and evidence links for verification."
+      description="Add registrations, certificates, ID proofs and upload evidence files (no manual links)."
       footer={
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 w-full">
           <Button
+            type="button"
             variant="outline"
             className="border-zc-border"
-            onClick={() => router.push(withDraftId("/infrastructure/human-resource/staff/onboarding/employment", draftId) as any)}
+            onClick={() =>
+              router.push(
+                `/infrastructure/human-resource/staff/onboarding/employment?draftId=${encodeURIComponent(
+                  draftId ?? "",
+                )}` as any,
+              )
+            }
           >
             Back
           </Button>
 
           <div className="flex items-center gap-2">
-            <Button variant="outline" className="border-zc-border" onClick={onSaveOnly} disabled={loading}>
+            <Button type="button" variant="outline" className="border-zc-border" onClick={onSaveOnly} disabled={loading}>
               Save
             </Button>
-            <Button className="bg-zc-accent text-white hover:bg-zc-accent/90" onClick={onSaveAndNext} disabled={loading}>
+            <Button
+              type="button"
+              className="bg-zc-accent text-white hover:bg-zc-accent/90"
+              onClick={onSaveAndNext}
+              disabled={loading}
+            >
               Save &amp; Next
             </Button>
           </div>
@@ -340,27 +396,16 @@ export default function HrStaffOnboardingCredentialsPage() {
       <div className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-zc-foreground">Step 4: Credentials</div>
+            <div className="text-sm font-medium text-zc-foreground">Credentials</div>
             <div className="mt-1 text-xs text-zc-muted">
-              Clinical staff must add at least one credential. Evidence links are optional placeholders (upload wiring can be added later).
+              {isClinical ? "Clinical staff must have at least one credential." : "Optional for non-clinical staff."}
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {isClinical ? (
-              <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400" variant="secondary">
-                Clinical: credentials required
-              </Badge>
-            ) : (
-              <Badge variant="secondary" className="border border-zc-border">
-                Non-clinical: optional
-              </Badge>
-            )}
-
             <Badge variant="secondary" className="border border-zc-border">
               Count: {credentials.length}
             </Badge>
-
             {dirty ? (
               <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400" variant="secondary">
                 Unsaved changes
@@ -375,11 +420,17 @@ export default function HrStaffOnboardingCredentialsPage() {
 
         <Separator className="bg-zc-border" />
 
-        {/* Existing credentials */}
+        {/* Current credentials */}
         <div className="grid gap-3">
           <div className="flex items-center justify-between gap-2">
             <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">Current credentials</div>
-            <Button variant="outline" className="h-8 border-zc-border px-3 text-xs" onClick={startAdd} disabled={loading}>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 border-zc-border px-3 text-xs"
+              onClick={startAdd}
+              disabled={loading}
+            >
               Add new
             </Button>
           </div>
@@ -387,7 +438,6 @@ export default function HrStaffOnboardingCredentialsPage() {
           {credentials.length === 0 ? (
             <div className="rounded-md border border-zc-border bg-zc-panel/40 p-4 text-sm text-zc-muted">
               No credentials added yet.
-              {isClinical ? " Clinical staff must add at least one registration/license." : ""}
             </div>
           ) : (
             <div className="grid gap-3">
@@ -402,24 +452,27 @@ export default function HrStaffOnboardingCredentialsPage() {
                         <Badge variant="secondary" className="border border-zc-border">
                           {String(c.verification_status ?? "PENDING")}
                         </Badge>
+                        {Array.isArray(c.evidence_urls) && c.evidence_urls.length ? (
+                          <Badge variant="secondary" className="border border-zc-border">
+                            Evidence: {c.evidence_urls.length}
+                          </Badge>
+                        ) : null}
                       </div>
+
                       <div className="mt-2 text-sm font-medium text-zc-foreground">
                         {c.title?.trim() || "(Untitled)"}{" "}
                         {c.credential_number ? <span className="text-zc-muted">• {c.credential_number}</span> : null}
                       </div>
+
                       <div className="mt-1 text-xs text-zc-muted">
                         {c.issuing_authority ? `Issued by: ${c.issuing_authority}` : "Issuing authority: —"}{" "}
                         {c.valid_to ? `• Valid to: ${String(c.valid_to).slice(0, 10)}` : ""}
                       </div>
-                      {Array.isArray(c.evidence_urls) && c.evidence_urls.length ? (
-                        <div className="mt-2 text-xs text-zc-muted">
-                          Evidence: <span className="font-mono">{c.evidence_urls.join(", ")}</span>
-                        </div>
-                      ) : null}
                     </div>
 
                     <div className="flex items-center gap-2">
                       <Button
+                        type="button"
                         variant="outline"
                         className="h-8 border-zc-border px-3 text-xs"
                         onClick={() => startEdit(c.id)}
@@ -427,6 +480,7 @@ export default function HrStaffOnboardingCredentialsPage() {
                         Edit
                       </Button>
                       <Button
+                        type="button"
                         variant="outline"
                         className="h-8 border-zc-border px-3 text-xs text-red-600 hover:text-red-600"
                         onClick={() => removeCredential(c.id)}
@@ -443,14 +497,26 @@ export default function HrStaffOnboardingCredentialsPage() {
 
         <Separator className="bg-zc-border" />
 
-        {/* Add/Edit form */}
-        <div className={cn("rounded-md border border-zc-border bg-zc-panel/40 p-4", loading ? "opacity-60" : "opacity-100")}>
+        {/* Add/Edit Form */}
+        <div
+          id="credential-form"
+          key={form.id} // ✅ remount to reset Selects properly
+          className={cn(
+            "rounded-md border border-zc-border bg-zc-panel/40 p-4",
+            loading ? "opacity-60" : "opacity-100",
+          )}
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs font-semibold uppercase tracking-wide text-zc-muted">
               {editingId ? "Edit credential" : "Add credential"}
             </div>
             {editingId ? (
-              <Button variant="outline" className="h-8 border-zc-border px-3 text-xs" onClick={startAdd}>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-8 border-zc-border px-3 text-xs"
+                onClick={startAdd}
+              >
                 Cancel edit
               </Button>
             ) : null}
@@ -459,10 +525,7 @@ export default function HrStaffOnboardingCredentialsPage() {
           <div className="mt-3 grid gap-3">
             <div className="grid gap-3 md:grid-cols-4">
               <Field label="Credential type" required error={errors.credential_type}>
-                <Select
-                  value={String(form.credential_type)}
-                  onValueChange={(v) => update("credential_type", v as CredentialType)}
-                >
+                <Select value={String(form.credential_type)} onValueChange={(v) => update("credential_type", v as CredentialType)}>
                   <SelectTrigger className={cn("border-zc-border", errors.credential_type ? "border-red-500" : "")}>
                     <SelectValue placeholder="Select" />
                   </SelectTrigger>
@@ -481,25 +544,29 @@ export default function HrStaffOnboardingCredentialsPage() {
                 </Select>
               </Field>
 
-              <Field label="Title / Name" help="e.g., MBBS, B.Sc Nursing, Aadhar" error={errors.title}>
+              <Field label="Title / Name" help="e.g., MBBS, B.Sc Nursing, Aadhaar">
                 <Input
-                  className={cn("border-zc-border", errors.title ? "border-red-500" : "")}
+                  className="border-zc-border"
                   value={String(form.title ?? "")}
                   onChange={(e) => update("title", e.target.value)}
                   placeholder="Optional"
                 />
               </Field>
 
-              <Field label="Issuing authority" help="e.g., State Medical Council" error={errors.issuing_authority}>
+              <Field label="Issuing authority" help="e.g., State Medical Council">
                 <Input
-                  className={cn("border-zc-border", errors.issuing_authority ? "border-red-500" : "")}
+                  className="border-zc-border"
                   value={String(form.issuing_authority ?? "")}
                   onChange={(e) => update("issuing_authority", e.target.value)}
                   placeholder="Optional"
                 />
               </Field>
 
-              <Field label="Credential / Reg. number" required={needsNumber(form.credential_type)} error={errors.credential_number}>
+              <Field
+                label="Credential / Reg. number"
+                required={needsNumber(form.credential_type)}
+                error={errors.credential_number}
+              >
                 <Input
                   className={cn("border-zc-border", errors.credential_number ? "border-red-500" : "")}
                   value={String(form.credential_number ?? "")}
@@ -518,7 +585,6 @@ export default function HrStaffOnboardingCredentialsPage() {
                   onChange={(e) => update("issued_on", e.target.value)}
                 />
               </Field>
-
               <Field label="Valid from" error={errors.valid_from}>
                 <Input
                   type="date"
@@ -527,7 +593,6 @@ export default function HrStaffOnboardingCredentialsPage() {
                   onChange={(e) => update("valid_from", e.target.value)}
                 />
               </Field>
-
               <Field label="Valid to" error={errors.valid_to}>
                 <Input
                   type="date"
@@ -536,8 +601,7 @@ export default function HrStaffOnboardingCredentialsPage() {
                   onChange={(e) => update("valid_to", e.target.value)}
                 />
               </Field>
-
-              <Field label="Verification status" help="Workflow will update later" error={errors.verification_status}>
+              <Field label="Verification status">
                 <Select
                   value={String(form.verification_status ?? "PENDING")}
                   onValueChange={(v) => update("verification_status", v as VerificationStatus)}
@@ -546,51 +610,46 @@ export default function HrStaffOnboardingCredentialsPage() {
                     <SelectValue placeholder="Select" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="PENDING">Pending</SelectItem>
-                    <SelectItem value="VERIFIED">Verified</SelectItem>
-                    <SelectItem value="REJECTED">Rejected</SelectItem>
-                    <SelectItem value="EXPIRED">Expired</SelectItem>
-                    <SelectItem value="RENEWAL_DUE">Renewal Due</SelectItem>
+                    <SelectItem value="PENDING">PENDING</SelectItem>
+                    <SelectItem value="VERIFIED">VERIFIED</SelectItem>
+                    <SelectItem value="REJECTED">REJECTED</SelectItem>
+                    <SelectItem value="EXPIRED">EXPIRED</SelectItem>
+                    <SelectItem value="RENEWAL_DUE">RENEWAL_DUE</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Evidence links" help="Comma-separated URLs/keys" error={errors.evidence_urls}>
-                <Input
-                  className="border-zc-border"
-                  value={evidenceCsv}
-                  onChange={(e) => {
-                    setEvidenceCsv(e.target.value);
-                    setDirty(true);
-                  }}
-                  placeholder="https://... , s3://... , file-key-123"
-                />
-              </Field>
-
-              <Field label="Verification notes" help="Optional reviewer notes" error={errors.verification_notes}>
+              <Field label="Verification notes" help={form.verification_status === "REJECTED" ? "Recommended when rejected" : "Optional"}>
                 <Textarea
                   className="border-zc-border"
                   value={String(form.verification_notes ?? "")}
                   onChange={(e) => update("verification_notes", e.target.value)}
-                  placeholder="Optional"
+                  placeholder="Optional notes for verifier…"
                 />
               </Field>
+
+              <div className="grid gap-2">
+                <Label className="text-xs text-zc-muted">Evidence files</Label>
+                <EvidenceUpload
+                  draftId={draftId}
+                  kind="IDENTITY_DOC"
+                  value={Array.isArray(form.evidence_urls) ? form.evidence_urls : []}
+                  onChange={(next) => setForm((p) => ({ ...p, evidence_urls: next }))}
+                />
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button variant="outline" className="border-zc-border" onClick={upsertCredential} disabled={loading}>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                className="bg-zc-accent text-white hover:bg-zc-accent/90"
+                onClick={upsertCredential}
+              >
                 {editingId ? "Update credential" : "Add credential"}
               </Button>
             </div>
-          </div>
-        </div>
-
-        <div className="rounded-md border border-zc-border bg-zc-panel/40 p-3 text-xs text-zc-muted">
-          <div className="font-medium text-zc-foreground">Next step</div>
-          <div className="mt-1">
-            Assignments: <span className="font-mono">/onboarding/assignments</span>
           </div>
         </div>
       </div>
@@ -598,6 +657,7 @@ export default function HrStaffOnboardingCredentialsPage() {
   );
 }
 
+/* ---------- UI helper ---------- */
 function Field({
   label,
   required,
@@ -623,93 +683,4 @@ function Field({
       {error ? <div className="text-xs text-red-500">{error}</div> : null}
     </div>
   );
-}
-
-function labelCredentialType(t: CredentialType) {
-  switch (t) {
-    case "MEDICAL_REGISTRATION":
-      return "Medical Registration";
-    case "NURSING_REGISTRATION":
-      return "Nursing Registration";
-    case "PHARMACY_REGISTRATION":
-      return "Pharmacy Registration";
-    case "PARAMEDICAL_REGISTRATION":
-      return "Paramedical Registration";
-    case "EDUCATION":
-      return "Education";
-    case "TRAINING":
-      return "Training";
-    case "EXPERIENCE":
-      return "Experience";
-    case "GOVT_ID":
-      return "Government ID";
-    case "IMMUNIZATION":
-      return "Immunization";
-    case "OTHER":
-      return "Other";
-    default:
-      return String(t);
-  }
-}
-
-function needsNumber(t: CredentialType) {
-  return (
-    t === "MEDICAL_REGISTRATION" ||
-    t === "NURSING_REGISTRATION" ||
-    t === "PHARMACY_REGISTRATION" ||
-    t === "PARAMEDICAL_REGISTRATION" ||
-    t === "GOVT_ID"
-  );
-}
-
-function makeId(): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c: any = globalThis.crypto;
-    if (c && typeof c.randomUUID === "function") return c.randomUUID();
-  } catch {
-    // ignore
-  }
-  return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
-function withDraftId(href: string, draftId: string | null): string {
-  if (!draftId) return href;
-  const u = new URL(href, "http://local");
-  u.searchParams.set("draftId", draftId);
-  return u.pathname + "?" + u.searchParams.toString();
-}
-
-function storageKey(draftId: string) {
-  return `hrStaffOnboardingDraft:${draftId}`;
-}
-
-function readDraft(draftId: string): StaffOnboardingDraft {
-  try {
-    const raw = localStorage.getItem(storageKey(draftId));
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    return parsed as StaffOnboardingDraft;
-  } catch {
-    return {};
-  }
-}
-
-function writeDraft(draftId: string, draft: StaffOnboardingDraft) {
-  try {
-    localStorage.setItem(storageKey(draftId), JSON.stringify(draft));
-  } catch {
-    // ignore
-  }
-}
-
-function isValidYmd(v: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
-  const d = new Date(v + "T00:00:00Z");
-  if (Number.isNaN(d.getTime())) return false;
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}` === v;
 }

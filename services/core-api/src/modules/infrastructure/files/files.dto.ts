@@ -1,7 +1,8 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { IsIn, IsString, Length, Matches } from "class-validator";
 
-export const STAFF_ASSET_KINDS = ["PROFILE_PHOTO", "SIGNATURE", "IDENTITY_DOC"] as const;
+export const STAFF_ASSET_KINDS = ["PROFILE_PHOTO", "SIGNATURE", "IDENTITY_DOC", "EVIDENCE"] as const;
+
 export type StaffAssetKind = (typeof STAFF_ASSET_KINDS)[number];
 
 /**

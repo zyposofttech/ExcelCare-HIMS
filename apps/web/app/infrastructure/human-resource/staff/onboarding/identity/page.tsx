@@ -20,6 +20,7 @@ import { toast } from "@/components/ui/use-toast";
 
 import { cn } from "@/lib/cn";
 import { apiFetch } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth/store";
 
 type IdentityDocType = "AADHAAR" | "PAN" | "PASSPORT" | "DRIVING_LICENSE" | "VOTER_ID" | "OTHER";
 type VerificationStatus = "PENDING" | "VERIFIED" | "REJECTED";
@@ -69,6 +70,11 @@ type UploadResp = {
   checksumSha256?: string;
 };
 
+type PreviewState = {
+  photoObjUrl: string | null;
+  signatureObjUrl: string | null;
+};
+
 const BASE = "/infrastructure/human-resource/staff/onboarding";
 
 const DOC_LABEL: Record<IdentityDocType, string> = {
@@ -94,6 +100,9 @@ export default function IdentityPage() {
   const sp = useSearchParams();
   const draftId = sp.get("draftId");
 
+  // ✅ Zustand token fallback (some flows might not have localStorage access_token populated)
+  const storeToken = useAuthStore((s) => s.token);
+
   const [loading, setLoading] = React.useState(true);
   const [dirty, setDirty] = React.useState(false);
   const [errors, setErrors] = React.useState<FieldErrorMap>({});
@@ -108,11 +117,171 @@ export default function IdentityPage() {
     notes: "",
   });
 
+  const [preview, setPreview] = React.useState<PreviewState>({
+    photoObjUrl: null,
+    signatureObjUrl: null,
+  });
+
   const [uploading, setUploading] = React.useState<{
     photo: boolean;
     sign: boolean;
     doc: Record<string, boolean>; // docId -> uploading
   }>({ photo: false, sign: false, doc: {} });
+
+  function getBearerToken(): string | null {
+    try {
+      if (typeof window !== "undefined") {
+        const t = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+        if (t) return t;
+      }
+    } catch {}
+    return storeToken ?? null;
+  }
+
+  function revokeObjUrl(u: string | null) {
+    if (!u) return;
+    try {
+      URL.revokeObjectURL(u);
+    } catch {}
+  }
+
+  async function fetchAsObjectUrl(url: string): Promise<string> {
+    const token = getBearerToken();
+    if (!token) throw new Error("Session expired. Please login again.");
+
+    const res = await fetch(url, {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "*/*",
+      },
+    });
+
+    if (!res.ok) {
+      // try to read JSON error
+      let msg = `Request failed (${res.status})`;
+      try {
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          const j = await res.json().catch(() => null);
+          msg = j?.message || j?.error || msg;
+        } else {
+          const t = await res.text().catch(() => "");
+          if (t) msg = t;
+        }
+      } catch {}
+      throw new Error(msg);
+    }
+
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  }
+
+  async function openSecure(url: string) {
+    try {
+      const obj = await fetchAsObjectUrl(url);
+      window.open(obj, "_blank", "noopener,noreferrer");
+      // keep alive briefly so the new tab can load it
+      window.setTimeout(() => revokeObjUrl(obj), 60_000);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Open failed",
+        description: err?.message ?? "Could not open file.",
+      });
+    }
+  }
+
+  // ✅ load previews when URLs exist (because <img src> cannot send Bearer)
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      const photoUrl = String(photo.photo_url || "").trim();
+      if (!photoUrl) {
+        setPreview((p) => {
+          if (p.photoObjUrl) revokeObjUrl(p.photoObjUrl);
+          return { ...p, photoObjUrl: null };
+        });
+        return;
+      }
+
+      try {
+        const obj = await fetchAsObjectUrl(photoUrl);
+        if (cancelled) {
+          revokeObjUrl(obj);
+          return;
+        }
+        setPreview((p) => {
+          if (p.photoObjUrl && p.photoObjUrl !== obj) revokeObjUrl(p.photoObjUrl);
+          return { ...p, photoObjUrl: obj };
+        });
+      } catch {
+        // keep silent; preview will show "No photo uploaded" style block
+        setPreview((p) => {
+          if (p.photoObjUrl) revokeObjUrl(p.photoObjUrl);
+          return { ...p, photoObjUrl: null };
+        });
+      }
+    }
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photo.photo_url]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      const signUrl = String(photo.signature_url || "").trim();
+      if (!signUrl) {
+        setPreview((p) => {
+          if (p.signatureObjUrl) revokeObjUrl(p.signatureObjUrl);
+          return { ...p, signatureObjUrl: null };
+        });
+        return;
+      }
+
+      try {
+        const obj = await fetchAsObjectUrl(signUrl);
+        if (cancelled) {
+          revokeObjUrl(obj);
+          return;
+        }
+        setPreview((p) => {
+          if (p.signatureObjUrl && p.signatureObjUrl !== obj) revokeObjUrl(p.signatureObjUrl);
+          return { ...p, signatureObjUrl: obj };
+        });
+      } catch {
+        setPreview((p) => {
+          if (p.signatureObjUrl) revokeObjUrl(p.signatureObjUrl);
+          return { ...p, signatureObjUrl: null };
+        });
+      }
+    }
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photo.signature_url]);
+
+  React.useEffect(() => {
+    return () => {
+      // cleanup previews on unmount
+      setPreview((p) => {
+        revokeObjUrl(p.photoObjUrl);
+        revokeObjUrl(p.signatureObjUrl);
+        return { photoObjUrl: null, signatureObjUrl: null };
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   React.useEffect(() => {
     if (!draftId) {
@@ -237,6 +406,9 @@ export default function IdentityPage() {
   async function uploadStaffAsset(kind: "PROFILE_PHOTO" | "SIGNATURE" | "IDENTITY_DOC", file: File): Promise<string> {
     if (!draftId) throw new Error("draftId missing");
 
+    const token = getBearerToken();
+    if (!token) throw new Error("Session expired. Please login again.");
+
     const max = 5 * 1024 * 1024;
     const mime = (file.type || "").toLowerCase();
 
@@ -250,10 +422,14 @@ export default function IdentityPage() {
     fd.append("kind", kind);
     fd.append("file", file);
 
+    // ✅ Force Authorization header (works even if token is only in Zustand)
     const res = await apiFetch<UploadResp>("/api/infrastructure/files/upload", {
       method: "POST",
       body: fd,
       showLoader: false,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     });
 
     if (!res?.url) throw new Error("Upload failed: server did not return URL.");
@@ -379,7 +555,11 @@ export default function IdentityPage() {
       description="Capture KYC + upload photo/signature + upload Aadhaar/PAN scans (URL generated automatically)."
       footer={
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <Button variant="outline" className="border-zc-border" onClick={() => router.push(withDraftId(`${BASE}/personal`, draftId) as any)}>
+          <Button
+            variant="outline"
+            className="border-zc-border"
+            onClick={() => router.push(withDraftId(`${BASE}/personal`, draftId) as any)}
+          >
             Back
           </Button>
 
@@ -468,14 +648,24 @@ export default function IdentityPage() {
 
               {photo.photo_url ? (
                 <div className="rounded-md border border-zc-border bg-zc-panel/40 p-2">
-                  <img src={String(photo.photo_url)} alt="Profile" className="h-28 w-28 rounded-md object-cover" />
+                  {/* ✅ use object URL preview so Bearer is not required by <img> */}
+                  {preview.photoObjUrl ? (
+                    <img src={preview.photoObjUrl} alt="Profile" className="h-28 w-28 rounded-md object-cover" />
+                  ) : (
+                    <div className="h-28 w-28 rounded-md border border-zc-border bg-zc-panel/40" />
+                  )}
+
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Button type="button" variant="outline" className="h-8 border-zc-border" onClick={() => updatePhoto("photo_url", "")}>
                       Remove
                     </Button>
-                    <a href={String(photo.photo_url)} target="_blank" rel="noreferrer" className="text-xs text-zc-accent underline underline-offset-2">
+                    <button
+                      type="button"
+                      onClick={() => openSecure(String(photo.photo_url))}
+                      className="text-xs text-zc-accent underline underline-offset-2"
+                    >
                       Open
-                    </a>
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -506,18 +696,27 @@ export default function IdentityPage() {
 
               {photo.signature_url ? (
                 <div className="rounded-md border border-zc-border bg-zc-panel/40 p-2">
-                  <img
-                    src={String(photo.signature_url)}
-                    alt="Signature"
-                    className="h-28 w-full max-w-[320px] rounded-md object-contain bg-white"
-                  />
+                  {preview.signatureObjUrl ? (
+                    <img
+                      src={preview.signatureObjUrl}
+                      alt="Signature"
+                      className="h-28 w-full max-w-[320px] rounded-md object-contain bg-white"
+                    />
+                  ) : (
+                    <div className="h-28 w-full max-w-[320px] rounded-md border border-zc-border bg-white" />
+                  )}
+
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Button type="button" variant="outline" className="h-8 border-zc-border" onClick={() => updatePhoto("signature_url", "")}>
                       Remove
                     </Button>
-                    <a href={String(photo.signature_url)} target="_blank" rel="noreferrer" className="text-xs text-zc-accent underline underline-offset-2">
+                    <button
+                      type="button"
+                      onClick={() => openSecure(String(photo.signature_url))}
+                      className="text-xs text-zc-accent underline underline-offset-2"
+                    >
                       Open
-                    </a>
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -632,7 +831,7 @@ export default function IdentityPage() {
                       </div>
                     </div>
 
-                    {/* ✅ Upload Aadhaar/PAN scan (fixed UI) */}
+                    {/* ✅ Upload Aadhaar/PAN scan */}
                     <div className="mt-3 rounded-md border border-zc-border bg-zc-panel p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="text-xs font-medium text-zc-foreground">Upload document scan</div>
@@ -660,14 +859,13 @@ export default function IdentityPage() {
                             <div key={url} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zc-border bg-zc-panel/40 px-3 py-2">
                               <div className="min-w-0 text-xs text-zc-muted truncate">{url}</div>
                               <div className="flex items-center gap-2">
-                                <a
-                                  href={url}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                <button
+                                  type="button"
+                                  onClick={() => openSecure(url)}
                                   className="text-xs text-zc-accent underline underline-offset-2"
                                 >
                                   Open
-                                </a>
+                                </button>
                                 <Button
                                   type="button"
                                   variant="outline"

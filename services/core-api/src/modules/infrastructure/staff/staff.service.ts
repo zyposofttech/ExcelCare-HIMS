@@ -159,7 +159,7 @@ function guessNationalIdType(raw: string): "AADHAAR" | "PAN" | "PASSPORT" | "OTH
 
 @Injectable()
 export class StaffService {
-  constructor(private readonly ctx: InfraContextService) {}
+  constructor(private readonly ctx: InfraContextService) { }
 
   private allowedBranchIds(principal: Principal): string[] {
     if (principal.roleScope === "GLOBAL") return [];
@@ -484,14 +484,14 @@ export class StaffService {
     // Profile completeness: include role bindings (multi-branch RBAC) for Staff-managed users
     const roleBindings = row.user?.id
       ? await this.ctx.prisma.userRoleBinding.findMany({
-          where: { userId: row.user.id },
-          include: {
-            branch: { select: { id: true, code: true, name: true } },
-            roleVersion: { include: { roleTemplate: true } },
-            staffAssignment: { select: { id: true, branchId: true, isPrimary: true, status: true, effectiveFrom: true, effectiveTo: true } },
-          },
-          orderBy: [{ isPrimary: "desc" }, { branchId: "asc" }],
-        })
+        where: { userId: row.user.id },
+        include: {
+          branch: { select: { id: true, code: true, name: true } },
+          roleVersion: { include: { roleTemplate: true } },
+          staffAssignment: { select: { id: true, branchId: true, isPrimary: true, status: true, effectiveFrom: true, effectiveTo: true } },
+        },
+        orderBy: [{ isPrimary: "desc" }, { branchId: "asc" }],
+      })
       : [];
 
     const legacyStructuredInNotes = !(row as any).personalDetails && !!tryExtractStructuredFromNotes((row as any).notes ?? null);
@@ -550,9 +550,15 @@ export class StaffService {
     const nextPhone = nextPhoneRaw ? String(nextPhoneRaw).trim() : null;
 
     // DPDP-safe minimal collection: require at least one contact method.
-    if (!nextEmail && !nextPhone) {
+    const effectiveOnboarding =
+      dto.onboardingStatus ?? (existing as any).onboardingStatus ?? "ACTIVE";
+
+    const allowMissingContact = effectiveOnboarding === "DRAFT";
+
+    if (!allowMissingContact && !nextEmail && !nextPhone) {
       throw new BadRequestException("Either email or phone is required");
     }
+
 
     const data: any = {
       // legacy flat fields are still supported
@@ -779,25 +785,25 @@ export class StaffService {
 
     const identHits = idQueries.length
       ? await this.ctx.prisma.staffIdentifier.findMany({
-          where: {
-            OR: idQueries.map((q) => ({ type: q.type as any, valueHash: q.valueHash })),
-          },
-          include: {
-            staff: {
-              select: {
-                id: true,
-                empCode: true,
-                name: true,
-                phone: true,
-                email: true,
-                hprId: true,
-                status: true,
-                isActive: true,
-              },
+        where: {
+          OR: idQueries.map((q) => ({ type: q.type as any, valueHash: q.valueHash })),
+        },
+        include: {
+          staff: {
+            select: {
+              id: true,
+              empCode: true,
+              name: true,
+              phone: true,
+              email: true,
+              hprId: true,
+              status: true,
+              isActive: true,
             },
           },
-          take: 20,
-        })
+        },
+        take: 20,
+      })
       : [];
 
     const byId = new Map<string, any>();
@@ -822,7 +828,7 @@ export class StaffService {
       })),
     };
   }
-    async createStaffMaster(principal: Principal, dto: StaffCreateMasterDto) {
+  async createStaffMaster(principal: Principal, dto: StaffCreateMasterDto) {
     const empCode = canonicalizeCode(dto.employee_id);
 
     const pd = dto.personal_details;
@@ -911,12 +917,12 @@ export class StaffService {
     const md = dto.medical_details;
     const medicalDetails = isMedical
       ? {
-          issuing_council: md?.issuing_council ?? null,
-          specialization: md?.specialization ?? null,
-          qualification: md?.qualification ?? null,
-          clinical_privileges: md?.clinical_privileges ?? [],
-          license_last4: md?.license_number ? last4(normalizeIdentifierValue("OTHER", md.license_number)) : null,
-        }
+        issuing_council: md?.issuing_council ?? null,
+        specialization: md?.specialization ?? null,
+        qualification: md?.qualification ?? null,
+        clinical_privileges: md?.clinical_privileges ?? [],
+        license_last4: md?.license_number ? last4(normalizeIdentifierValue("OTHER", md.license_number)) : null,
+      }
       : null;
 
     const systemAccess = dto.system_access ?? null;
@@ -999,6 +1005,32 @@ export class StaffService {
         provisionUser: "POST /infrastructure/staff/:staffId/provision-user",
       },
     };
+  }
+  async createStaffDraft(principal: Principal) {
+    const tempCode = `DRAFT-${Date.now().toString().slice(-8)}-${Math.random()
+      .toString(16)
+      .slice(2, 6)
+      .toUpperCase()}`.slice(0, 32);
+
+    const staff = await this.ctx.prisma.staff.create({
+      data: {
+        empCode: tempCode,
+        name: "Draft Staff",
+        designation: "STAFF",
+        category: "NON_MEDICAL",
+        engagementType: "EMPLOYEE",
+        status: "ACTIVE",
+        onboardingStatus: "DRAFT",
+        isActive: true,
+        personalDetails: {},
+        contactDetails: {},
+        employmentDetails: {},
+        medicalDetails: {},
+        systemAccess: {},
+      } as any,
+    });
+
+    return { ok: true, staffId: staff.id };
   }
 
   // ---------------- Onboarding (Staff master + required assignments) ----------------
@@ -1213,10 +1245,10 @@ export class StaffService {
 
     const identifierHits = identifiersPrepared.length
       ? await this.ctx.prisma.staffIdentifier.findMany({
-          where: { OR: identifiersPrepared.map((i) => ({ type: i.type as any, valueHash: i.valueHash })) },
-          select: { staffId: true, type: true, valueLast4: true },
-          take: 20,
-        })
+        where: { OR: identifiersPrepared.map((i) => ({ type: i.type as any, valueHash: i.valueHash })) },
+        select: { staffId: true, type: true, valueLast4: true },
+        take: 20,
+      })
       : [];
 
     if (identifierHits.length) {
@@ -1306,16 +1338,16 @@ export class StaffService {
 
       await this.ctx.audit.log(
         {
-        branchId: null,
-        actorUserId: principal.userId,
-        action: "STAFF_ONBOARD",
-        entity: "Staff",
-        entityId: staff.id,
-        meta: {
-          staff: { empCode, name: dto.name, category: dto.category },
-          assignments: dto.assignments,
-          identifiers: identifiersPrepared.map((i) => ({ type: i.type, valueLast4: i.valueLast4 })),
-        },
+          branchId: null,
+          actorUserId: principal.userId,
+          action: "STAFF_ONBOARD",
+          entity: "Staff",
+          entityId: staff.id,
+          meta: {
+            staff: { empCode, name: dto.name, category: dto.category },
+            assignments: dto.assignments,
+            identifiers: identifiersPrepared.map((i) => ({ type: i.type, valueLast4: i.valueLast4 })),
+          },
         },
         tx,
       );
@@ -1446,10 +1478,10 @@ export class StaffService {
       const nextFrom =
         dto.effectiveFrom !== undefined
           ? (() => {
-              const d = parseDate(dto.effectiveFrom);
-              if (!d) throw new BadRequestException("Invalid date for effectiveFrom");
-              return d;
-            })()
+            const d = parseDate(dto.effectiveFrom);
+            if (!d) throw new BadRequestException("Invalid date for effectiveFrom");
+            return d;
+          })()
           : new Date(existing.effectiveFrom);
 
       const nextTo =

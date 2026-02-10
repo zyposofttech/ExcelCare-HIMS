@@ -97,6 +97,45 @@ type FieldErrorMap = Record<string, string>;
 
 const BASE = "/infrastructure/human-resource/staff/onboarding";
 
+const INDIAN_STATES = [
+  "Andhra Pradesh",
+  "Arunachal Pradesh",
+  "Assam",
+  "Bihar",
+  "Chhattisgarh",
+  "Goa",
+  "Gujarat",
+  "Haryana",
+  "Himachal Pradesh",
+  "Jharkhand",
+  "Karnataka",
+  "Kerala",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Manipur",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Odisha",
+  "Punjab",
+  "Rajasthan",
+  "Sikkim",
+  "Tamil Nadu",
+  "Telangana",
+  "Tripura",
+  "Uttar Pradesh",
+  "Uttarakhand",
+  "West Bengal",
+  "Andaman and Nicobar Islands",
+  "Chandigarh",
+  "Dadra and Nagar Haveli and Daman and Diu",
+  "Delhi",
+  "Jammu and Kashmir",
+  "Ladakh",
+  "Lakshadweep",
+  "Puducherry",
+];
+
 export default function HrStaffOnboardingPersonalMergedPage() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -295,6 +334,47 @@ export default function HrStaffOnboardingPersonalMergedPage() {
     }
   }
 
+  function setFieldError(key: string, message?: string | null) {
+    setErrors((prev) => {
+      const next = { ...prev };
+      if (message) next[key] = message;
+      else delete next[key];
+      return next;
+    });
+  }
+
+  function validateEmailField(key: string, value: string | undefined, required: boolean, label: string) {
+    const msg = getEmailError(value, required, label);
+    setFieldError(key, msg);
+  }
+
+  function validatePhoneField(key: string, value: string | undefined, required: boolean, label: string) {
+    const msg = getPhoneError(value, required, label);
+    setFieldError(key, msg);
+  }
+
+  function validateEmergencyGroup(
+    next?: Partial<NonNullable<ContactDetailsDraft["emergency_contact"]>>,
+  ) {
+    const base = contact.emergency_contact ?? {};
+    const merged = { ...base, ...(next ?? {}) };
+    const emgName = String(merged?.name ?? "").trim();
+    const emgRelation = String(merged?.relation ?? "").trim();
+    const emgPhone = String(merged?.phone ?? "").trim();
+    const emgAny = !!(emgName || emgRelation || emgPhone);
+
+    if (!emgAny) {
+      setFieldError("emergency_contact.name", null);
+      setFieldError("emergency_contact.relation", null);
+      setFieldError("emergency_contact.phone", null);
+      return;
+    }
+
+    setFieldError("emergency_contact.name", emgName ? null : "Emergency contact name is required.");
+    setFieldError("emergency_contact.relation", emgRelation ? null : "Emergency contact relation is required.");
+    setFieldError("emergency_contact.phone", getPhoneError(emgPhone, true, "Emergency contact phone"));
+  }
+
   // ----- validation -----
   function validateAll(): FieldErrorMap {
     const e: FieldErrorMap = {};
@@ -303,36 +383,43 @@ export default function HrStaffOnboardingPersonalMergedPage() {
     if (!personal.title) e.title = "Title is required.";
     if (!String(personal.first_name ?? "").trim()) e.first_name = "First name is required.";
     if (!String(personal.last_name ?? "").trim()) e.last_name = "Last name is required.";
-    if (!String(personal.display_name ?? "").trim()) e.display_name = "Display name is required.";
     if (!String(personal.date_of_birth ?? "").trim()) e.date_of_birth = "Date of birth is required.";
     if (personal.date_of_birth && !isValidYmd(personal.date_of_birth)) e.date_of_birth = "Invalid date.";
     if (personal.date_of_birth && computeAge(personal.date_of_birth) === null) e.date_of_birth = "Date is out of range.";
     if (!personal.gender) e.gender = "Gender is required.";
 
     // Contact required by workflow: phone + email
-    if (!String(contact.mobile_primary ?? "").trim()) e.mobile_primary = "Primary mobile is required.";
-    else if (!isPhone10(contact.mobile_primary ?? "")) e.mobile_primary = "Primary mobile must be exactly 10 digits.";
+    const primaryPhoneErr = getPhoneError(contact.mobile_primary, true, "Primary mobile");
+    if (primaryPhoneErr) e.mobile_primary = primaryPhoneErr;
 
-    if (!String(contact.email_official ?? "").trim()) e.email_official = "Official email is required.";
-    else if (!isEmail(contact.email_official ?? "")) e.email_official = "Official email format is invalid.";
+    const officialEmailErr = getEmailError(contact.email_official, true, "Official email");
+    if (officialEmailErr) e.email_official = officialEmailErr;
 
     // Optional validations
-    if (String(contact.mobile_secondary ?? "").trim() && !isPhone10(contact.mobile_secondary ?? "")) {
-      e.mobile_secondary = "Secondary mobile must be exactly 10 digits.";
-    }
-    if (String(contact.email_personal ?? "").trim() && !isEmail(contact.email_personal ?? "")) {
-      e.email_personal = "Personal email format is invalid.";
-    }
+    const secondaryPhoneErr = getPhoneError(contact.mobile_secondary, false, "Secondary mobile");
+    if (secondaryPhoneErr) e.mobile_secondary = secondaryPhoneErr;
+
+    const personalEmailErr = getEmailError(contact.email_personal, false, "Personal email");
+    if (personalEmailErr) e.email_personal = personalEmailErr;
+
     const emg = contact.emergency_contact ?? null;
-    const emgAny = !!(emg?.name?.trim() || emg?.relation?.trim() || emg?.phone?.trim());
-    if (emgAny && emg?.phone?.trim() && !isPhone10(emg.phone)) {
-      e["emergency_contact.phone"] = "Emergency phone must be 10 digits.";
+    const emgName = String(emg?.name ?? "").trim();
+    const emgRelation = String(emg?.relation ?? "").trim();
+    const emgPhone = String(emg?.phone ?? "").trim();
+    const emgAny = !!(emgName || emgRelation || emgPhone);
+    if (emgAny) {
+      if (!emgName) e["emergency_contact.name"] = "Emergency contact name is required.";
+      if (!emgRelation) e["emergency_contact.relation"] = "Emergency contact relation is required.";
+      const emgPhoneErr = getPhoneError(emgPhone, true, "Emergency contact phone");
+      if (emgPhoneErr) e["emergency_contact.phone"] = emgPhoneErr;
     }
 
     // Address required (structured current always, permanent if not sameAsCurrent)
     if (!String(currentAddr.address_line1 ?? "").trim()) e["current.address_line1"] = "Address line 1 is required.";
     if (!String(currentAddr.city ?? "").trim()) e["current.city"] = "City is required.";
+    else if (!isAlphaSpace(currentAddr.city ?? "")) e["current.city"] = "City must contain only letters.";
     if (!String(currentAddr.state ?? "").trim()) e["current.state"] = "State is required.";
+    else if (!isIndianState(currentAddr.state ?? "")) e["current.state"] = "Select a valid Indian state.";
     if (!String(currentAddr.country ?? "").trim()) e["current.country"] = "Country is required.";
     if (!String(currentAddr.pincode ?? "").trim()) e["current.pincode"] = "Pincode is required.";
     else if (!isPincode(currentAddr.pincode ?? "")) e["current.pincode"] = "Pincode must be 6 digits.";
@@ -340,7 +427,9 @@ export default function HrStaffOnboardingPersonalMergedPage() {
     if (!sameAsCurrent) {
       if (!String(permanentAddr.address_line1 ?? "").trim()) e["permanent.address_line1"] = "Address line 1 is required.";
       if (!String(permanentAddr.city ?? "").trim()) e["permanent.city"] = "City is required.";
+      else if (!isAlphaSpace(permanentAddr.city ?? "")) e["permanent.city"] = "City must contain only letters.";
       if (!String(permanentAddr.state ?? "").trim()) e["permanent.state"] = "State is required.";
+      else if (!isIndianState(permanentAddr.state ?? "")) e["permanent.state"] = "Select a valid Indian state.";
       if (!String(permanentAddr.country ?? "").trim()) e["permanent.country"] = "Country is required.";
       if (!String(permanentAddr.pincode ?? "").trim()) e["permanent.pincode"] = "Pincode is required.";
       else if (!isPincode(permanentAddr.pincode ?? "")) e["permanent.pincode"] = "Pincode must be 6 digits.";
@@ -470,10 +559,9 @@ export default function HrStaffOnboardingPersonalMergedPage() {
       footer={
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Button
-            variant="outline"
-            className="border-zc-border"
+            variant="ghost"
+            className="text-zc-muted hover:text-zc-foreground"
             onClick={() => router.push("/infrastructure/human-resource/staff" as any)}
-
           >
             Back
           </Button>
@@ -675,8 +763,11 @@ export default function HrStaffOnboardingPersonalMergedPage() {
                 <Input
                   className={cn("border-zc-border", errors.mobile_primary ? "border-red-500" : "")}
                   value={contact.mobile_primary ?? ""}
-                  onChange={(e) => updateContact("mobile_primary", e.target.value)}
+                  onChange={(e) => updateContact("mobile_primary", normalizePhoneInput(e.target.value))}
+                  onBlur={(e) => validatePhoneField("mobile_primary", e.currentTarget.value, true, "Primary mobile")}
                   placeholder="10-digit mobile"
+                  inputMode="numeric"
+                  maxLength={10}
                 />
               </Field>
 
@@ -685,6 +776,7 @@ export default function HrStaffOnboardingPersonalMergedPage() {
                   className={cn("border-zc-border", errors.email_official ? "border-red-500" : "")}
                   value={contact.email_official ?? ""}
                   onChange={(e) => updateContact("email_official", e.target.value)}
+                  onBlur={(e) => validateEmailField("email_official", e.currentTarget.value, true, "Official email")}
                   placeholder="name@hospital.com"
                 />
               </Field>
@@ -695,8 +787,11 @@ export default function HrStaffOnboardingPersonalMergedPage() {
                 <Input
                   className={cn("border-zc-border", errors.mobile_secondary ? "border-red-500" : "")}
                   value={contact.mobile_secondary ?? ""}
-                  onChange={(e) => updateContact("mobile_secondary", e.target.value)}
+                  onChange={(e) => updateContact("mobile_secondary", normalizePhoneInput(e.target.value))}
+                  onBlur={(e) => validatePhoneField("mobile_secondary", e.currentTarget.value, false, "Secondary mobile")}
                   placeholder="Optional"
+                  inputMode="numeric"
+                  maxLength={10}
                 />
               </Field>
 
@@ -705,6 +800,7 @@ export default function HrStaffOnboardingPersonalMergedPage() {
                   className={cn("border-zc-border", errors.email_personal ? "border-red-500" : "")}
                   value={contact.email_personal ?? ""}
                   onChange={(e) => updateContact("email_personal", e.target.value)}
+                  onBlur={(e) => validateEmailField("email_personal", e.currentTarget.value, false, "Personal email")}
                   placeholder="Optional"
                 />
               </Field>
@@ -777,18 +873,24 @@ export default function HrStaffOnboardingPersonalMergedPage() {
                   <Input
                     className={cn("border-zc-border", errors["current.city"] ? "border-red-500" : "")}
                     value={currentAddr.city ?? ""}
-                    onChange={(e) => updateCurrent("city", e.target.value)}
+                    onChange={(e) => updateCurrent("city", normalizeCityInput(e.target.value))}
                     placeholder="City"
                   />
                 </Field>
 
                 <Field label="State" required error={errors["current.state"]}>
-                  <Input
-                    className={cn("border-zc-border", errors["current.state"] ? "border-red-500" : "")}
-                    value={currentAddr.state ?? ""}
-                    onChange={(e) => updateCurrent("state", e.target.value)}
-                    placeholder="State"
-                  />
+                  <Select value={currentAddr.state ?? ""} onValueChange={(v) => updateCurrent("state", v)}>
+                    <SelectTrigger className={cn("border-zc-border", errors["current.state"] ? "border-red-500" : "")}>
+                      <SelectValue placeholder="Select state" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-64 overflow-y-auto">
+                      {INDIAN_STATES.map((state) => (
+                        <SelectItem key={state} value={state}>
+                          {state}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
 
                 <Field label="Country" required error={errors["current.country"]}>
@@ -801,14 +903,15 @@ export default function HrStaffOnboardingPersonalMergedPage() {
                 </Field>
 
                 <Field label="Pincode" required error={errors["current.pincode"]}>
-                  <Input
-                    className={cn("border-zc-border", errors["current.pincode"] ? "border-red-500" : "")}
-                    value={currentAddr.pincode ?? ""}
-                    onChange={(e) => updateCurrent("pincode", e.target.value)}
-                    placeholder="6 digits"
-                    inputMode="numeric"
-                  />
-                </Field>
+                <Input
+                  className={cn("border-zc-border", errors["current.pincode"] ? "border-red-500" : "")}
+                  value={currentAddr.pincode ?? ""}
+                  onChange={(e) => updateCurrent("pincode", normalizePincodeInput(e.target.value))}
+                  placeholder="6 digits"
+                  inputMode="numeric"
+                  maxLength={6}
+                />
+              </Field>
               </div>
             </div>
 
@@ -843,21 +946,27 @@ export default function HrStaffOnboardingPersonalMergedPage() {
 
                 <div className="grid gap-3 md:grid-cols-4">
                   <Field label="City" required error={errors["permanent.city"]}>
-                    <Input
-                      className={cn("border-zc-border", errors["permanent.city"] ? "border-red-500" : "")}
-                      value={permanentAddr.city ?? ""}
-                      onChange={(e) => updatePermanent("city", e.target.value)}
-                      placeholder="City"
-                    />
-                  </Field>
+                  <Input
+                    className={cn("border-zc-border", errors["permanent.city"] ? "border-red-500" : "")}
+                    value={permanentAddr.city ?? ""}
+                    onChange={(e) => updatePermanent("city", normalizeCityInput(e.target.value))}
+                    placeholder="City"
+                  />
+                </Field>
 
                   <Field label="State" required error={errors["permanent.state"]}>
-                    <Input
-                      className={cn("border-zc-border", errors["permanent.state"] ? "border-red-500" : "")}
-                      value={permanentAddr.state ?? ""}
-                      onChange={(e) => updatePermanent("state", e.target.value)}
-                      placeholder="State"
-                    />
+                    <Select value={permanentAddr.state ?? ""} onValueChange={(v) => updatePermanent("state", v)}>
+                      <SelectTrigger className={cn("border-zc-border", errors["permanent.state"] ? "border-red-500" : "")}>
+                        <SelectValue placeholder="Select state" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-64 overflow-y-auto">
+                        {INDIAN_STATES.map((state) => (
+                          <SelectItem key={state} value={state}>
+                            {state}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
 
                   <Field label="Country" required error={errors["permanent.country"]}>
@@ -870,14 +979,15 @@ export default function HrStaffOnboardingPersonalMergedPage() {
                   </Field>
 
                   <Field label="Pincode" required error={errors["permanent.pincode"]}>
-                    <Input
-                      className={cn("border-zc-border", errors["permanent.pincode"] ? "border-red-500" : "")}
-                      value={permanentAddr.pincode ?? ""}
-                      onChange={(e) => updatePermanent("pincode", e.target.value)}
-                      placeholder="6 digits"
-                      inputMode="numeric"
-                    />
-                  </Field>
+                  <Input
+                    className={cn("border-zc-border", errors["permanent.pincode"] ? "border-red-500" : "")}
+                    value={permanentAddr.pincode ?? ""}
+                    onChange={(e) => updatePermanent("pincode", normalizePincodeInput(e.target.value))}
+                    placeholder="6 digits"
+                    inputMode="numeric"
+                    maxLength={6}
+                  />
+                </Field>
                 </div>
               </div>
             ) : (
@@ -899,6 +1009,7 @@ export default function HrStaffOnboardingPersonalMergedPage() {
                   className={cn("border-zc-border", errors["emergency_contact.name"] ? "border-red-500" : "")}
                   value={contact.emergency_contact?.name ?? ""}
                   onChange={(e) => updateEmergency("name", e.target.value)}
+                  onBlur={(e) => validateEmergencyGroup({ name: e.currentTarget.value })}
                   placeholder="Optional"
                 />
               </Field>
@@ -908,6 +1019,7 @@ export default function HrStaffOnboardingPersonalMergedPage() {
                   className={cn("border-zc-border", errors["emergency_contact.relation"] ? "border-red-500" : "")}
                   value={contact.emergency_contact?.relation ?? ""}
                   onChange={(e) => updateEmergency("relation", e.target.value)}
+                  onBlur={(e) => validateEmergencyGroup({ relation: e.currentTarget.value })}
                   placeholder="Optional"
                 />
               </Field>
@@ -916,8 +1028,11 @@ export default function HrStaffOnboardingPersonalMergedPage() {
                 <Input
                   className={cn("border-zc-border", errors["emergency_contact.phone"] ? "border-red-500" : "")}
                   value={contact.emergency_contact?.phone ?? ""}
-                  onChange={(e) => updateEmergency("phone", e.target.value)}
+                  onChange={(e) => updateEmergency("phone", normalizePhoneInput(e.target.value))}
+                  onBlur={(e) => validateEmergencyGroup({ phone: e.currentTarget.value })}
                   placeholder="Optional"
+                  inputMode="numeric"
+                  maxLength={10}
                 />
               </Field>
             </div>
@@ -1009,14 +1124,29 @@ function isEmail(v: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || "").trim().toLowerCase());
 }
 
+function getEmailError(value: string | undefined, required: boolean, label: string): string | null {
+  const v = String(value ?? "").trim();
+  if (!v) return required ? `${label} is required.` : null;
+  if (!isEmail(v)) return `${label} format is invalid.`;
+  return null;
+}
+
 function normalizePhone(v: string | undefined) {
   return String(v || "")
     .replace(/[^\d]/g, "")
     .trim();
 }
 
-function isPhone10(v: string) {
-  return /^\d{10}$/.test(normalizePhone(v));
+function normalizePhoneInput(v: string | undefined) {
+  return normalizePhone(v).slice(0, 10);
+}
+
+function getPhoneError(value: string | undefined, required: boolean, label: string): string | null {
+  const v = normalizePhone(value);
+  if (!v) return required ? `${label} is required.` : null;
+  if (!/^[6-9]/.test(v)) return `${label} must start with 6, 7, 8, or 9.`;
+  if (v.length !== 10) return `${label} must be exactly 10 digits.`;
+  return null;
 }
 
 function normalizePincode(v: string | undefined) {
@@ -1025,8 +1155,24 @@ function normalizePincode(v: string | undefined) {
     .trim();
 }
 
+function normalizePincodeInput(v: string | undefined) {
+  return normalizePincode(v).slice(0, 6);
+}
+
 function isPincode(v: string) {
   return /^\d{6}$/.test(normalizePincode(v));
+}
+
+function normalizeCityInput(v: string | undefined) {
+  return String(v || "").replace(/[^a-zA-Z ]/g, "");
+}
+
+function isAlphaSpace(v: string | undefined) {
+  return /^[a-zA-Z ]+$/.test(String(v ?? "").trim());
+}
+
+function isIndianState(v: string | undefined) {
+  return INDIAN_STATES.includes(String(v ?? "").trim());
 }
 
 // ---------- personal helpers ----------

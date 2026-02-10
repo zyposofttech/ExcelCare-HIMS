@@ -22,31 +22,22 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/cn";
+import { apiFetch } from "@/lib/api";
 
 import { STAFF_ONBOARDING_STEPS, StaffOnboardingStepId } from "../_lib/steps";
 
 type Props = {
   title: string;
   description?: string;
-
   stepId?: StaffOnboardingStepId;
   stepKey?: string;
-
   draftId?: string;
   onSaveDraft?: () => void | Promise<void>;
-
   footer?: React.ReactNode;
   children: React.ReactNode;
 };
 
-function newDraftId(): string {
-  const c: any = typeof crypto !== "undefined" ? crypto : null;
-  if (c?.randomUUID) return c.randomUUID();
-  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
 function deriveRoots(pathname: string | null) {
-  // /infrastructure/.../staff/onboarding/<step>
   const p = pathname ?? "";
   const idx = p.indexOf("/onboarding");
   const staffRoot = idx > 0 ? p.slice(0, idx) : "/infrastructure/human-resource/staff";
@@ -67,6 +58,39 @@ const STEP_ICONS: Partial<Record<StaffOnboardingStepId, React.ComponentType<{ cl
   review: CheckCircle2,
   done: CheckCircle2,
 };
+
+function storageKey(draftId: string) {
+  return `hrStaffOnboardingDraft:${draftId}`;
+}
+
+function readLocalDraft(draftId: string): any {
+  try {
+    const raw = localStorage.getItem(storageKey(draftId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function migrateLocalDraft(oldId: string, newId: string) {
+  try {
+    const raw = localStorage.getItem(storageKey(oldId));
+    if (!raw) return;
+    localStorage.setItem(storageKey(newId), raw);
+    localStorage.removeItem(storageKey(oldId));
+  } catch {
+    // ignore
+  }
+}
+
+function mapDob(pd: any) {
+  if (!pd || typeof pd !== "object") return pd;
+  // your Personal step saves date_of_birth but Review expects dob
+  if (!pd.dob && pd.date_of_birth) return { ...pd, dob: pd.date_of_birth };
+  return pd;
+}
 
 export function OnboardingShell({
   title,
@@ -89,23 +113,78 @@ export function OnboardingShell({
   const { staffRoot } = React.useMemo(() => deriveRoots(pathname), [pathname]);
 
   const [draftId, setDraftId] = React.useState<string>(draftIdProp ?? sp.get("draftId") ?? "");
+  const [initializing, setInitializing] = React.useState(false);
 
-  // ✅ If draftId missing (because you removed Start), create one and rewrite URL ONCE
+  // ✅ Ensure draftId always maps to a REAL server staffId
   React.useEffect(() => {
-    if (draftId) return;
+    if (draftId || initializing) return;
 
-    const id = newDraftId();
-    setDraftId(id);
+    async function initDraft() {
+      setInitializing(true);
+      try {
+        const created = await apiFetch<{ staffId: string }>(`/api/infrastructure/staff/drafts`, {
+          method: "POST",
+          body: {},
+        });
+        if (!created?.staffId) throw new Error("No staffId returned");
 
-    // preserve current path + other params, just inject draftId
-    const url = new URL(window.location.href);
-    url.searchParams.set("draftId", id);
-    router.replace(url.pathname + "?" + url.searchParams.toString() as any);
+        setDraftId(created.staffId);
 
-    toast({
-      title: "Draft initialized",
-      description: "Created a new onboarding draft.",
-    });
+        const url = new URL(window.location.href);
+        url.searchParams.set("draftId", created.staffId);
+        router.replace((url.pathname + "?" + url.searchParams.toString()) as any);
+
+        toast({ title: "Draft initialized", description: "Created a new staff draft." });
+      } catch (e: any) {
+        toast({ variant: "destructive", title: "Draft init failed", description: e?.message ?? "Could not create draft." });
+      } finally {
+        setInitializing(false);
+      }
+    }
+
+    initDraft();
+  }, [draftId, initializing, router, toast]);
+
+  // ✅ If URL draftId exists but server doesn’t have it, create real draft and migrate local data
+  React.useEffect(() => {
+    if (!draftId) return;
+    let cancelled = false;
+
+    async function validateDraft() {
+      try {
+        await apiFetch(`/api/infrastructure/staff/${encodeURIComponent(draftId)}`);
+      } catch {
+        // server doesn't know this id => create a new one and migrate localStorage
+        try {
+          const created = await apiFetch<{ staffId: string }>(`/api/infrastructure/staff/drafts`, {
+            method: "POST",
+            body: {},
+          });
+          if (!created?.staffId) throw new Error("No staffId returned");
+
+          if (cancelled) return;
+
+          migrateLocalDraft(draftId, created.staffId);
+          setDraftId(created.staffId);
+
+          const url = new URL(window.location.href);
+          url.searchParams.set("draftId", created.staffId);
+          router.replace((url.pathname + "?" + url.searchParams.toString()) as any);
+
+          toast({
+            title: "Draft repaired",
+            description: "The previous draftId was invalid. We created a new server draft and migrated your local progress.",
+          });
+        } catch (e: any) {
+          toast({ variant: "destructive", title: "Draft repair failed", description: e?.message ?? "Could not repair draft." });
+        }
+      }
+    }
+
+    validateDraft();
+    return () => {
+      cancelled = true;
+    };
   }, [draftId, router, toast]);
 
   const goTo = React.useCallback(
@@ -113,25 +192,42 @@ export function OnboardingShell({
       const step = STAFF_ONBOARDING_STEPS.find((s) => s.id === nextStepId);
       if (!step) return;
 
-      // draftId should exist, but in case user clicks too fast:
-      const id = draftId || newDraftId();
-      if (!draftId) setDraftId(id);
-
-      const href = `${step.href}?draftId=${encodeURIComponent(id)}`;
+      if (!draftId) return;
+      const href = `${step.href}?draftId=${encodeURIComponent(draftId)}`;
       router.push(href as any);
     },
     [draftId, router],
   );
 
+  // ✅ Save draft now syncs local draft JSON to backend
   const handleSaveDraft = async () => {
+    if (!draftId) return;
+
     try {
       if (onSaveDraft) await onSaveDraft();
-      toast({
-        title: "Saved",
-        description: onSaveDraft
-          ? "Draft saved."
-          : "Draft is stored locally in this browser (auto-saved as you type as well).",
+
+      const local = readLocalDraft(draftId);
+      const patch = {
+        onboardingStatus: "DRAFT",
+        personal_details: mapDob(local?.personal_details ?? {}),
+        contact_details: local?.contact_details ?? {},
+        employment_details: local?.employment_details ?? {},
+        medical_details: local?.medical_details ?? {},
+        system_access: local?.system_access ?? {},
+        // keep as-is for backend JSON columns:
+        personalDetails: mapDob(local?.personal_details ?? {}),
+        contactDetails: local?.contact_details ?? {},
+        employmentDetails: local?.employment_details ?? {},
+        medicalDetails: local?.medical_details ?? {},
+        systemAccess: local?.system_access ?? {},
+      };
+
+      await apiFetch(`/api/infrastructure/staff/${encodeURIComponent(draftId)}`, {
+        method: "PATCH",
+        body: patch,
       });
+
+      toast({ title: "Saved", description: "Draft saved to server successfully." });
     } catch (e: any) {
       toast({
         title: "Save failed",
@@ -142,15 +238,13 @@ export function OnboardingShell({
   };
 
   const visibleSteps = STAFF_ONBOARDING_STEPS.filter((s) => s.id !== "done");
-
-  // ✅ Prevent your child pages from running with empty draftId
   const ready = Boolean(draftId);
 
   return (
     <AppShell title="Staff Onboarding">
       <div className="w-full max-w-full overflow-x-hidden">
         <div className="grid gap-6 w-full max-w-full">
-          {/* Header */}
+
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between w-full max-w-full">
             <div className="flex items-center gap-3 min-w-0">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-zc-border bg-zc-panel/30">
@@ -163,7 +257,7 @@ export function OnboardingShell({
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <Button variant="outline" className="px-5 gap-2" onClick={handleSaveDraft}>
+              <Button variant="outline" className="px-5 gap-2" onClick={handleSaveDraft} disabled={!ready}>
                 Save draft
               </Button>
               <Button variant="outline" className="px-5 gap-2" onClick={() => router.push(staffRoot as any)}>
@@ -172,14 +266,10 @@ export function OnboardingShell({
             </div>
           </div>
 
-          {/* Wizard */}
           <Card className="border-zc-border bg-zc-panel w-full max-w-full">
             <CardHeader className="pb-3 w-full max-w-full">
-              {/* ✅ wrap (no horizontal scrollbar) */}
               <Tabs value={stepId} onValueChange={(v) => goTo(v as StaffOnboardingStepId)}>
-                <TabsList
-                  className={cn("h-10 rounded-2xl border border-zc-border bg-zc-panel/20 p-1")}
-                >
+                <TabsList className={cn("h-10 rounded-2xl border border-zc-border bg-zc-panel/20 p-1")}>
                   {visibleSteps.map((s) => {
                     const Icon = STEP_ICONS[s.id];
                     return (

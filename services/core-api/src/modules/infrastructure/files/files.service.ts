@@ -10,8 +10,10 @@ function mimeToExt(mime: string): string | null {
   if (m === "image/jpeg" || m === "image/jpg") return "jpg";
   if (m === "image/png") return "png";
   if (m === "image/webp") return "webp";
+  if (m === "application/pdf") return "pdf";
   return null;
 }
+
 
 function assertSafeKey(key: string) {
   // Prevent path traversal and weird control chars.
@@ -40,9 +42,19 @@ export class InfraFilesService {
     if (!file) throw new BadRequestException("file is required");
     const mime = String(file.mimetype || "").toLowerCase();
     const ext = mimeToExt(mime);
-    if (!ext) {
-      throw new BadRequestException("Only image uploads are allowed (jpg/png/webp)");
+    if (!ext) throw new BadRequestException("Only image/pdf uploads are allowed");
+
+    if (kind === "PROFILE_PHOTO" || kind === "SIGNATURE") {
+      if (!["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(mime)) {
+        throw new BadRequestException("Profile photo / signature must be an image (jpg/png/webp)");
+      }
+    } else {
+      // IDENTITY_DOC / EVIDENCE
+      if (!["image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"].includes(mime)) {
+        throw new BadRequestException("Evidence must be image or PDF");
+      }
     }
+
 
     // Size guard (double-check; multer already enforces limits)
     const sizeBytes = Number(file.size || file.buffer?.length || 0);

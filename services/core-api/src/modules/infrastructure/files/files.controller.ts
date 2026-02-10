@@ -1,62 +1,71 @@
 import {
-  BadRequestException,
-  Body,
   Controller,
+  Post,
+  UseInterceptors,
+  UploadedFile,
+  Body,
   Get,
   Param,
-  Post,
   Res,
-  UploadedFile,
-  UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { memoryStorage } from "multer";
-import type { Response } from "express";
+import { diskStorage } from "multer";
+import { extname } from "path";
+import * as fs from "fs";
+import * as path from "path";
 
-import { Permissions } from "../../auth/permissions.decorator";
-import { PERM } from "../../iam/iam.constants";
+function safeName(original: string) {
+  return original.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
 
-import { UploadStaffAssetDto } from "./files.dto";
-import { InfraFilesService } from "./files.service";
-
-@Controller(["infrastructure", "infra"])
-export class InfraFilesController {
-  constructor(private readonly files: InfraFilesService) {}
-
-  /**
-   * Upload staff assets (profile photo / signature) and get a URL back.
-   *
-   * POST /api/infrastructure/files/upload
-   * Multipart form-data: file, contextId, kind
-   */
-  @Post("files/upload")
-  @Permissions(PERM.STAFF_CREATE)
+@Controller(["infrastructure/files", "infra/files"])
+export class FilesController {
+  @Post("upload")
   @UseInterceptors(
     FileInterceptor("file", {
-      storage: memoryStorage(),
+      storage: diskStorage({
+        destination: (req, file, cb) => {
+          const dir = path.join(process.cwd(), "uploads");
+          fs.mkdirSync(dir, { recursive: true });
+          cb(null, dir);
+        },
+        filename: (req, file, cb) => {
+          const key =
+            Date.now() +
+            "_" +
+            Math.random().toString(16).slice(2, 8) +
+            "_" +
+            safeName(file.originalname);
+
+          cb(null, key);
+        },
+      }),
       limits: { fileSize: 5 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        const mime = String(file.mimetype || "").toLowerCase();
-        if (["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(mime)) return cb(null, true);
-        return cb(new BadRequestException("Only image uploads are allowed (jpg/png/webp)"), false);
-      },
     }),
   )
-  async uploadStaffAsset(@Body() body: UploadStaffAssetDto, @UploadedFile() file?: Express.Multer.File) {
-    if (!file) throw new BadRequestException("file is required");
-    return this.files.saveStaffAsset({ contextId: body.contextId, kind: body.kind, file });
+  async upload(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: any,
+  ) {
+    return {
+      url: `/api/infrastructure/files/${encodeURIComponent(file.filename)}`,
+      fileName: file.originalname,
+      mime: file.mimetype,
+      sizeBytes: file.size,
+      contextId: body?.contextId ?? null,
+      kind: body?.kind ?? null,
+    };
   }
 
-  /**
-   * Serve uploaded files from local storage.
-   *
-   * GET /api/infrastructure/files/<key>
-   */
-  @Get("files/:key(*)")
-  @Permissions(PERM.STAFF_READ)
-  async getFile(@Param("key") key: string, @Res() res: Response) {
-    const { absPath, mimeGuess } = await this.files.readFile(key);
-    if (mimeGuess) res.type(mimeGuess);
-    return res.sendFile(absPath);
+  @Get(":fileKey")
+  async getFile(@Param("fileKey") fileKey: string, @Res() res: any) {
+    const decoded = decodeURIComponent(fileKey);
+    const full = path.join(process.cwd(), "uploads", decoded);
+
+    if (!fs.existsSync(full)) {
+      return res.status(404).send({ message: "File not found" });
+    }
+
+    return res.sendFile(full);
   }
 }

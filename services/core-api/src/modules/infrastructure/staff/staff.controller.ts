@@ -39,7 +39,7 @@ import { StaffService } from "./staff.service";
 // - /infra/* (short alias)
 @Controller(["infrastructure", "infra", "infrastructure/human-resource", "infra/human-resource", "infrastructure/hr", "infra/hr"])
 export class StaffController {
-  constructor(private readonly svc: StaffService) {}
+  constructor(private readonly svc: StaffService) { }
 
   private principal(req: any) {
     return req.principal;
@@ -73,8 +73,8 @@ export class StaffController {
       take: take ? Number(take) : undefined,
     });
   }
-  
-    // ✅ Staff Master creation using the provided (nested) onboarding schema
+
+  // ✅ Staff Master creation using the provided (nested) onboarding schema
   // This creates the enterprise Staff record + DPDP-safe identifier + (optional) initial credential.
   // Assignments, user provisioning, and RBAC bindings remain as existing endpoints.
   @Post("staff")
@@ -82,7 +82,12 @@ export class StaffController {
   async createMaster(@Req() req: any, @Body() dto: StaffCreateMasterDto) {
     return this.svc.createStaffMaster(this.principal(req), dto);
   }
-  
+  @Post("staff/drafts")
+  @Permissions(PERM.STAFF_CREATE)
+  async createDraft(@Req() req: any) {
+    return this.svc.createStaffDraft(this.principal(req));
+  }
+
   @Get("staff/:staffId")
   @Permissions(PERM.STAFF_READ)
   async get(@Req() req: any, @Param("staffId") staffId: string) {
@@ -102,7 +107,7 @@ export class StaffController {
     return this.svc.migrateNotesToProfile(this.principal(req), staffId);
   }
 
-  
+
   // ✅ Phase-1 Onboarding (staff master + required assignments)
   @Post("staff/onboard")
   @Permissions(PERM.STAFF_CREATE)
@@ -192,7 +197,7 @@ export class StaffController {
     });
   }
 
-  
+
 
   // ---------------- Documents (vault) ----------------
 
@@ -314,7 +319,7 @@ export class StaffController {
   async upsertProviderProfile(@Req() req: any, @Param("staffId") staffId: string, @Body() dto: UpsertStaffProviderProfileDto) {
     return this.svc.upsertProviderProfile(this.principal(req), staffId, dto);
   }
-// Dedupe preview
+  // Dedupe preview
   @Post("staff/dedupe/preview")
   @Permissions(PERM.STAFF_DEDUPE_PREVIEW)
   async dedupePreview(@Req() req: any, @Body() dto: StaffOnboardDto) {
