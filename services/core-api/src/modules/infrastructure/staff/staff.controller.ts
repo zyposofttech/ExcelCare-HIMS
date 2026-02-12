@@ -30,6 +30,7 @@ import {
   UpsertStaffProviderProfileDto,
 } from "./dto";
 import { StaffService } from "./staff.service";
+import { StaffPrivilegePolicyService } from "./staff-privilege-policy.service";
 
 @ApiTags("infrastructure/staff")
 // NOTE: We support multiple route prefixes for backward compatibility:
@@ -39,7 +40,10 @@ import { StaffService } from "./staff.service";
 // - /infra/* (short alias)
 @Controller(["infrastructure", "infra", "infrastructure/human-resource", "infra/human-resource", "infrastructure/hr", "infra/hr"])
 export class StaffController {
-  constructor(private readonly svc: StaffService) { }
+  constructor(
+    private readonly svc: StaffService,
+    private readonly privilegePolicy: StaffPrivilegePolicyService,
+  ) {}
 
   private principal(req: any) {
     return req.principal;
@@ -57,7 +61,7 @@ export class StaffController {
     @Query("departmentId") departmentId?: string,
     @Query("designation") designation?: string,
     @Query("credentialStatus") credentialStatus?: string,
-    @Query("onboarding") onboarding?: string,              // ✅ ADD THIS
+    @Query("onboarding") onboarding?: string, // ✅
     @Query("cursor") cursor?: string,
     @Query("take") take?: string,
   ) {
@@ -70,21 +74,19 @@ export class StaffController {
       departmentId: departmentId ?? null,
       designation: designation ?? null,
       credentialStatus: credentialStatus ?? null,
-      onboarding: onboarding ?? null,                      // ✅ ADD THIS
+      onboarding: onboarding ?? null,
       cursor: cursor ?? null,
       take: take ? Number(take) : undefined,
     });
   }
 
-
   // ✅ Staff Master creation using the provided (nested) onboarding schema
-  // This creates the enterprise Staff record + DPDP-safe identifier + (optional) initial credential.
-  // Assignments, user provisioning, and RBAC bindings remain as existing endpoints.
   @Post("staff")
   @Permissions(PERM.STAFF_CREATE)
   async createMaster(@Req() req: any, @Body() dto: StaffCreateMasterDto) {
     return this.svc.createStaffMaster(this.principal(req), dto);
   }
+
   @Post("staff/drafts")
   @Permissions(PERM.STAFF_CREATE)
   async createDraft(@Req() req: any) {
@@ -109,7 +111,6 @@ export class StaffController {
   async migrateNotes(@Req() req: any, @Param("staffId") staffId: string) {
     return this.svc.migrateNotesToProfile(this.principal(req), staffId);
   }
-
 
   // ✅ Phase-1 Onboarding (staff master + required assignments)
   @Post("staff/onboard")
@@ -200,8 +201,6 @@ export class StaffController {
     });
   }
 
-
-
   // ---------------- Documents (vault) ----------------
 
   @Get("staff/:staffId/documents")
@@ -284,6 +283,47 @@ export class StaffController {
   }
 
   // ---------------- Privileges (Phase C) ----------------
+  // IMPORTANT: "me" endpoints must be declared BEFORE ":staffId" to avoid route capture.
+
+  @Get("staff/me/privileges")
+  async myPrivileges(
+    @Req() req: any,
+    @Query("branchId") branchId?: string,
+    @Query("includeInactive") includeInactive?: string,
+  ) {
+    return this.privilegePolicy.listMyPrivilegeGrants(this.principal(req), {
+      branchId: branchId ?? null,
+      includeInactive: includeInactive === "true",
+    });
+  }
+
+  @Post("staff/me/privileges/check")
+  async checkMyPrivilege(
+    @Req() req: any,
+    @Body()
+    body: {
+      branchId?: string | null;
+      area: string;
+      action: string;
+      targetType?: string | null;
+      targetId?: string | null;
+      allowAdminOverride?: boolean | null;
+    },
+  ) {
+    const ok = await this.privilegePolicy.hasPrivilege(
+      this.principal(req),
+      {
+        branchId: body.branchId ?? null,
+        area: body.area,
+        action: body.action,
+        targetType: body.targetType ?? null,
+        targetId: body.targetId ?? null,
+      },
+      { allowAdminOverride: body.allowAdminOverride === true },
+    );
+
+    return { ok };
+  }
 
   @Get("staff/:staffId/privileges")
   @Permissions(PERM.STAFF_READ)
@@ -322,6 +362,7 @@ export class StaffController {
   async upsertProviderProfile(@Req() req: any, @Param("staffId") staffId: string, @Body() dto: UpsertStaffProviderProfileDto) {
     return this.svc.upsertProviderProfile(this.principal(req), staffId, dto);
   }
+
   // Dedupe preview
   @Post("staff/dedupe/preview")
   @Permissions(PERM.STAFF_DEDUPE_PREVIEW)

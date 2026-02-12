@@ -181,7 +181,15 @@ export class StaffService {
       select: { id: true },
     });
   }
-
+  private async bumpAuthzForStaff(staffId: string, tx: any) {
+    const u = await tx.user.findFirst({
+      where: { staffId },
+      select: { id: true },
+    });
+    if (u?.id) {
+      await this.bumpAuthz(u.id, tx);
+    }
+  }
   private normalizeDateRange(fromRaw?: string | null, toRaw?: string | null, defaultFromNow = true) {
     const from = parseDate(fromRaw ?? null) ?? (defaultFromNow ? new Date() : null);
     if (!from) throw new BadRequestException("effectiveFrom is required");
@@ -3162,7 +3170,7 @@ export class StaffService {
         },
         tx,
       );
-
+     await this.bumpAuthzForStaff(staffId, tx);
       return grant;
     });
 
@@ -3206,7 +3214,7 @@ export class StaffService {
         },
         tx,
       );
-
+      await this.bumpAuthzForStaff(row.staffId, tx);
       return grant;
     });
 
@@ -3244,7 +3252,7 @@ export class StaffService {
         },
         tx,
       );
-
+      await this.bumpAuthzForStaff(row.staffId, tx);
       return grant;
     });
 

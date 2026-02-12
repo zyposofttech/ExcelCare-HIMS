@@ -136,10 +136,65 @@ class SpecialtySummary(BaseModel):
     specialties: list[SpecialtyDetail] = []
 
 
+class PharmStoreSnapshot(BaseModel):
+    id: str
+    storeCode: str
+    storeName: str
+    storeType: str
+    status: str
+    parentStoreId: str | None = None
+    pharmacistInChargeId: str | None = None
+    drugLicenseNumber: str | None = None
+    drugLicenseExpiry: datetime | None = None
+    is24x7: bool = False
+    canDispense: bool = False
+    isActive: bool = True
+
+
+class DrugSnapshot(BaseModel):
+    id: str
+    drugCode: str
+    genericName: str
+    brandName: str | None = None
+    category: str = "OTHER"
+    strength: str | None = None
+    route: str | None = None
+    scheduleClass: str = "GENERAL"
+    isNarcotic: bool = False
+    isControlled: bool = False
+    isAntibiotic: bool = False
+    isHighAlert: bool = False
+    isLasa: bool = False
+    formularyStatus: str = "NON_FORMULARY"
+    status: str = "ACTIVE"
+
+
+class PharmacySummary(BaseModel):
+    totalStores: int = 0
+    activeStores: int = 0
+    stores: list[PharmStoreSnapshot] = []
+    totalDrugs: int = 0
+    activeDrugs: int = 0
+    drugs: list[DrugSnapshot] = []
+    narcoticCount: int = 0
+    highAlertCount: int = 0
+    antibioticCount: int = 0
+    lasaCount: int = 0
+    hasFormulary: bool = False
+    formularyVersion: int | None = None
+    formularyStatus: str | None = None
+    interactionCount: int = 0
+    supplierCount: int = 0
+    inventoryConfigCount: int = 0
+    byCategory: dict[str, int] = {}
+    byScheduleClass: dict[str, int] = {}
+
+
 class BranchContext(BaseModel):
     branch: BranchSnapshot
     location: LocationSummary
     units: UnitSummary
     departments: DepartmentSummary
     specialties: SpecialtySummary = SpecialtySummary()
+    pharmacy: PharmacySummary = PharmacySummary()
     textSummary: str = ""

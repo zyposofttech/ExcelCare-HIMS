@@ -368,3 +368,124 @@ class DepartmentSpecialty(Base):
     isPrimary: Mapped[bool] = mapped_column(Boolean, default=False)
     createdAt: Mapped[datetime] = mapped_column(DateTime)
     updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+# ── Pharmacy ─────────────────────────────────────────────────────────────
+
+
+class PharmacyStore(Base):
+    __tablename__ = "PharmacyStore"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    storeCode: Mapped[str] = mapped_column(String(32))
+    storeName: Mapped[str] = mapped_column(String(160))
+    storeType: Mapped[str] = mapped_column(String)  # PharmacyStoreType enum
+    status: Mapped[str] = mapped_column(String, default="UNDER_SETUP")
+    parentStoreId: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    locationNodeId: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    pharmacistInChargeId: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    drugLicenseNumber: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    drugLicenseExpiry: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    is24x7: Mapped[bool] = mapped_column(Boolean, default=False)
+    canDispense: Mapped[bool] = mapped_column(Boolean, default=False)
+    canIndent: Mapped[bool] = mapped_column(Boolean, default=True)
+    canReceiveStock: Mapped[bool] = mapped_column(Boolean, default=False)
+    isActive: Mapped[bool] = mapped_column(Boolean, default=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class DrugMaster(Base):
+    __tablename__ = "DrugMaster"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    drugCode: Mapped[str] = mapped_column(String(32))
+    genericName: Mapped[str] = mapped_column(String(255))
+    brandName: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    manufacturer: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    category: Mapped[str] = mapped_column(String)  # DrugCategory enum
+    strength: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    route: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    scheduleClass: Mapped[str] = mapped_column(String, default="GENERAL")
+    therapeuticClass: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    isNarcotic: Mapped[bool] = mapped_column(Boolean, default=False)
+    isPsychotropic: Mapped[bool] = mapped_column(Boolean, default=False)
+    isControlled: Mapped[bool] = mapped_column(Boolean, default=False)
+    isAntibiotic: Mapped[bool] = mapped_column(Boolean, default=False)
+    isHighAlert: Mapped[bool] = mapped_column(Boolean, default=False)
+    isLasa: Mapped[bool] = mapped_column(Boolean, default=False)
+    mrp: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    purchasePrice: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    hsnCode: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    gstRate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    formularyStatus: Mapped[str] = mapped_column(String, default="NON_FORMULARY")
+    status: Mapped[str] = mapped_column(String, default="ACTIVE")
+    isActive: Mapped[bool] = mapped_column(Boolean, default=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class PharmSupplier(Base):
+    __tablename__ = "PharmSupplier"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    supplierCode: Mapped[str] = mapped_column(String(32))
+    supplierName: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String, default="ACTIVE")
+    drugLicenseExpiry: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class Formulary(Base):
+    __tablename__ = "Formulary"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String, default="DRAFT")
+    publishedAt: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class FormularyItem(Base):
+    __tablename__ = "FormularyItem"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    formularyId: Mapped[str] = mapped_column(String, ForeignKey("Formulary.id"))
+    drugMasterId: Mapped[str] = mapped_column(String, ForeignKey("DrugMaster.id"))
+    tier: Mapped[str] = mapped_column(String, default="APPROVED")
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class InventoryConfig(Base):
+    __tablename__ = "InventoryConfig"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    pharmacyStoreId: Mapped[str] = mapped_column(String, ForeignKey("PharmacyStore.id"))
+    drugMasterId: Mapped[str] = mapped_column(String, ForeignKey("DrugMaster.id"))
+    minimumStock: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    maximumStock: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reorderLevel: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reorderQuantity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    safetyStock: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    abcClass: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    vedClass: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class DrugInteraction(Base):
+    __tablename__ = "DrugInteraction"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    drugAId: Mapped[str] = mapped_column(String, ForeignKey("DrugMaster.id"))
+    drugBId: Mapped[str] = mapped_column(String, ForeignKey("DrugMaster.id"))
+    severity: Mapped[str] = mapped_column(String, default="MODERATE")
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)

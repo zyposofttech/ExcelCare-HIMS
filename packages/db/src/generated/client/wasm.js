@@ -2166,6 +2166,191 @@ exports.Prisma.GovernedChangeRequestScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
+exports.Prisma.PharmacyStoreScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  storeCode: 'storeCode',
+  storeName: 'storeName',
+  storeType: 'storeType',
+  parentStoreId: 'parentStoreId',
+  locationNodeId: 'locationNodeId',
+  pharmacistInChargeId: 'pharmacistInChargeId',
+  drugLicenseNumber: 'drugLicenseNumber',
+  drugLicenseExpiry: 'drugLicenseExpiry',
+  is24x7: 'is24x7',
+  canDispense: 'canDispense',
+  canIndent: 'canIndent',
+  canReceiveStock: 'canReceiveStock',
+  canReturnVendor: 'canReturnVendor',
+  operatingHours: 'operatingHours',
+  autoIndentEnabled: 'autoIndentEnabled',
+  status: 'status',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DrugMasterScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  drugCode: 'drugCode',
+  genericName: 'genericName',
+  brandName: 'brandName',
+  manufacturer: 'manufacturer',
+  category: 'category',
+  dosageForm: 'dosageForm',
+  strength: 'strength',
+  route: 'route',
+  therapeuticClass: 'therapeuticClass',
+  pharmacologicalClass: 'pharmacologicalClass',
+  scheduleClass: 'scheduleClass',
+  isNarcotic: 'isNarcotic',
+  isPsychotropic: 'isPsychotropic',
+  isControlled: 'isControlled',
+  isAntibiotic: 'isAntibiotic',
+  isHighAlert: 'isHighAlert',
+  isLasa: 'isLasa',
+  mrp: 'mrp',
+  purchasePrice: 'purchasePrice',
+  hsnCode: 'hsnCode',
+  gstRate: 'gstRate',
+  packSize: 'packSize',
+  defaultDosage: 'defaultDosage',
+  maxDailyDose: 'maxDailyDose',
+  contraindications: 'contraindications',
+  formularyStatus: 'formularyStatus',
+  status: 'status',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.DrugInteractionScalarFieldEnum = {
+  id: 'id',
+  drugAId: 'drugAId',
+  drugBId: 'drugBId',
+  severity: 'severity',
+  description: 'description',
+  recommendation: 'recommendation',
+  source: 'source',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.FormularyScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  version: 'version',
+  effectiveDate: 'effectiveDate',
+  status: 'status',
+  publishedAt: 'publishedAt',
+  publishedByUserId: 'publishedByUserId',
+  notes: 'notes',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.FormularyItemScalarFieldEnum = {
+  id: 'id',
+  formularyId: 'formularyId',
+  drugMasterId: 'drugMasterId',
+  tier: 'tier',
+  notes: 'notes',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.TherapeuticSubstitutionScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  sourceDrugId: 'sourceDrugId',
+  targetDrugId: 'targetDrugId',
+  notes: 'notes',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.PharmSupplierScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  supplierCode: 'supplierCode',
+  supplierName: 'supplierName',
+  gstin: 'gstin',
+  drugLicenseNumber: 'drugLicenseNumber',
+  drugLicenseExpiry: 'drugLicenseExpiry',
+  contactPerson: 'contactPerson',
+  phone: 'phone',
+  email: 'email',
+  address: 'address',
+  paymentTermsDays: 'paymentTermsDays',
+  discountTerms: 'discountTerms',
+  deliveryLeadTimeDays: 'deliveryLeadTimeDays',
+  productCategories: 'productCategories',
+  rating: 'rating',
+  status: 'status',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.SupplierStoreMappingScalarFieldEnum = {
+  id: 'id',
+  supplierId: 'supplierId',
+  pharmacyStoreId: 'pharmacyStoreId',
+  createdAt: 'createdAt'
+};
+
+exports.Prisma.InventoryConfigScalarFieldEnum = {
+  id: 'id',
+  pharmacyStoreId: 'pharmacyStoreId',
+  drugMasterId: 'drugMasterId',
+  minimumStock: 'minimumStock',
+  maximumStock: 'maximumStock',
+  reorderLevel: 'reorderLevel',
+  reorderQuantity: 'reorderQuantity',
+  safetyStock: 'safetyStock',
+  abcClass: 'abcClass',
+  vedClass: 'vedClass',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.StoreIndentMappingScalarFieldEnum = {
+  id: 'id',
+  requestingStoreId: 'requestingStoreId',
+  supplyingStoreId: 'supplyingStoreId',
+  approvalRole: 'approvalRole',
+  slaDurationMinutes: 'slaDurationMinutes',
+  isEmergencyOverride: 'isEmergencyOverride',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.NarcoticsRegisterScalarFieldEnum = {
+  id: 'id',
+  pharmacyStoreId: 'pharmacyStoreId',
+  drugMasterId: 'drugMasterId',
+  transactionType: 'transactionType',
+  quantity: 'quantity',
+  batchNumber: 'batchNumber',
+  balanceBefore: 'balanceBefore',
+  balanceAfter: 'balanceAfter',
+  witnessName: 'witnessName',
+  witnessSignature: 'witnessSignature',
+  notes: 'notes',
+  performedByUserId: 'performedByUserId',
+  createdAt: 'createdAt'
+};
+
+exports.Prisma.DrugLicenseHistoryScalarFieldEnum = {
+  id: 'id',
+  pharmacyStoreId: 'pharmacyStoreId',
+  licenseNumber: 'licenseNumber',
+  validFrom: 'validFrom',
+  validTo: 'validTo',
+  documentUrl: 'documentUrl',
+  uploadedByUserId: 'uploadedByUserId',
+  createdAt: 'createdAt'
+};
+
 exports.Prisma.SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -3153,6 +3338,102 @@ exports.GovernedChangeStatus = exports.$Enums.GovernedChangeStatus = {
   APPLIED: 'APPLIED'
 };
 
+exports.PharmacyStoreType = exports.$Enums.PharmacyStoreType = {
+  MAIN: 'MAIN',
+  IP_PHARMACY: 'IP_PHARMACY',
+  OP_PHARMACY: 'OP_PHARMACY',
+  EMERGENCY: 'EMERGENCY',
+  OT_STORE: 'OT_STORE',
+  ICU_STORE: 'ICU_STORE',
+  WARD_STORE: 'WARD_STORE',
+  NARCOTICS: 'NARCOTICS'
+};
+
+exports.PharmacyStoreStatus = exports.$Enums.PharmacyStoreStatus = {
+  ACTIVE: 'ACTIVE',
+  INACTIVE: 'INACTIVE',
+  UNDER_SETUP: 'UNDER_SETUP'
+};
+
+exports.DrugCategory = exports.$Enums.DrugCategory = {
+  TABLET: 'TABLET',
+  CAPSULE: 'CAPSULE',
+  INJECTION: 'INJECTION',
+  SYRUP: 'SYRUP',
+  OINTMENT: 'OINTMENT',
+  DROPS: 'DROPS',
+  INHALER: 'INHALER',
+  SUPPOSITORY: 'SUPPOSITORY',
+  PATCH: 'PATCH',
+  POWDER: 'POWDER',
+  IV_FLUID: 'IV_FLUID',
+  OTHER: 'OTHER'
+};
+
+exports.DrugRoute = exports.$Enums.DrugRoute = {
+  ORAL: 'ORAL',
+  IV: 'IV',
+  IM: 'IM',
+  SC: 'SC',
+  TOPICAL: 'TOPICAL',
+  INHALATION: 'INHALATION',
+  RECTAL: 'RECTAL',
+  OPHTHALMIC: 'OPHTHALMIC',
+  NASAL: 'NASAL',
+  SUBLINGUAL: 'SUBLINGUAL',
+  TRANSDERMAL: 'TRANSDERMAL'
+};
+
+exports.DrugScheduleClass = exports.$Enums.DrugScheduleClass = {
+  GENERAL: 'GENERAL',
+  H: 'H',
+  H1: 'H1',
+  X: 'X',
+  G: 'G'
+};
+
+exports.DrugFormularyStatus = exports.$Enums.DrugFormularyStatus = {
+  APPROVED: 'APPROVED',
+  RESTRICTED: 'RESTRICTED',
+  NON_FORMULARY: 'NON_FORMULARY'
+};
+
+exports.DrugLifecycleStatus = exports.$Enums.DrugLifecycleStatus = {
+  ACTIVE: 'ACTIVE',
+  INACTIVE: 'INACTIVE',
+  RECALLED: 'RECALLED'
+};
+
+exports.InteractionSeverity = exports.$Enums.InteractionSeverity = {
+  MAJOR: 'MAJOR',
+  MODERATE: 'MODERATE',
+  MINOR: 'MINOR'
+};
+
+exports.InteractionSource = exports.$Enums.InteractionSource = {
+  STANDARD: 'STANDARD',
+  CUSTOM: 'CUSTOM'
+};
+
+exports.FormularyVersionStatus = exports.$Enums.FormularyVersionStatus = {
+  DRAFT: 'DRAFT',
+  PUBLISHED: 'PUBLISHED',
+  ARCHIVED: 'ARCHIVED'
+};
+
+exports.PharmSupplierStatus = exports.$Enums.PharmSupplierStatus = {
+  ACTIVE: 'ACTIVE',
+  BLACKLISTED: 'BLACKLISTED',
+  INACTIVE: 'INACTIVE'
+};
+
+exports.NarcoticsTransactionType = exports.$Enums.NarcoticsTransactionType = {
+  RECEIPT: 'RECEIPT',
+  ISSUE: 'ISSUE',
+  WASTAGE: 'WASTAGE',
+  ADJUSTMENT: 'ADJUSTMENT'
+};
+
 exports.Prisma.ModelName = {
   Organization: 'Organization',
   Branch: 'Branch',
@@ -3285,7 +3566,19 @@ exports.Prisma.ModelName = {
   EquipmentContract: 'EquipmentContract',
   EquipmentMaintenanceTask: 'EquipmentMaintenanceTask',
   EquipmentComplianceEvidence: 'EquipmentComplianceEvidence',
-  GovernedChangeRequest: 'GovernedChangeRequest'
+  GovernedChangeRequest: 'GovernedChangeRequest',
+  PharmacyStore: 'PharmacyStore',
+  DrugMaster: 'DrugMaster',
+  DrugInteraction: 'DrugInteraction',
+  Formulary: 'Formulary',
+  FormularyItem: 'FormularyItem',
+  TherapeuticSubstitution: 'TherapeuticSubstitution',
+  PharmSupplier: 'PharmSupplier',
+  SupplierStoreMapping: 'SupplierStoreMapping',
+  InventoryConfig: 'InventoryConfig',
+  StoreIndentMapping: 'StoreIndentMapping',
+  NarcoticsRegister: 'NarcoticsRegister',
+  DrugLicenseHistory: 'DrugLicenseHistory'
 };
 
 /**

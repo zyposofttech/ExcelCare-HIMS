@@ -60,8 +60,21 @@ import { TariffPlansService } from "./tariff-plans/tariff-plans.service";
 
 import { StaffController } from "./staff/staff.controller";
 import { StaffService } from "./staff/staff.service";
+import { StaffPrivilegePolicyService } from "./staff/staff-privilege-policy.service";
 import { FilesController } from "./files/files.controller";
 import { InfraFilesService } from "./files/files.service";
+
+import { PharmacyController } from "./pharmacy/pharmacy.controller";
+import { PharmacyService } from "./pharmacy/pharmacy.service";
+import { DrugMasterController } from "./pharmacy/drug-master.controller";
+import { DrugMasterService } from "./pharmacy/drug-master.service";
+import { FormularyController } from "./pharmacy/formulary.controller";
+import { FormularyService } from "./pharmacy/formulary.service";
+import { SupplierController } from "./pharmacy/supplier.controller";
+import { SupplierService } from "./pharmacy/supplier.service";
+import { InventoryConfigController } from "./pharmacy/inventory-config.controller";
+import { InventoryConfigService } from "./pharmacy/inventory-config.service";
+import { PharmacyGoLiveService } from "./pharmacy/pharmacy-golive.service";
 
 @Module({
   imports: [
@@ -92,7 +105,12 @@ import { InfraFilesService } from "./files/files.service";
     ServiceAvailabilityController,
     TariffPlansController,
     StaffController,
-    FilesController
+    FilesController,
+    PharmacyController,
+    DrugMasterController,
+    FormularyController,
+    SupplierController,
+    InventoryConfigController,
   ],
   providers: [
     LocationService,
@@ -112,7 +130,14 @@ import { InfraFilesService } from "./files/files.service";
     ServiceAvailabilityService,
     TariffPlansService,
     StaffService,
-    InfraFilesService
+    StaffPrivilegePolicyService,
+    InfraFilesService,
+    PharmacyService,
+    DrugMasterService,
+    FormularyService,
+    SupplierService,
+    InventoryConfigService,
+    PharmacyGoLiveService,
   ],
 })
 export class InfrastructureModule {}

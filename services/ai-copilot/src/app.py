@@ -374,16 +374,20 @@ async def ai_health_check(branchId: str = Query(...), bust: str = Query(None)):
     from .engines.go_live_scorer import compute_go_live_score
     from .engines.nabh_checker import run_nabh_checks
     from .engines.naming_enforcer import run_naming_check
+    from .engines.pharmacy_checker import run_pharmacy_checks
 
     ctx = await collect_branch_context(branchId)
     consistency = run_consistency_checks(ctx)
     nabh = run_nabh_checks(ctx)
     naming = run_naming_check(ctx)
     go_live = compute_go_live_score(consistency, nabh)
+    pharmacy_issues = run_pharmacy_checks(ctx)
 
-    # Determine overall health
-    total_blockers = len(consistency.blockers) + nabh.failCount
-    total_warnings = len(consistency.warnings) + len(nabh.warnings)
+    # Determine overall health — include pharmacy blockers
+    pharmacy_blockers = [i for i in pharmacy_issues if i.severity == "BLOCKER"]
+    pharmacy_warnings = [i for i in pharmacy_issues if i.severity == "WARNING"]
+    total_blockers = len(consistency.blockers) + nabh.failCount + len(pharmacy_blockers)
+    total_warnings = len(consistency.warnings) + len(nabh.warnings) + len(pharmacy_warnings)
 
     if total_blockers == 0 and consistency.score >= 90:
         overall = "EXCELLENT"
@@ -427,6 +431,18 @@ async def ai_health_check(branchId: str = Query(...), bust: str = Query(None)):
                     "area": _nabh_area(check.id),
                 })
 
+    # Pharmacy issues
+    for issue in pharmacy_issues:
+        if issue.severity in ("BLOCKER", "WARNING"):
+            top_issues.append({
+                "id": issue.id,
+                "severity": issue.severity,
+                "title": issue.title,
+                "category": issue.category,
+                "fixHint": issue.fixHint,
+                "area": _issue_area(issue.category),
+            })
+
     result = {
         "branchId": branchId,
         "branchName": ctx.branch.name,
@@ -458,6 +474,7 @@ def _issue_area(category: str) -> str:
         "UNIT": "units",
         "ROOM": "rooms",
         "RESOURCE": "resources",
+        "PHARMACY": "pharmacy",
     }
     return mapping.get(category, "infrastructure")
 

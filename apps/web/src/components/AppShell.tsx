@@ -264,6 +264,20 @@ const NAV_WORKSPACES: NavNode[] = [
       },
       {
         type: "group",
+        label: "Pharmacy Infrastructure",
+        children: [
+          { label: "Pharmacy Overview", href: "/infrastructure/pharmacy" },
+          { label: "Pharmacy Stores", href: "/infrastructure/pharmacy/stores" },
+          { label: "Drug Master", href: "/infrastructure/pharmacy/drugs" },
+          { label: "Formulary", href: "/infrastructure/pharmacy/formulary" },
+          { label: "Suppliers", href: "/infrastructure/pharmacy/suppliers" },
+          { label: "Inventory Config", href: "/infrastructure/pharmacy/inventory" },
+          { label: "Narcotics Vault", href: "/infrastructure/pharmacy/narcotics" },
+          { label: "Indent Mapping", href: "/infrastructure/pharmacy/indent-mapping" },
+        ],
+      },
+      {
+        type: "group",
         label: "Billing Setup",
         children: [
           { label: "Tax Codes (GST)", href: "/infrastructure/tax-codes" },

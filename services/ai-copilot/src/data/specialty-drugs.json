@@ -1,0 +1,87 @@
+{
+  "_comment": "Essential drugs expected for each hospital specialty. Used by AI copilot to detect missing drugs per specialty. Generic names in lowercase.",
+  "specialties": {
+    "CARDIO": [
+      "amlodipine", "atenolol", "metoprolol", "enalapril", "losartan",
+      "aspirin", "clopidogrel", "atorvastatin", "nitroglycerin", "warfarin",
+      "furosemide", "digoxin", "amiodarone", "heparin", "diltiazem"
+    ],
+    "ORTHO": [
+      "diclofenac", "ibuprofen", "paracetamol", "tramadol", "aceclofenac",
+      "calcium carbonate", "vitamin d3", "alendronate", "teriparatide",
+      "cefuroxime", "metronidazole", "ondansetron"
+    ],
+    "NEURO": [
+      "phenytoin", "carbamazepine", "valproic acid", "levetiracetam",
+      "diazepam", "mannitol", "dexamethasone", "nimodipine",
+      "donepezil", "levodopa", "pregabalin", "gabapentin"
+    ],
+    "GASTRO": [
+      "omeprazole", "pantoprazole", "ranitidine", "domperidone",
+      "ondansetron", "lactulose", "metronidazole", "hyoscine",
+      "sucralfate", "mesalamine", "ursodeoxycholic acid"
+    ],
+    "PULMO": [
+      "salbutamol", "ipratropium", "budesonide", "montelukast",
+      "theophylline", "prednisolone", "azithromycin", "amoxicillin",
+      "doxycycline", "levofloxacin", "aminophylline"
+    ],
+    "ENDO": [
+      "metformin", "glimepiride", "insulin glargine", "insulin regular",
+      "levothyroxine", "carbimazole", "prednisolone",
+      "sitagliptin", "empagliflozin", "pioglitazone"
+    ],
+    "NEPHRO": [
+      "furosemide", "torsemide", "enalapril", "losartan",
+      "amlodipine", "calcium carbonate", "sodium bicarbonate",
+      "erythropoietin", "iron sucrose", "heparin"
+    ],
+    "ONCOLOGY": [
+      "paclitaxel", "cisplatin", "carboplatin", "doxorubicin",
+      "cyclophosphamide", "methotrexate", "5-fluorouracil",
+      "ondansetron", "dexamethasone", "filgrastim", "morphine"
+    ],
+    "PEDIATRICS": [
+      "paracetamol", "ibuprofen", "amoxicillin", "ceftriaxone",
+      "salbutamol", "oral rehydration salts", "zinc sulfate",
+      "iron syrup", "vitamin a", "phenobarbitone", "midazolam"
+    ],
+    "OBG": [
+      "oxytocin", "misoprostol", "methylergometrine", "magnesium sulfate",
+      "nifedipine", "labetalol", "iron sucrose", "folic acid",
+      "progesterone", "betamethasone", "tranexamic acid"
+    ],
+    "EMERGENCY": [
+      "adrenaline", "atropine", "amiodarone", "dopamine",
+      "noradrenaline", "diazepam", "midazolam", "morphine",
+      "naloxone", "flumazenil", "mannitol", "dexamethasone",
+      "normal saline", "ringer lactate", "activated charcoal"
+    ],
+    "ANESTHESIA": [
+      "propofol", "thiopental", "ketamine", "succinylcholine",
+      "atracurium", "neostigmine", "glycopyrrolate", "fentanyl",
+      "bupivacaine", "lidocaine", "midazolam", "ondansetron"
+    ],
+    "DERMATOLOGY": [
+      "betamethasone cream", "clotrimazole cream", "mupirocin",
+      "acyclovir", "hydroxychloroquine", "dapsone",
+      "methotrexate", "isotretinoin", "cetirizine", "prednisolone"
+    ],
+    "PSYCHIATRY": [
+      "olanzapine", "risperidone", "haloperidol", "clozapine",
+      "fluoxetine", "sertraline", "escitalopram", "lithium",
+      "valproic acid", "lorazepam", "chlorpromazine", "trihexyphenidyl"
+    ],
+    "ENT": [
+      "amoxicillin", "azithromycin", "ciprofloxacin ear drops",
+      "ofloxacin ear drops", "xylometazoline", "fluticasone nasal spray",
+      "cetirizine", "montelukast", "prednisolone"
+    ],
+    "OPHTHALMOLOGY": [
+      "timolol eye drops", "latanoprost", "pilocarpine",
+      "ciprofloxacin eye drops", "moxifloxacin eye drops",
+      "prednisolone eye drops", "tropicamide", "homatropine",
+      "artificial tears"
+    ]
+  }
+}

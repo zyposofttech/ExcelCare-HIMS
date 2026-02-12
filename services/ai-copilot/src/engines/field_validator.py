@@ -15,6 +15,13 @@ from .models import FieldValidationResult, FieldWarning
 # ── Naming patterns ───────────────────────────────────────────────────────
 
 CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_-]*$")
+DRUG_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9-]*$")
+STRENGTH_PATTERN = re.compile(r"^\d+(\.\d+)?\s*(mg|g|ml|mcg|iu|%|mg/ml|mg/5ml|mg/tab)$", re.IGNORECASE)
+HSN_PATTERN = re.compile(r"^\d{4,8}$")
+VALID_GST_RATES = {0, 5, 12, 18, 28}
+
+SCHEDULE_NARCOTIC_MAP = {"X"}
+SCHEDULE_CONTROLLED_MAP = {"X", "H1"}
 
 ICU_UNIT_TYPES = {"ICU", "HDU", "CCU", "NICU", "PICU", "SICU", "MICU"}
 CRITICAL_CARE_UNIT_TYPES = ICU_UNIT_TYPES | {"ER", "EMERGENCY", "OT", "PACU"}
@@ -200,6 +207,141 @@ def validate_field(
                     warnings.append(FieldWarning(
                         level="info",
                         message="ICU units typically have 8-20 beds for effective patient monitoring.",
+                    ))
+            except (ValueError, TypeError):
+                pass
+
+    # ── Drug-specific checks ──────────────────────────────────────────
+    if module == "drug":
+        if field == "drugCode" and value:
+            trimmed = value.strip().upper()
+            if not DRUG_CODE_PATTERN.match(trimmed):
+                warnings.append(FieldWarning(
+                    level="warning",
+                    message="Drug codes should be uppercase alphanumeric with hyphens (e.g., DRG-00123, PARA-500).",
+                ))
+
+        if field == "strength" and value:
+            trimmed = value.strip()
+            if trimmed and not STRENGTH_PATTERN.match(trimmed):
+                warnings.append(FieldWarning(
+                    level="info",
+                    message="Strength format looks unusual. Common formats: '500mg', '10mg/ml', '5mg/5ml', '100mcg'.",
+                ))
+
+        if field == "scheduleClass" and value:
+            schedule = value.strip().upper()
+            # Auto-suggest narcotic flags
+            if schedule in SCHEDULE_NARCOTIC_MAP:
+                if not ctx.get("isNarcotic"):
+                    suggestion = {
+                        "value": {"isNarcotic": True, "isControlled": True},
+                        "reasoning": f"Schedule {schedule} drugs are classified as narcotic and controlled under NDPS Act.",
+                        "confidence": 0.98,
+                    }
+            elif schedule in SCHEDULE_CONTROLLED_MAP:
+                if not ctx.get("isControlled"):
+                    suggestion = {
+                        "value": {"isControlled": True},
+                        "reasoning": f"Schedule {schedule} drugs are controlled substances requiring special handling.",
+                        "confidence": 0.95,
+                    }
+
+        if field == "genericName" and value:
+            trimmed = value.strip()
+            existing_names = ctx.get("existingDrugNames") or []
+            existing_strength = ctx.get("strength") or ""
+            for existing in existing_names:
+                if isinstance(existing, str) and existing.lower() == trimmed.lower():
+                    warnings.append(FieldWarning(
+                        level="warning",
+                        message=f"A drug with generic name '{trimmed}' already exists. Ensure strength/form differs to avoid duplicates.",
+                    ))
+                    break
+
+        if field == "hsnCode" and value:
+            trimmed = value.strip()
+            if trimmed and not HSN_PATTERN.match(trimmed):
+                warnings.append(FieldWarning(
+                    level="warning",
+                    message="HSN code should be 4-8 digits. Common pharma HSN: 3003, 3004, 3006.",
+                ))
+
+        if field == "gstRate" and value:
+            try:
+                rate = float(value)
+                if rate not in VALID_GST_RATES:
+                    warnings.append(FieldWarning(
+                        level="info",
+                        message=f"GST rate {rate}% is not standard. Valid pharma GST slabs: 0%, 5%, 12%, 18%, 28%.",
+                    ))
+            except (ValueError, TypeError):
+                pass
+
+        if field == "mrp" and value:
+            try:
+                mrp = float(value)
+                purchase = float(ctx.get("purchasePrice") or 0)
+                if purchase > 0 and mrp < purchase:
+                    warnings.append(FieldWarning(
+                        level="warning",
+                        message="MRP is less than purchase price. Please verify pricing.",
+                    ))
+            except (ValueError, TypeError):
+                pass
+
+    # ── Pharmacy Store-specific checks ────────────────────────────────
+    if module == "pharmacy-store":
+        if field == "storeType" and value:
+            store_type = value.strip().upper()
+            if store_type == "EMERGENCY":
+                suggestion = {
+                    "value": {"is24x7": True, "canDispense": True},
+                    "reasoning": "Emergency pharmacy stores should operate 24x7 and have dispensing enabled.",
+                    "confidence": 0.95,
+                }
+            if store_type == "NARCOTICS_VAULT":
+                suggestion = {
+                    "value": {"canDispense": False, "canIndent": False, "canReceiveStock": True},
+                    "reasoning": "Narcotics vault stores receive stock but do not directly dispense. Indents go through the main store.",
+                    "confidence": 0.92,
+                }
+
+        if field == "status" and value:
+            status = value.strip().upper()
+            if status == "ACTIVE":
+                if not ctx.get("drugLicenseNumber"):
+                    warnings.append(FieldWarning(
+                        level="critical",
+                        message="Cannot activate a pharmacy store without a drug license number.",
+                    ))
+                if not ctx.get("pharmacistInChargeId"):
+                    warnings.append(FieldWarning(
+                        level="critical",
+                        message="Cannot activate a pharmacy store without assigning a pharmacist-in-charge.",
+                    ))
+
+        if field == "drugLicenseNumber" and value:
+            trimmed = value.strip()
+            if len(trimmed) < 5:
+                warnings.append(FieldWarning(
+                    level="warning",
+                    message="Drug license number appears too short. Verify the complete license number.",
+                ))
+
+        if field == "drugLicenseExpiry" and value:
+            try:
+                from datetime import datetime as _dt, timedelta as _td
+                expiry = _dt.fromisoformat(value.replace("Z", "+00:00"))
+                if expiry < _dt.now(expiry.tzinfo):
+                    warnings.append(FieldWarning(
+                        level="critical",
+                        message="Drug license has already expired. Store cannot operate with an expired license.",
+                    ))
+                elif expiry < _dt.now(expiry.tzinfo) + _td(days=90):
+                    warnings.append(FieldWarning(
+                        level="warning",
+                        message="Drug license expires within 90 days. Initiate renewal process.",
                     ))
             except (ValueError, TypeError):
                 pass

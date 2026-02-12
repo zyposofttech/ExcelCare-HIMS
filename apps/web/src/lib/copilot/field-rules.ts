@@ -3,8 +3,12 @@
 import type { FieldWarning } from "./types";
 
 const CODE_RE = /^[A-Z][A-Z0-9_-]*$/;
+const DRUG_CODE_RE = /^[A-Z][A-Z0-9-]*$/;
+const STRENGTH_RE = /^\d+(\.\d+)?\s*(mg|g|ml|mcg|iu|%|mg\/ml|mg\/5ml|mg\/tab)$/i;
+const HSN_RE = /^\d{4,8}$/;
 const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z]\d[Z][A-Z0-9]$/;
 const PAN_RE = /^[A-Z]{5}\d{4}[A-Z]$/;
+const VALID_GST_RATES = new Set([0, 5, 12, 18, 28]);
 
 const ICU_TYPES = new Set(["ICU", "HDU", "CCU", "NICU", "PICU", "SICU", "MICU"]);
 
@@ -206,6 +210,83 @@ export function checkFieldRules(
         warnings.push({
           level: "warning",
           message: "Unit codes should be at least 2 characters.",
+        });
+      }
+    }
+  }
+
+  // ── Drug ─────────────────────────────────────────────────────────────
+  if (module === "drug") {
+    if (field === "drugCode" && value) {
+      const trimmed = value.trim().toUpperCase();
+      if (trimmed.length > 0 && !DRUG_CODE_RE.test(trimmed)) {
+        warnings.push({
+          level: "warning",
+          message: "Drug codes should be uppercase alphanumeric with hyphens (e.g., DRG-00123).",
+        });
+      }
+    }
+    if (field === "strength" && value) {
+      const trimmed = value.trim();
+      if (trimmed.length > 0 && !STRENGTH_RE.test(trimmed)) {
+        warnings.push({
+          level: "info",
+          message: "Strength format looks unusual. Common formats: '500mg', '10mg/ml', '100mcg'.",
+        });
+      }
+    }
+    if (field === "hsnCode" && value) {
+      const trimmed = value.trim();
+      if (trimmed.length > 0 && !HSN_RE.test(trimmed)) {
+        warnings.push({
+          level: "warning",
+          message: "HSN code should be 4-8 digits. Common pharma HSN: 3003, 3004, 3006.",
+        });
+      }
+    }
+    if (field === "gstRate" && value) {
+      const rate = parseFloat(value);
+      if (!isNaN(rate) && !VALID_GST_RATES.has(rate)) {
+        warnings.push({
+          level: "info",
+          message: `GST rate ${rate}% is not standard. Valid pharma GST slabs: 0%, 5%, 12%, 18%, 28%.`,
+        });
+      }
+    }
+    if (field === "mrp" && value) {
+      const mrp = parseFloat(value);
+      const purchase = parseFloat(String(ctx.purchasePrice ?? ""));
+      if (!isNaN(mrp) && !isNaN(purchase) && purchase > 0 && mrp < purchase) {
+        warnings.push({
+          level: "warning",
+          message: "MRP is less than purchase price. Please verify pricing.",
+        });
+      }
+    }
+  }
+
+  // ── Pharmacy Store ──────────────────────────────────────────────────
+  if (module === "pharmacy-store") {
+    if (field === "drugLicenseNumber" && value) {
+      const trimmed = value.trim();
+      if (trimmed.length > 0 && trimmed.length < 5) {
+        warnings.push({
+          level: "warning",
+          message: "Drug license number appears too short. Verify the complete license number.",
+        });
+      }
+    }
+    if (field === "status" && value === "ACTIVE") {
+      if (!ctx.drugLicenseNumber) {
+        warnings.push({
+          level: "critical",
+          message: "Cannot activate store without a drug license number.",
+        });
+      }
+      if (!ctx.pharmacistInChargeId) {
+        warnings.push({
+          level: "critical",
+          message: "Cannot activate store without a pharmacist-in-charge.",
         });
       }
     }

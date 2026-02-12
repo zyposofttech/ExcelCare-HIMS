@@ -35,6 +35,18 @@ def get_page_insights(module: str, ctx: BranchContext) -> PageInsightsResult:
         insights = _rooms_insights(ctx)
     elif module == "resources":
         insights = _resources_insights(ctx)
+    elif module == "pharmacy":
+        insights = _pharmacy_overview_insights(ctx)
+    elif module == "pharmacy-stores":
+        insights = _pharmacy_stores_insights(ctx)
+    elif module == "pharmacy-drugs":
+        insights = _pharmacy_drugs_insights(ctx)
+    elif module == "pharmacy-formulary":
+        insights = _pharmacy_formulary_insights(ctx)
+    elif module == "pharmacy-suppliers":
+        insights = _pharmacy_suppliers_insights(ctx)
+    elif module == "pharmacy-inventory":
+        insights = _pharmacy_inventory_insights(ctx)
 
     return PageInsightsResult(
         module=module,
@@ -542,5 +554,338 @@ def _resources_insights(ctx: BranchContext) -> list[PageInsight]:
             message=f"{total_resources} resources configured across {len(resource_by_unit)} units ({beds} beds).",
             entityCount=total_resources,
         ))
+
+    return insights
+
+
+# ── Pharmacy Overview ──────────────────────────────────────────────────
+
+
+def _pharmacy_overview_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    ph = ctx.pharmacy
+
+    if ph.totalStores == 0 and ph.totalDrugs == 0:
+        insights.append(PageInsight(
+            id="ph-not-started",
+            level="info",
+            message="Pharmacy module is not set up yet. Start by creating a Main pharmacy store, then import your drug master.",
+            actionHint="Create pharmacy store",
+        ))
+        return insights
+
+    # No main store
+    main_stores = [s for s in ph.stores if s.storeType == "MAIN" and s.status == "ACTIVE"]
+    if not main_stores:
+        insights.append(PageInsight(
+            id="ph-no-main",
+            level="critical",
+            message="No ACTIVE main pharmacy store. This is required for dispensing and procurement.",
+            actionHint="Create or activate main store",
+        ))
+
+    # Low drug count
+    if 0 < ph.activeDrugs < 100:
+        insights.append(PageInsight(
+            id="ph-low-drugs",
+            level="warning",
+            message=f"Only {ph.activeDrugs} active drugs in the master. At least 100 are recommended for go-live.",
+            actionHint="Import drugs via bulk import",
+            entityCount=ph.activeDrugs,
+        ))
+
+    # No formulary
+    if not ph.hasFormulary:
+        insights.append(PageInsight(
+            id="ph-no-formulary",
+            level="warning",
+            message="No formulary published yet. Formularies control which drugs are approved for prescription.",
+            actionHint="Create and publish a formulary",
+        ))
+
+    # Narcotics without vault
+    if ph.narcoticCount > 0:
+        vault_stores = [s for s in ph.stores if s.storeType == "NARCOTICS_VAULT"]
+        if not vault_stores:
+            insights.append(PageInsight(
+                id="ph-narcotic-no-vault",
+                level="warning",
+                message=f"{ph.narcoticCount} narcotic drug(s) in master but no narcotics vault store configured.",
+                actionHint="Create narcotics vault store",
+                entityCount=ph.narcoticCount,
+            ))
+
+    # Good summary
+    if not insights:
+        insights.append(PageInsight(
+            id="ph-summary",
+            level="info",
+            message=f"Pharmacy: {ph.activeStores} store(s), {ph.activeDrugs} drugs, {ph.supplierCount} supplier(s). {'Formulary published.' if ph.hasFormulary else ''}",
+        ))
+
+    return insights
+
+
+# ── Pharmacy Stores ───────────────────────────────────────────────────
+
+
+def _pharmacy_stores_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    ph = ctx.pharmacy
+
+    if ph.totalStores == 0:
+        insights.append(PageInsight(
+            id="phs-empty",
+            level="info",
+            message="No pharmacy stores configured. Create a Main store to begin setting up your pharmacy.",
+            actionHint="Create pharmacy store",
+        ))
+        return insights
+
+    # Active stores missing license
+    active_stores = [s for s in ph.stores if s.status == "ACTIVE"]
+    no_license = [s for s in active_stores if not s.drugLicenseNumber]
+    if no_license:
+        insights.append(PageInsight(
+            id="phs-no-license",
+            level="critical",
+            message=f"{len(no_license)} ACTIVE store(s) missing drug license number. Required by law.",
+            actionHint="Add drug license numbers",
+            entityCount=len(no_license),
+        ))
+
+    # Active stores missing pharmacist
+    no_pharmacist = [s for s in active_stores if not s.pharmacistInChargeId]
+    if no_pharmacist:
+        insights.append(PageInsight(
+            id="phs-no-pharmacist",
+            level="critical",
+            message=f"{len(no_pharmacist)} ACTIVE store(s) missing pharmacist-in-charge. Required for drug dispensing.",
+            actionHint="Assign pharmacists",
+            entityCount=len(no_pharmacist),
+        ))
+
+    # License expiry check
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    expiring = [
+        s for s in active_stores
+        if s.drugLicenseExpiry and s.drugLicenseExpiry <= now + timedelta(days=90)
+    ]
+    if expiring:
+        insights.append(PageInsight(
+            id="phs-license-expiry",
+            level="warning",
+            message=f"{len(expiring)} store(s) with drug license expiring within 90 days.",
+            actionHint="Renew drug licenses",
+            entityCount=len(expiring),
+        ))
+
+    # No dispensing store
+    dispensing = [s for s in active_stores if s.canDispense]
+    if active_stores and not dispensing:
+        insights.append(PageInsight(
+            id="phs-no-dispensing",
+            level="warning",
+            message="No ACTIVE store has dispensing enabled. At least one is required for patient prescriptions.",
+            actionHint="Enable dispensing on a store",
+        ))
+
+    return insights
+
+
+# ── Pharmacy Drugs ────────────────────────────────────────────────────
+
+
+def _pharmacy_drugs_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    ph = ctx.pharmacy
+
+    if ph.totalDrugs == 0:
+        insights.append(PageInsight(
+            id="phd-empty",
+            level="info",
+            message="Drug master is empty. Import drugs via bulk import or add them individually.",
+            actionHint="Import drugs",
+        ))
+        return insights
+
+    # High-alert drugs count
+    if ph.highAlertCount > 0:
+        insights.append(PageInsight(
+            id="phd-high-alert",
+            level="info",
+            message=f"{ph.highAlertCount} high-alert drug(s) in master. These require special storage and dispensing protocols.",
+            entityCount=ph.highAlertCount,
+        ))
+
+    # LASA drugs
+    if ph.lasaCount > 0:
+        insights.append(PageInsight(
+            id="phd-lasa",
+            level="info",
+            message=f"{ph.lasaCount} LASA (Look-Alike Sound-Alike) drug(s) flagged. Ensure Tall-Man lettering on labels.",
+            entityCount=ph.lasaCount,
+        ))
+    elif ph.totalDrugs > 50:
+        insights.append(PageInsight(
+            id="phd-no-lasa",
+            level="warning",
+            message="No drugs flagged as LASA. With 50+ drugs, LASA pairs likely exist. Run LASA detection.",
+            actionHint="Review LASA pairs",
+        ))
+
+    # No interactions configured
+    if ph.interactionCount == 0 and ph.totalDrugs > 20:
+        insights.append(PageInsight(
+            id="phd-no-interactions",
+            level="warning",
+            message="No drug interactions configured. Interaction checking is critical for patient safety.",
+            actionHint="Import drug interaction database",
+        ))
+
+    # Category distribution insight
+    if ph.byCategory:
+        top_cat = max(ph.byCategory, key=ph.byCategory.get)  # type: ignore
+        insights.append(PageInsight(
+            id="phd-category",
+            level="info",
+            message=f"Drug distribution: {len(ph.byCategory)} categories. Largest: {top_cat} ({ph.byCategory[top_cat]} drugs).",
+            entityCount=ph.totalDrugs,
+        ))
+
+    return insights
+
+
+# ── Pharmacy Formulary ───────────────────────────────────────────────
+
+
+def _pharmacy_formulary_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    ph = ctx.pharmacy
+
+    if not ph.hasFormulary:
+        insights.append(PageInsight(
+            id="phf-none",
+            level="warning",
+            message="No formulary created yet. A published formulary defines approved drugs for prescribing.",
+            actionHint="Create a formulary",
+        ))
+        return insights
+
+    if ph.formularyStatus == "DRAFT":
+        insights.append(PageInsight(
+            id="phf-draft",
+            level="warning",
+            message=f"Formulary v{ph.formularyVersion} is in DRAFT status. Publish it to make it active for prescribers.",
+            actionHint="Publish formulary",
+        ))
+
+    if ph.formularyStatus == "PUBLISHED":
+        insights.append(PageInsight(
+            id="phf-published",
+            level="info",
+            message=f"Formulary v{ph.formularyVersion} is published and active.",
+        ))
+
+    # Compare drug count to formulary expectation
+    if ph.totalDrugs > 0 and ph.activeDrugs > 0:
+        # Rough check: if < 50% of active drugs might be in formulary
+        insights.append(PageInsight(
+            id="phf-coverage",
+            level="info",
+            message=f"Drug master has {ph.activeDrugs} active drugs. Ensure formulary covers essential and commonly used drugs.",
+            actionHint="Review formulary items",
+            entityCount=ph.activeDrugs,
+        ))
+
+    return insights
+
+
+# ── Pharmacy Suppliers ───────────────────────────────────────────────
+
+
+def _pharmacy_suppliers_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    ph = ctx.pharmacy
+
+    if ph.supplierCount == 0:
+        if ph.totalDrugs > 0:
+            insights.append(PageInsight(
+                id="phsup-none",
+                level="warning",
+                message="No active suppliers configured. Suppliers are needed for procurement and indent workflows.",
+                actionHint="Add suppliers",
+            ))
+        else:
+            insights.append(PageInsight(
+                id="phsup-empty",
+                level="info",
+                message="No suppliers configured yet. Add suppliers after setting up your drug master.",
+                actionHint="Add suppliers",
+            ))
+        return insights
+
+    if ph.supplierCount == 1:
+        insights.append(PageInsight(
+            id="phsup-single",
+            level="info",
+            message="Only 1 supplier configured. Consider adding backup suppliers for supply chain resilience.",
+            actionHint="Add more suppliers",
+            entityCount=1,
+        ))
+
+    if ph.supplierCount >= 2:
+        insights.append(PageInsight(
+            id="phsup-ok",
+            level="info",
+            message=f"{ph.supplierCount} active supplier(s) configured.",
+            entityCount=ph.supplierCount,
+        ))
+
+    return insights
+
+
+# ── Pharmacy Inventory ───────────────────────────────────────────────
+
+
+def _pharmacy_inventory_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    ph = ctx.pharmacy
+
+    if ph.inventoryConfigCount == 0:
+        if ph.totalDrugs > 0 and ph.totalStores > 0:
+            insights.append(PageInsight(
+                id="phi-none",
+                level="warning",
+                message="No inventory levels configured. Set min/max/reorder levels to enable stock management.",
+                actionHint="Configure inventory levels",
+            ))
+        else:
+            insights.append(PageInsight(
+                id="phi-prereq",
+                level="info",
+                message="Set up pharmacy stores and drug master before configuring inventory levels.",
+            ))
+        return insights
+
+    # Check coverage
+    if ph.activeDrugs > 0:
+        coverage_pct = round(ph.inventoryConfigCount / ph.activeDrugs * 100)
+        if coverage_pct < 50:
+            insights.append(PageInsight(
+                id="phi-low-coverage",
+                level="warning",
+                message=f"Only {coverage_pct}% of active drugs have inventory levels configured ({ph.inventoryConfigCount} of {ph.activeDrugs}).",
+                actionHint="Configure remaining inventory levels",
+                entityCount=ph.activeDrugs - ph.inventoryConfigCount,
+            ))
+        else:
+            insights.append(PageInsight(
+                id="phi-coverage",
+                level="info",
+                message=f"{coverage_pct}% of active drugs have inventory levels configured ({ph.inventoryConfigCount} of {ph.activeDrugs}).",
+                entityCount=ph.inventoryConfigCount,
+            ))
 
     return insights

@@ -371,6 +371,25 @@ export class IamSeedService implements OnModuleInit {
 
           PERM.INFRA_GOLIVE_READ,
           PERM.INFRA_GOLIVE_RUN,
+
+          // Pharmacy Infrastructure
+          PERM.INFRA_PHARMACY_STORE_READ,
+          PERM.INFRA_PHARMACY_STORE_CREATE,
+          PERM.INFRA_PHARMACY_STORE_UPDATE,
+          PERM.INFRA_PHARMACY_DRUG_READ,
+          PERM.INFRA_PHARMACY_DRUG_CREATE,
+          PERM.INFRA_PHARMACY_DRUG_UPDATE,
+          PERM.INFRA_PHARMACY_FORMULARY_READ,
+          PERM.INFRA_PHARMACY_FORMULARY_CREATE,
+          PERM.INFRA_PHARMACY_FORMULARY_UPDATE,
+          PERM.INFRA_PHARMACY_FORMULARY_PUBLISH,
+          PERM.INFRA_PHARMACY_SUPPLIER_READ,
+          PERM.INFRA_PHARMACY_SUPPLIER_CREATE,
+          PERM.INFRA_PHARMACY_SUPPLIER_UPDATE,
+          PERM.INFRA_PHARMACY_INVENTORY_READ,
+          PERM.INFRA_PHARMACY_INVENTORY_UPDATE,
+          PERM.INFRA_PHARMACY_NARCOTICS_READ,
+          PERM.INFRA_PHARMACY_NARCOTICS_UPDATE,
         ].map(normalizePermCode);
       } else if (r.code === ROLE.HR_ADMIN) {
         permCodes = [
@@ -455,29 +474,75 @@ export class IamSeedService implements OnModuleInit {
       const temp = "ChangeMe@123";
       const hash = hashPassword(temp);
 
+      // 1) Ensure SUPER_ADMIN user exists
       const existing = await this.prisma.user.findUnique({ where: { email } });
-      if (!existing) {
-        await this.prisma.user.create({
-          data: {
-            email,
-            name: "ZypoCare Super Admin",
-            role: ROLE.SUPER_ADMIN,
-            roleVersionId: superV1.id,
-            passwordHash: hash,
-            mustChangePassword: false,
-            isActive: true,
-          },
-        });
-      } else {
+      const superUser = !existing
+        ? await this.prisma.user.create({
+            data: {
+              email,
+              name: "ZypoCare Super Admin",
+              role: ROLE.SUPER_ADMIN,
+              roleVersionId: superV1.id,
+              passwordHash: hash,
+              mustChangePassword: false,
+              isActive: true,
+            },
+          })
+        : await this.prisma.user.update({
+            where: { email },
+            data: {
+              role: ROLE.SUPER_ADMIN,
+              roleVersionId: superV1.id,
+              passwordHash: existing.passwordHash ?? hash,
+              mustChangePassword: false,
+              isActive: true,
+            },
+          });
+
+      // 2) ✅ Ensure SUPER_ADMIN exists in Staff table (critical gap fix)
+      // NOTE: Code-level enum values are CLINICAL/NON_CLINICAL (mapped to MEDICAL/NON_MEDICAL in DB)
+      // and onboarding status is DRAFT/IN_REVIEW/ACTIVE (no "COMPLETED").
+      const superEmpCode = "SA-0001";
+
+      const superStaff = await this.prisma.staff.upsert({
+        where: { empCode: superEmpCode },
+        update: {
+          name: "ZypoCare Super Admin",
+          designation: "Super Admin",
+          category: "NON_CLINICAL",
+          staffType: "ADMIN_STAFF",
+          hasSystemAccess: true,
+          onboardingStatus: "ACTIVE",
+          isActive: true,
+          // helpful contact mirrors
+          email,
+          personalEmail: email,
+          officialEmail: email,
+          phone: "+91-9999999999",
+          primaryPhone: "+91-9999999999",
+        },
+        create: {
+          empCode: superEmpCode,
+          name: "ZypoCare Super Admin",
+          designation: "Super Admin",
+          category: "NON_CLINICAL",
+          staffType: "ADMIN_STAFF",
+          hasSystemAccess: true,
+          onboardingStatus: "ACTIVE",
+          isActive: true,
+          email,
+          personalEmail: email,
+          officialEmail: email,
+          phone: "+91-9999999999",
+          primaryPhone: "+91-9999999999",
+        },
+      });
+
+      // 3) Link User <-> Staff (User.staffId is the owning FK in your schema)
+      if (superUser.staffId !== superStaff.id) {
         await this.prisma.user.update({
-          where: { email },
-          data: {
-            role: ROLE.SUPER_ADMIN,
-            roleVersionId: superV1.id,
-            passwordHash: existing.passwordHash ?? hash,
-            mustChangePassword: false,
-            isActive: true,
-          },
+          where: { id: superUser.id },
+          data: { staffId: superStaff.id },
         });
       }
     }

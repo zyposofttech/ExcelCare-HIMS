@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -7,7 +6,6 @@ import {
   HttpCode,
   HttpStatus,
   Post,
-  Query,
   Req,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
@@ -15,27 +13,15 @@ import { AuthService } from "./auth.service";
 import { Public } from "./public.decorator";
 import { hashPassword } from "../iam/password.util";
 
-/**
- * NOTE:
- * - login is public
- * - change-password requires Bearer token
- * - force-seed endpoints are DEV/BOOTSTRAP only (blocked in production by default)
- */
 @ApiTags("Auth/Login")
 @Controller("auth")
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  // -------------------------------
-  // Auth endpoints
-  // -------------------------------
-
   @Public()
   @HttpCode(HttpStatus.OK)
   @Post("login")
   async login(@Body() dto: Record<string, any>) {
-    // AuthService.login returns:
-    // { access_token, user { roleCode, roleScope, branchId, ... } }
     return this.authService.login(dto);
   }
 
@@ -69,36 +55,23 @@ export class AuthController {
     return { ok: true };
   }
 
-  /**
-   * Helpful for debugging what guards put on the request.
-   * If you later add staffId into JWT + principal, you’ll see it here immediately.
-   */
-  @HttpCode(HttpStatus.OK)
-  @Get("me")
-  async me(@Req() req: any) {
-    return {
-      jwt: req.user ?? null,
-      principal: req.principal ?? null,
-    };
-  }
-
   // -------------------------------
-  // Force seed helpers (DEV only)
+  // Force seed helpers (DEV ONLY)
   // -------------------------------
 
   private prisma() {
-    // Access prisma from AuthService (current pattern in your repo)
+    // Access prisma from AuthService (as in your original code)
     return (this.authService as any).prisma;
   }
 
   private assertForceSeedAllowed() {
-    const nodeEnv = (process.env.NODE_ENV || "").toLowerCase();
-    const allow = process.env.ALLOW_AUTH_FORCE_SEED === "true";
+    const nodeEnv = String(process.env.NODE_ENV || "").toLowerCase();
+    const allow =
+      process.env.AUTH_FORCE_SEED_ENABLED === "true" || nodeEnv !== "production";
 
-    // Block in production unless explicitly enabled
-    if (nodeEnv === "production" && !allow) {
+    if (!allow) {
       throw new ForbiddenException(
-        "force-seed is disabled in production. Set ALLOW_AUTH_FORCE_SEED=true to enable."
+        "force-seed is disabled in production (set AUTH_FORCE_SEED_ENABLED=true to allow)"
       );
     }
   }
@@ -151,42 +124,128 @@ export class AuthController {
     return roleVersion;
   }
 
+  private async nextAvailableEmpCode(base: string) {
+    const prisma = this.prisma();
+    let code = base.trim().toUpperCase();
+    if (!code) code = "SYS-ADMIN";
+
+    // If base is available, use it. Else suffix -2, -3, ...
+    let n = 1;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const exists = await prisma.staff.findUnique({
+        where: { empCode: code },
+        select: { id: true },
+      });
+      if (!exists) return code;
+      n += 1;
+      code = `${base.trim().toUpperCase()}-${n}`;
+    }
+  }
+
   /**
-   * ✅ Seeds SUPER_ADMIN user (GLOBAL).
-   * Does NOT create a Staff row (by design) — SUPER_ADMIN is an IAM principal.
-   *
-   * You can override defaults via query params for convenience:
-   * /auth/force-seed?email=...&password=...&name=...
+   * ✅ Critical gap fix:
+   * Ensure any seeded admin user also exists in Staff table,
+   * then link via user.staffId so the system can:
+   * - show "createdBy staff" consistently
+   * - allow workflow chains (approvals, leave routing, etc.)
+   * - support future clinical privileging UX (autofill grantedBy)
    */
+  private async ensureStaffLinkedToUser(args: {
+    userId: string;
+    email: string;
+    name: string;
+    designation: string;
+    empCodeBase: string;
+  }) {
+    const prisma = this.prisma();
+
+    const u = await prisma.user.findUnique({
+      where: { id: args.userId },
+      select: { id: true, staffId: true, email: true },
+    });
+    if (!u) return null;
+
+    // Already linked
+    if (u.staffId) return u.staffId;
+
+    // Reuse staff if it already exists by officialEmail/email
+    const existingStaff = await prisma.staff.findFirst({
+      where: {
+        OR: [{ officialEmail: args.email }, { email: args.email }],
+      },
+      select: { id: true },
+    });
+
+    let staffId: string;
+
+    if (existingStaff?.id) {
+      staffId = existingStaff.id;
+    } else {
+      const empCode = await this.nextAvailableEmpCode(args.empCodeBase);
+
+      const staff = await prisma.staff.create({
+        data: {
+          empCode,
+          name: args.name,
+          designation: args.designation,
+
+          // keep it simple + safe: system admins are NON_CLINICAL
+          category: "NON_CLINICAL",
+
+          // mark as system-access ready
+          hasSystemAccess: true,
+          onboardingStatus: "ACTIVE",
+
+          officialEmail: args.email,
+          email: args.email,
+          status: "ACTIVE",
+          isActive: true,
+
+          // No branch assignment for GLOBAL admins (allowed by schema)
+          primaryBranchId: null,
+          homeBranchId: null,
+        },
+        select: { id: true },
+      });
+
+      staffId = staff.id;
+    }
+
+    // Link user -> staff
+    await prisma.user.update({
+      where: { id: args.userId },
+      data: { staffId },
+      select: { id: true },
+    });
+
+    return staffId;
+  }
+
+  // ✅ Keeps your original endpoint but makes it deterministic (always SUPER_ADMIN)
   @Public()
   @Get("force-seed")
-  async forceSeed(
-    @Query("email") emailQ?: string,
-    @Query("password") passwordQ?: string,
-    @Query("name") nameQ?: string
-  ) {
+  async forceSeed() {
     this.assertForceSeedAllowed();
 
     const prisma = this.prisma();
 
-    const email = (emailQ?.trim() || "superadmin@zypocare.com").toLowerCase();
-    const password = passwordQ?.trim() || "ChangeMe@123";
-    const name = nameQ?.trim() || "ZypoCare Super Admin";
-
+    const email = "superadmin@zypocare.com";
+    const password = "ChangeMe@123";
     const hash = hashPassword(password);
 
     const roleVersion = await this.ensureActiveRoleVersion({
       code: "SUPER_ADMIN",
       name: "Super Admin",
       scope: "GLOBAL",
-      description: "Bootstrap Super Admin",
+      description: "Emergency Seed",
     });
 
     const user = await prisma.user.upsert({
       where: { email },
       update: {
         passwordHash: hash,
-        mustChangePassword: true,
+        mustChangePassword: false,
         isActive: true,
         role: "SUPER_ADMIN",
         roleVersionId: roleVersion.id,
@@ -194,40 +253,41 @@ export class AuthController {
       },
       create: {
         email,
-        name,
+        name: "ZypoCare Super Admin",
         role: "SUPER_ADMIN",
         roleVersionId: roleVersion.id,
         passwordHash: hash,
-        mustChangePassword: true,
+        mustChangePassword: false,
         isActive: true,
         branchId: null,
       },
     });
 
+    // ✅ Ensure SUPER_ADMIN also exists in Staff + link user.staffId
+    const staffId = await this.ensureStaffLinkedToUser({
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      designation: "Super Admin",
+      empCodeBase: "SYS-SUPERADMIN",
+    });
+
     return {
-      message: "✅ SUCCESS: Super Admin seeded!",
-      user: { email: user.email, password, mustChangePassword: true },
+      message: "✅ SUCCESS: Super Admin seeded (User + Staff linked)!",
+      user: { email: user.email, password, staffId },
     };
   }
 
-  /**
-   * ✅ Seeds Corporate Admin (GLOBAL) — useful for multi-branch setup.
-   */
+  // ✅ NEW: seed a Corporate Admin (GLOBAL) to manage branches
   @Public()
   @Get("force-seed-corporate")
-  async forceSeedCorporate(
-    @Query("email") emailQ?: string,
-    @Query("password") passwordQ?: string,
-    @Query("name") nameQ?: string
-  ) {
+  async forceSeedCorporate() {
     this.assertForceSeedAllowed();
 
     const prisma = this.prisma();
 
-    const email = (emailQ?.trim() || "corporateadmin@zypocare.com").toLowerCase();
-    const password = passwordQ?.trim() || "ChangeMe@123";
-    const name = nameQ?.trim() || "ZypoCare Corporate Admin";
-
+    const email = "corporateadmin@zypocare.com";
+    const password = "ChangeMe@123";
     const hash = hashPassword(password);
 
     const roleVersion = await this.ensureActiveRoleVersion({
@@ -241,7 +301,7 @@ export class AuthController {
       where: { email },
       update: {
         passwordHash: hash,
-        mustChangePassword: true,
+        mustChangePassword: false,
         isActive: true,
         role: "CORPORATE_ADMIN",
         roleVersionId: roleVersion.id,
@@ -249,82 +309,28 @@ export class AuthController {
       },
       create: {
         email,
-        name,
+        name: "ZypoCare Corporate Admin",
         role: "CORPORATE_ADMIN",
         roleVersionId: roleVersion.id,
         passwordHash: hash,
-        mustChangePassword: true,
+        mustChangePassword: false,
         isActive: true,
         branchId: null,
       },
     });
 
-    return {
-      message: "✅ SUCCESS: Corporate Admin seeded!",
-      user: { email: user.email, password, mustChangePassword: true },
-    };
-  }
-
-  /**
-   * ✅ Seeds Branch Admin (BRANCH).
-   * Needs branchId.
-   *
-   * Example:
-   * /auth/force-seed-branch-admin?branchId=xxx&email=...&password=...
-   */
-  @Public()
-  @Get("force-seed-branch-admin")
-  async forceSeedBranchAdmin(
-    @Query("branchId") branchId?: string,
-    @Query("email") emailQ?: string,
-    @Query("password") passwordQ?: string,
-    @Query("name") nameQ?: string
-  ) {
-    this.assertForceSeedAllowed();
-
-    const prisma = this.prisma();
-
-    const b = (branchId || "").trim();
-    if (!b) throw new BadRequestException("branchId is required");
-
-    const email = (emailQ?.trim() || `branchadmin.${b}@zypocare.com`).toLowerCase();
-    const password = passwordQ?.trim() || "ChangeMe@123";
-    const name = nameQ?.trim() || "ZypoCare Branch Admin";
-
-    const hash = hashPassword(password);
-
-    const roleVersion = await this.ensureActiveRoleVersion({
-      code: "BRANCH_ADMIN",
-      name: "Branch Admin",
-      scope: "BRANCH",
-      description: "Branch administrator",
-    });
-
-    const user = await prisma.user.upsert({
-      where: { email },
-      update: {
-        passwordHash: hash,
-        mustChangePassword: true,
-        isActive: true,
-        role: "BRANCH_ADMIN",
-        roleVersionId: roleVersion.id,
-        branchId: b,
-      },
-      create: {
-        email,
-        name,
-        role: "BRANCH_ADMIN",
-        roleVersionId: roleVersion.id,
-        passwordHash: hash,
-        mustChangePassword: true,
-        isActive: true,
-        branchId: b,
-      },
+    // ✅ Ensure CORPORATE_ADMIN also exists in Staff + link user.staffId
+    const staffId = await this.ensureStaffLinkedToUser({
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      designation: "Corporate Admin",
+      empCodeBase: "SYS-CORPORATEADMIN",
     });
 
     return {
-      message: "✅ SUCCESS: Branch Admin seeded!",
-      user: { email: user.email, password, branchId: b, mustChangePassword: true },
+      message: "✅ SUCCESS: Corporate Admin seeded (User + Staff linked)!",
+      user: { email: user.email, password, staffId },
     };
   }
 }

@@ -1,27 +1,81 @@
 import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/common";
 import { IamPrincipalService } from "./iam-principal.service";
 
+export type StaffSummary = {
+  id: string;
+  empCode: string;
+  name: string;
+  designation: string;
+
+  category: string; // CLINICAL | NON_CLINICAL (code-level)
+  staffType?: string | null;
+  status?: string | null;
+  onboardingStatus?: string | null;
+
+  hasSystemAccess?: boolean | null;
+
+  primaryBranchId?: string | null;
+  homeBranchId?: string | null;
+};
+
+export type StaffAssignmentSummary = {
+  id: string;
+  staffId: string;
+
+  branchId: string;
+  facilityId?: string | null;
+  departmentId?: string | null;
+  specialtyId?: string | null;
+  unitId?: string | null;
+
+  designation?: string | null;
+  role?: string | null;
+
+  assignmentType?: string | null;
+  status?: string | null;
+
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+
+  isPrimary?: boolean | null;
+  isActive?: boolean | null;
+
+  requiresApproval?: boolean | null;
+  approvalStatus?: string | null;
+
+  // Branch-level flags for quick gating
+  canAdmitPatients?: boolean | null;
+  canPerformSurgery?: boolean | null;
+  hasOTPrivileges?: boolean | null;
+};
+
 export type Principal = {
   userId: string;
   email: string;
   name: string;
 
-  /**
-   * Linked Staff directory identity (HR).
-   *
-   * - null for purely system users (e.g., GLOBAL SUPER_ADMIN not represented as Staff)
-   * - non-null for staff-managed accounts
-   */
-  staffId?: string | null;
-
+  // Effective branch for the request context (selected/derived)
   branchId: string | null;
+
   // Optional multi-branch allowance (derived from UserRoleBinding)
   branchIds?: string[];
+
   roleCode: string | null;
   roleScope: "GLOBAL" | "BRANCH" | null;
   roleVersionId: string | null;
   authzVersion: number;
   permissions: string[];
+
+  // ✅ Staff context (critical for onboarding, leave routing, privileging)
+  staffId?: string | null;
+  staff?: StaffSummary;
+  staffBranchIds?: string[];
+  staffAssignment?: StaffAssignmentSummary;
+
+  // Convenience shortcuts (helps FE + workflow routing)
+  departmentId?: string;
+  unitId?: string;
+  specialtyId?: string;
 };
 
 @Injectable()
@@ -29,12 +83,12 @@ export class AccessPolicyService {
   constructor(private principals: IamPrincipalService) {}
 
   /**
-   * Loads the local DB user as a Principal (roleScope + permissions).
+   * Loads the local DB user as a Principal (roleScope + permissions + staff context).
    *
    * Source of truth:
    *  - roleTemplateVersion (ACTIVE) permissions if roleVersionId exists
    *  - fallback: resolve latest ACTIVE version by roleTemplate.code
-   *  - safety fallback: SUPER_ADMIN gets all permissions (DB-driven)
+   *  - safety fallback: SUPER_ADMIN gets all permissions (DB-driven + code PERM)
    *
    * NOTE: returns null for disabled users (isActive=false).
    */
@@ -63,17 +117,14 @@ export class AccessPolicyService {
   /**
    * Convenience: checks if principal can operate on a branchId.
    * GLOBAL: allowed for any branchId
-   * BRANCH: allowed only for own branchId
+   * BRANCH: allowed only for allowed branches (branchIds if present, else branchId)
    */
   canAccessBranch(principal: Principal, branchId: string | null | undefined) {
     if (principal.roleScope === "GLOBAL") return true;
     if (principal.roleScope === "BRANCH") {
-      const allowed =
-        Array.isArray((principal as any).branchIds) && (principal as any).branchIds.length
-          ? (principal as any).branchIds
-          : principal.branchId
-            ? [principal.branchId]
-            : [];
+      const allowed = Array.isArray((principal as any).branchIds) && (principal as any).branchIds.length
+        ? (principal as any).branchIds
+        : (principal.branchId ? [principal.branchId] : []);
       if (!allowed.length) return false;
       if (!branchId) return false;
       return allowed.includes(branchId);
@@ -90,12 +141,9 @@ export class AccessPolicyService {
     const requested = req.length ? req : null;
 
     if (principal.roleScope === "BRANCH") {
-      const allowed =
-        Array.isArray((principal as any).branchIds) && (principal as any).branchIds.length
-          ? (principal as any).branchIds
-          : principal.branchId
-            ? [principal.branchId]
-            : [];
+      const allowed = Array.isArray((principal as any).branchIds) && (principal as any).branchIds.length
+        ? (principal as any).branchIds
+        : (principal.branchId ? [principal.branchId] : []);
 
       if (!allowed.length) {
         throw new ForbiddenException("Branch-scoped principal missing branchId");
@@ -129,16 +177,14 @@ export class AccessPolicyService {
   assertBranchAccess(principal: Principal, branchId: string | null | undefined) {
     if (principal.roleScope === "GLOBAL") return;
     if (principal.roleScope === "BRANCH") {
-      const allowed =
-        Array.isArray((principal as any).branchIds) && (principal as any).branchIds.length
-          ? (principal as any).branchIds
-          : principal.branchId
-            ? [principal.branchId]
-            : [];
+      const allowed = Array.isArray((principal as any).branchIds) && (principal as any).branchIds.length
+        ? (principal as any).branchIds
+        : (principal.branchId ? [principal.branchId] : []);
       if (!allowed.length) throw new ForbiddenException("Branch-scoped principal missing branchId");
       if (!branchId || !allowed.includes(branchId)) {
         throw new ForbiddenException("Forbidden: cross-branch access");
       }
+      return;
     }
   }
 }

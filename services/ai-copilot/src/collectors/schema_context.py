@@ -16,8 +16,15 @@ from src.db.models import (
     Branch,
     Department,
     DepartmentSpecialty,
+    DrugInteraction,
+    DrugMaster,
+    Formulary,
+    FormularyItem,
+    InventoryConfig,
     LocationNode,
     LocationNodeRevision,
+    PharmacyStore,
+    PharmSupplier,
     Specialty,
     StaffAssignment,
     Unit,
@@ -33,8 +40,11 @@ from .models import (
     BranchSnapshot,
     DepartmentDetail,
     DepartmentSummary,
+    DrugSnapshot,
     LocationSummary,
     LocationTreeNode,
+    PharmacySummary,
+    PharmStoreSnapshot,
     ResourceSummary,
     RoomDetail,
     SpecialtyDetail,
@@ -62,14 +72,16 @@ async def collect_branch_context(branch_id: str) -> BranchContext:
         units = await _collect_units(session, branch_id)
         departments = await _collect_departments(session, branch_id)
         specialties = await _collect_specialties(session, branch_id)
+        pharmacy = await _collect_pharmacy(session, branch_id)
 
-    text_summary = _build_text_summary(branch, location, units, departments)
+    text_summary = _build_text_summary(branch, location, units, departments, pharmacy)
     return BranchContext(
         branch=branch,
         location=location,
         units=units,
         departments=departments,
         specialties=specialties,
+        pharmacy=pharmacy,
         textSummary=text_summary,
     )
 
@@ -369,6 +381,154 @@ async def _collect_specialties(session: AsyncSession, branch_id: str) -> Special
     )
 
 
+# ── Pharmacy ──────────────────────────────────────────────────────────
+
+
+async def _collect_pharmacy(
+    session: AsyncSession, branch_id: str
+) -> PharmacySummary:
+    # Stores
+    store_result = await session.execute(
+        select(PharmacyStore).where(PharmacyStore.branchId == branch_id)
+    )
+    stores = store_result.scalars().all()
+
+    store_snapshots = [
+        PharmStoreSnapshot(
+            id=s.id,
+            storeCode=s.storeCode,
+            storeName=s.storeName,
+            storeType=s.storeType,
+            status=s.status,
+            parentStoreId=s.parentStoreId,
+            pharmacistInChargeId=s.pharmacistInChargeId,
+            drugLicenseNumber=s.drugLicenseNumber,
+            drugLicenseExpiry=s.drugLicenseExpiry,
+            is24x7=s.is24x7,
+            canDispense=s.canDispense,
+            isActive=s.isActive,
+        )
+        for s in stores
+    ]
+
+    # Drugs — cap at 500 for context size
+    drug_result = await session.execute(
+        select(DrugMaster)
+        .where(DrugMaster.branchId == branch_id)
+        .order_by(DrugMaster.drugCode.asc())
+        .limit(500)
+    )
+    drugs = drug_result.scalars().all()
+
+    # Total drug count (may be > 500)
+    total_drug_result = await session.execute(
+        select(func.count(DrugMaster.id)).where(DrugMaster.branchId == branch_id)
+    )
+    total_drugs = total_drug_result.scalar() or 0
+
+    by_category: dict[str, int] = {}
+    by_schedule: dict[str, int] = {}
+    narcotic_count = 0
+    high_alert_count = 0
+    antibiotic_count = 0
+    lasa_count = 0
+    active_drugs = 0
+
+    drug_snapshots: list[DrugSnapshot] = []
+    for d in drugs:
+        by_category[d.category] = by_category.get(d.category, 0) + 1
+        by_schedule[d.scheduleClass] = by_schedule.get(d.scheduleClass, 0) + 1
+        if d.isNarcotic:
+            narcotic_count += 1
+        if d.isHighAlert:
+            high_alert_count += 1
+        if d.isAntibiotic:
+            antibiotic_count += 1
+        if d.isLasa:
+            lasa_count += 1
+        if d.isActive:
+            active_drugs += 1
+
+        drug_snapshots.append(
+            DrugSnapshot(
+                id=d.id,
+                drugCode=d.drugCode,
+                genericName=d.genericName,
+                brandName=d.brandName,
+                category=d.category,
+                strength=d.strength,
+                route=d.route,
+                scheduleClass=d.scheduleClass,
+                isNarcotic=d.isNarcotic,
+                isControlled=d.isControlled,
+                isAntibiotic=d.isAntibiotic,
+                isHighAlert=d.isHighAlert,
+                isLasa=d.isLasa,
+                formularyStatus=d.formularyStatus,
+                status=d.status,
+            )
+        )
+
+    # Formulary
+    formulary_result = await session.execute(
+        select(Formulary)
+        .where(Formulary.branchId == branch_id)
+        .order_by(Formulary.version.desc())
+        .limit(1)
+    )
+    formulary = formulary_result.scalar_one_or_none()
+
+    # Interaction count
+    interaction_result = await session.execute(
+        select(func.count(DrugInteraction.id)).where(
+            DrugInteraction.drugAId.in_(
+                select(DrugMaster.id).where(DrugMaster.branchId == branch_id)
+            )
+        )
+    )
+    interaction_count = interaction_result.scalar() or 0
+
+    # Supplier count
+    supplier_result = await session.execute(
+        select(func.count(PharmSupplier.id)).where(
+            PharmSupplier.branchId == branch_id,
+            cast(PharmSupplier.status, SAString) == "ACTIVE",
+        )
+    )
+    supplier_count = supplier_result.scalar() or 0
+
+    # Inventory config count
+    inv_result = await session.execute(
+        select(func.count(InventoryConfig.id)).where(
+            InventoryConfig.pharmacyStoreId.in_(
+                select(PharmacyStore.id).where(PharmacyStore.branchId == branch_id)
+            )
+        )
+    )
+    inv_config_count = inv_result.scalar() or 0
+
+    return PharmacySummary(
+        totalStores=len(stores),
+        activeStores=sum(1 for s in stores if str(s.status) == "ACTIVE"),
+        stores=store_snapshots,
+        totalDrugs=total_drugs,
+        activeDrugs=active_drugs,
+        drugs=drug_snapshots,
+        narcoticCount=narcotic_count,
+        highAlertCount=high_alert_count,
+        antibioticCount=antibiotic_count,
+        lasaCount=lasa_count,
+        hasFormulary=formulary is not None,
+        formularyVersion=formulary.version if formulary else None,
+        formularyStatus=str(formulary.status) if formulary else None,
+        interactionCount=interaction_count,
+        supplierCount=supplier_count,
+        inventoryConfigCount=inv_config_count,
+        byCategory=by_category,
+        byScheduleClass=by_schedule,
+    )
+
+
 # ── Text Summary ──────────────────────────────────────────────────────────
 
 
@@ -377,6 +537,7 @@ def _build_text_summary(
     location: LocationSummary,
     units: UnitSummary,
     departments: DepartmentSummary,
+    pharmacy: PharmacySummary | None = None,
 ) -> str:
     lines: list[str] = []
 
@@ -437,5 +598,24 @@ def _build_text_summary(
         )
     else:
         lines.append("Departments: Not set up")
+
+    # Pharmacy
+    if pharmacy and pharmacy.totalStores > 0:
+        lines.append(
+            f"Pharmacy stores: {pharmacy.totalStores} "
+            f"({pharmacy.activeStores} active)"
+        )
+        lines.append(f"Drug master: {pharmacy.totalDrugs} drugs ({pharmacy.activeDrugs} active)")
+        if pharmacy.narcoticCount > 0:
+            lines.append(f"Narcotics: {pharmacy.narcoticCount} drug(s)")
+        if pharmacy.highAlertCount > 0:
+            lines.append(f"High-alert drugs: {pharmacy.highAlertCount}")
+        if pharmacy.hasFormulary:
+            lines.append(f"Formulary: v{pharmacy.formularyVersion} ({pharmacy.formularyStatus})")
+        else:
+            lines.append("Formulary: Not published")
+        lines.append(f"Suppliers: {pharmacy.supplierCount}, Interactions: {pharmacy.interactionCount}")
+    elif pharmacy:
+        lines.append("Pharmacy: Not set up")
 
     return "\n".join(lines)

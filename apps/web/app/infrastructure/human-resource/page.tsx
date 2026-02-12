@@ -75,20 +75,6 @@ const tiles: Tile[] = [
     badge: "Planned",
     icon: <ShieldCheck className="h-4 w-4 text-zc-accent" />,
   },
-  {
-    title: "Appraisals",
-    desc: "Performance appraisals, probation reviews, and confirmation workflows.",
-    href: "/infrastructure/human-resource/appraisals",
-    badge: "Planned",
-    icon: <CheckCircle2 className="h-4 w-4 text-zc-accent" />,
-  },
-  {
-    title: "Separation",
-    desc: "Resignation, termination, exit checklist, and access revocation.",
-    href: "/infrastructure/human-resource/separation",
-    badge: "Planned",
-    icon: <AlertTriangle className="h-4 w-4 text-zc-accent" />,
-  },
 ];
 
 function StatusPill({ status }: { status: TileBadge }) {
@@ -175,16 +161,16 @@ export default function HumanResourceOverviewPage() {
 
           <Card className="overflow-hidden">
             <CardHeader className="pb-4">
-              <CardTitle className="text-base">Implementation plan (frontend)</CardTitle>
+              <CardTitle className="text-base">How It Works</CardTitle>
               <CardDescription className="text-sm">
-                We will build this module as multi-page workflow (not one mega page). Next: Staff Directory → Onboarding Wizard steps → Staff Profile tabs.
+                The Human Resource module provides a comprehensive suite of tools to manage hospital staff effectively. Start with the Staff Directory to create profiles, manage assignments, credentials, and system access. Then, utilize the Roster for shift scheduling and coverage planning, track Attendance with event logging and biometric integrations, handle Leaves with requests and approvals, and ensure compliance with Training requirements. 
               </CardDescription>
             </CardHeader>
             <Separator />
             <CardContent className="pt-6 text-sm text-zc-muted">
               <ul className="list-disc space-y-2 pl-5">
                 <li>Staff Directory list (filters, statuses, quick actions)</li>
-                <li>Onboarding Wizard (17 steps as per workflow) with Save-as-draft</li>
+                <li>Onboarding Wizard with Save-as-draft</li>
                 <li>Staff Profile (Overview, Assignments, Credentials, System Access, Roles, Audit)</li>
                 <li>Then: roster, attendance, leaves, training, appraisals, separation</li>
               </ul>
