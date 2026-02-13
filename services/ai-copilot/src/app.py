@@ -419,11 +419,13 @@ async def ai_health_check(branchId: str = Query(...), bust: str = Query(None)):
             "area": _issue_area(issue.category),
         })
 
-    # Consistency issues
+    # Consistency issues (all severities — blockers, warnings, and infos)
     for issue in consistency.blockers:
         _append_consistency_issue(issue, "BLOCKER")
     for issue in consistency.warnings:
         _append_consistency_issue(issue, "WARNING")
+    for issue in consistency.infos:
+        _append_consistency_issue(issue, "INFO")
 
     # NABH issues — extract from chapter results (they have id, description, fixHint)
     for chapter in nabh.chapters:
@@ -483,6 +485,26 @@ def _issue_area(category: str) -> str:
         "ROOM": "rooms",
         "RESOURCE": "resources",
         "PHARMACY": "pharmacy",
+        # Billing Setup
+        "TAX_CODE": "tax-codes",
+        "CHARGE_MASTER": "charge-master",
+        "TARIFF_PLAN": "tariff-plans",
+        "PAYER": "payers",
+        "CONTRACT": "payer-contracts",
+        "GOV_SCHEME": "gov-schemes",
+        "PRICING_TIER": "pricing-tiers",
+        "PRICE_HISTORY": "price-history",
+        # Service Catalogue
+        "SERVICE_CATALOG": "service-items",
+        "SERVICE_CATALOGUE": "service-catalogues",
+        "SERVICE_LIBRARY": "service-library",
+        "SERVICE_MAPPING": "service-mapping",
+        "SERVICE_PACKAGE": "service-packages",
+        "ORDER_SET": "order-sets",
+        "SERVICE_AVAILABILITY": "service-availability",
+        "SERVICE_BULK_IMPORT": "service-bulk-import",
+        # Legacy fallback
+        "FINANCIAL": "tax-codes",
     }
     return mapping.get(category, "infrastructure")
 
@@ -502,6 +524,126 @@ def _nabh_area(check_id: str) -> str:
     }
     prefix = check_id.rsplit(".", 1)[0] if "." in check_id else check_id
     return _NABH_AREA_MAP.get(prefix, "infrastructure")
+
+
+# ── Service Catalog AI Engines ─────────────────────────────────────────
+
+
+class ServiceSearchInput(BaseModel):
+    query: str
+    branchId: str
+    limit: int = 20
+
+
+@app.post("/v1/ai/service-search")
+async def ai_service_search(inp: ServiceSearchInput):
+    """Fuzzy + synonym service search."""
+    from .collectors.schema_context import collect_branch_context
+    from .engines.service_search import search_services
+
+    try:
+        ctx = await collect_branch_context(inp.branchId)
+        return search_services(inp.query, ctx, inp.limit).model_dump()
+    except Exception as exc:
+        logger.warning("service-search failed: %s", exc)
+        return {"query": inp.query, "hits": [], "total": 0}
+
+
+class CodeSuggestInput(BaseModel):
+    serviceName: str
+    category: str | None = None
+    branchId: str | None = None
+
+
+@app.post("/v1/ai/suggest-codes")
+async def ai_suggest_codes(inp: CodeSuggestInput):
+    """Suggest LOINC/CPT/SNOMED codes for a service."""
+    from .engines.code_suggester import suggest_codes
+
+    ctx = None
+    if inp.branchId:
+        try:
+            from .collectors.schema_context import collect_branch_context
+            ctx = await collect_branch_context(inp.branchId)
+        except Exception:
+            pass
+    return suggest_codes(inp.serviceName, inp.category, ctx).model_dump()
+
+
+class DuplicateCheckInput(BaseModel):
+    branchId: str
+    threshold: float = 0.7
+
+
+@app.post("/v1/ai/duplicate-check")
+async def ai_duplicate_check(inp: DuplicateCheckInput):
+    """Detect potential duplicate service items."""
+    from .collectors.schema_context import collect_branch_context
+    from .engines.duplicate_detector import detect_duplicates
+
+    try:
+        ctx = await collect_branch_context(inp.branchId)
+        return detect_duplicates(ctx, inp.threshold).model_dump()
+    except Exception as exc:
+        logger.warning("duplicate-check failed: %s", exc)
+        return {"totalItemsChecked": 0, "potentialDuplicates": [], "highConfidence": 0, "mediumConfidence": 0}
+
+
+class PricingRecommendInput(BaseModel):
+    branchId: str
+
+
+@app.post("/v1/ai/pricing-recommend")
+async def ai_pricing_recommend(inp: PricingRecommendInput):
+    """Statistical pricing advice based on branch data."""
+    from .collectors.schema_context import collect_branch_context
+    from .engines.pricing_recommender import recommend_pricing
+
+    try:
+        ctx = await collect_branch_context(inp.branchId)
+        return recommend_pricing(ctx).model_dump()
+    except Exception as exc:
+        logger.warning("pricing-recommend failed: %s", exc)
+        return {"insights": [], "serviceCoveragePercent": 0}
+
+
+class ContractAnalysisInput(BaseModel):
+    branchId: str
+
+
+@app.post("/v1/ai/contract-analysis")
+async def ai_contract_analysis(inp: ContractAnalysisInput):
+    """Payer contract profitability and coverage analysis."""
+    from .collectors.schema_context import collect_branch_context
+    from .engines.payer_contract_analyzer import analyze_contracts
+
+    try:
+        ctx = await collect_branch_context(inp.branchId)
+        return analyze_contracts(ctx).model_dump()
+    except Exception as exc:
+        logger.warning("contract-analysis failed: %s", exc)
+        return {"totalPayers": 0, "totalContracts": 0, "activeContracts": 0, "insights": [], "coverageScore": 0}
+
+
+class GSTClassifyInput(BaseModel):
+    serviceName: str
+    category: str | None = None
+    branchId: str | None = None
+
+
+@app.post("/v1/ai/gst-classify")
+async def ai_gst_classify(inp: GSTClassifyInput):
+    """Auto GST/SAC classification for a service."""
+    from .engines.gst_compliance import classify_gst
+
+    ctx = None
+    if inp.branchId:
+        try:
+            from .collectors.schema_context import collect_branch_context
+            ctx = await collect_branch_context(inp.branchId)
+        except Exception:
+            pass
+    return classify_gst(inp.serviceName, inp.category, ctx).model_dump()
 
 
 # ── Page-Level Insights ─────────────────────────────────────────────────

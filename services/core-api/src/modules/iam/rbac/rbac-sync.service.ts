@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import type { PrismaClient } from "@zypocare/db";
+import { ROLE } from "../iam.constants";
 import { PERMISSIONS, normalizePermCode } from "./permission-catalog";
 
 @Injectable()
@@ -72,6 +73,12 @@ export class RbacSyncService implements OnModuleInit {
       }
     }
 
+    // ── Auto-assign new permissions to SUPER_ADMIN ────────────────────────
+    // SUPER_ADMIN must always have every permission. When new perms are added
+    // in code, this block ensures they get assigned on every sync — even in
+    // production where iam.seed.ts may not run (AUTH_DEV_SEED=false).
+    await this.ensureSuperAdminHasAll();
+
     const result = { created, updated, total: items.length };
 
     this.logger.log(
@@ -79,5 +86,54 @@ export class RbacSyncService implements OnModuleInit {
     );
 
     return result;
+  }
+
+  /**
+   * Ensure SUPER_ADMIN role template has every permission in the catalog
+   * assigned to its active (v1) version. This is idempotent — existing
+   * assignments are upserted (no duplicates, no deletions).
+   */
+  private async ensureSuperAdminHasAll(): Promise<void> {
+    try {
+      const tpl = await this.prisma.roleTemplate.findUnique({
+        where: { code: ROLE.SUPER_ADMIN },
+      });
+      if (!tpl) return; // role template not seeded yet
+
+      const v1 = await (this.prisma as any).roleTemplateVersion.findFirst({
+        where: { roleTemplateId: tpl.id, version: 1 },
+      });
+      if (!v1) return;
+
+      const allPerms = await this.prisma.permission.findMany({
+        select: { id: true },
+      });
+
+      const existingAssignments = await (this.prisma as any).roleTemplatePermission.findMany({
+        where: { roleVersionId: v1.id },
+        select: { permissionId: true },
+      });
+      const existingIds = new Set(
+        existingAssignments.map((a: any) => a.permissionId),
+      );
+
+      let added = 0;
+      for (const p of allPerms) {
+        if (existingIds.has(p.id)) continue;
+        await (this.prisma as any).roleTemplatePermission.create({
+          data: { roleVersionId: v1.id, permissionId: p.id },
+        });
+        added++;
+      }
+
+      if (added > 0) {
+        this.logger.log(
+          `SUPER_ADMIN auto-granted ${added} new permission(s)`,
+        );
+      }
+    } catch (err) {
+      // Non-fatal: log and continue. The seed will fix it on next dev restart.
+      this.logger.warn(`SUPER_ADMIN auto-grant failed (non-fatal): ${err}`);
+    }
   }
 }

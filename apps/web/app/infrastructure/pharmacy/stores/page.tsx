@@ -125,6 +125,9 @@ export default function PharmacyStoresPage() {
   // Create dialog
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [allStores, setAllStores] = React.useState<StoreRow[]>([]);
+  const [staffList, setStaffList] = React.useState<
+    { id: string; empCode: string; name: string; designation?: string | null }[]
+  >([]);
   const [form, setForm] = React.useState<any>({});
   const [saving, setSaving] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
@@ -175,10 +178,20 @@ export default function PharmacyStoresPage() {
     } catch {}
   }, [branchId]);
 
+  const loadStaff = React.useCallback(async () => {
+    if (!branchId) return;
+    try {
+      const data = await apiFetch(`/infrastructure/staff?take=200`);
+      const list = Array.isArray(data) ? data : data?.items ?? data?.rows ?? [];
+      setStaffList(Array.isArray(list) ? list : []);
+    } catch {}
+  }, [branchId]);
+
   const openCreate = () => {
-    setForm({ storeType: "OP_PHARMACY", is24x7: false, canDispense: false, canIndent: true, canReceiveStock: false, canReturnVendor: false, autoIndentEnabled: false });
+    setForm({ storeType: "OP_PHARMACY", is24x7: false, canDispense: false, canIndent: true, canReceiveStock: false, canReturnVendor: false, autoIndentEnabled: false, pharmacistInChargeId: "" });
     setErr(null);
     loadAllStores();
+    loadStaff();
     setDialogOpen(true);
   };
 
@@ -189,9 +202,14 @@ export default function PharmacyStoresPage() {
 
     setSaving(true);
     try {
+      const payload = { ...form };
+      // Don't send empty string for optional FK fields
+      if (!payload.pharmacistInChargeId) delete payload.pharmacistInChargeId;
+      if (!payload.parentStoreId) delete payload.parentStoreId;
+
       await apiFetch(`/infrastructure/pharmacy/stores`, {
         method: "POST",
-        body: form,
+        body: payload,
       });
       setDialogOpen(false);
       setForm({});
@@ -524,6 +542,24 @@ export default function PharmacyStoresPage() {
                   </Select>
                 </div>
               )}
+
+              <div className="grid gap-2">
+                <Label>Pharmacist In Charge</Label>
+                <Select
+                  value={form.pharmacistInChargeId ?? ""}
+                  onValueChange={(v) => setForm({ ...form, pharmacistInChargeId: v })}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select pharmacist" /></SelectTrigger>
+                  <SelectContent>
+                    {staffList.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.empCode} — {s.name}{s.designation ? ` (${s.designation})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-zc-muted">Required to activate the store. A pharmacist must be assigned before the store can go live.</p>
+              </div>
             </div>
 
             <Separator />

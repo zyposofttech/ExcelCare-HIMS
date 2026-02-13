@@ -990,6 +990,220 @@ def run_consistency_checks(ctx: BranchContext) -> ConsistencyResult:
     track("RESOURCE", b)
 
     # ═══════════════════════════════════════════════════════════════════════
+    # 8. SERVICE CATALOG & FINANCIAL CONFIG
+    # ═══════════════════════════════════════════════════════════════════════
+    # NOTE: Each module is mandatory for go-live. Checks fire independently
+    # (no cross-module prerequisite gating) so sidebar badges always appear.
+    sc = ctx.serviceCatalog
+
+    # ── Service Items ───────────────────────────────────────────────────
+    b = len(issues)
+    checks_run += 1
+    if sc.totalServiceItems == 0:
+        issues.append(
+            _iss(
+                "SVC-001", "SERVICE_CATALOG", "WARNING",
+                "No service items configured",
+                "Service items are required for ordering and billing.",
+                "Go to Service Items and create services.",
+            )
+        )
+    track("SERVICE_CATALOG", b)
+
+    b = len(issues)
+    checks_run += 1
+    if sc.withoutBasePrice > 5:
+        issues.append(
+            _iss(
+                "SVC-002", "SERVICE_CATALOG", "WARNING",
+                f"{sc.withoutBasePrice} service(s) have no base price",
+                "Services without prices cannot be billed correctly.",
+                "Set base prices for all active services.",
+                count=sc.withoutBasePrice,
+            )
+        )
+    track("SERVICE_CATALOG", b)
+
+    # ── Charge Master ───────────────────────────────────────────────────
+    b = len(issues)
+    checks_run += 1
+    if sc.totalChargeMaster == 0:
+        issues.append(
+            _iss(
+                "CHG-001", "CHARGE_MASTER", "WARNING",
+                "No charge master items configured",
+                "The charge master defines billable line items for revenue capture.",
+                "Go to Charge Master and create items (lab tests, procedures, supplies, etc.).",
+            )
+        )
+    track("CHARGE_MASTER", b)
+
+    # ── Service Mapping ─────────────────────────────────────────────────
+    b = len(issues)
+    checks_run += 1
+    if sc.totalServiceItems == 0 or sc.totalChargeMaster == 0:
+        issues.append(
+            _iss(
+                "MAP-001", "SERVICE_MAPPING", "WARNING",
+                "Service-to-Charge mapping not possible yet",
+                "Both service items and charge master items are needed for mapping.",
+                "Set up Service Items and Charge Master first, then create mappings.",
+            )
+        )
+    elif sc.totalChargeMaster > 0 and sc.totalServiceItems > 0:
+        unmapped = abs(sc.activeChargeMaster - sc.activeServiceItems)
+        if unmapped > 5:
+            issues.append(
+                _iss(
+                    "MAP-002", "SERVICE_MAPPING", "WARNING",
+                    f"~{unmapped} items may lack service-to-charge mapping",
+                    "Unmapped items cannot be ordered or billed correctly.",
+                    "Go to Service <-> Charge Mapping and link services to charges.",
+                    count=unmapped,
+                )
+            )
+    track("SERVICE_MAPPING", b)
+
+    # ── Tax Codes (GST) ────────────────────────────────────────────────
+    b = len(issues)
+    checks_run += 1
+    if sc.totalTaxCodes == 0:
+        issues.append(
+            _iss(
+                "TAX-001", "TAX_CODE", "WARNING",
+                "No GST tax codes configured",
+                "Tax codes are needed for GST-compliant billing.",
+                "Go to Tax Codes (GST) and configure rates (5%, 12%, 18%, exempt).",
+            )
+        )
+    track("TAX_CODE", b)
+
+    # ── Tariff Plans & Rates ────────────────────────────────────────────
+    b = len(issues)
+    checks_run += 1
+    if sc.totalTariffPlans == 0:
+        issues.append(
+            _iss(
+                "TAR-001", "TARIFF_PLAN", "WARNING",
+                "No tariff plans configured",
+                "Tariff plans define negotiated rates for payers and patient categories.",
+                "Go to Tariff Plans & Rates and create at least one plan.",
+            )
+        )
+    track("TARIFF_PLAN", b)
+
+    # ── Payer Management ────────────────────────────────────────────────
+    b = len(issues)
+    checks_run += 1
+    if sc.totalPayers == 0:
+        issues.append(
+            _iss(
+                "PAY-001", "PAYER", "WARNING",
+                "No payers configured",
+                "Payers are needed for insurance billing and self-pay.",
+                "Go to Payer Management and create payers (start with CASH payer).",
+            )
+        )
+    track("PAYER", b)
+
+    b = len(issues)
+    checks_run += 1
+    if not sc.hasCashPayer and sc.totalPayers > 0:
+        issues.append(
+            _iss(
+                "PAY-002", "PAYER", "WARNING",
+                "No CASH payer configured",
+                "Self-pay patients need a CASH billing path.",
+                "Create a payer with kind=CASH.",
+            )
+        )
+    track("PAYER", b)
+
+    # ── Payer Contracts ─────────────────────────────────────────────────
+    b = len(issues)
+    checks_run += 1
+    if sc.totalContracts == 0:
+        issues.append(
+            _iss(
+                "CON-001", "CONTRACT", "WARNING",
+                "No payer contracts configured",
+                "Contracts define negotiated rates and coverage terms per payer.",
+                "Go to Payer Contracts and create contracts.",
+            )
+        )
+    track("CONTRACT", b)
+
+    b = len(issues)
+    checks_run += 1
+    if sc.expiredContracts > 0:
+        issues.append(
+            _iss(
+                "CON-002", "CONTRACT", "INFO",
+                f"{sc.expiredContracts} contract(s) expired",
+                "Expired contracts should be renewed or terminated.",
+                "Review expired contracts in Payer Contracts.",
+                count=sc.expiredContracts,
+            )
+        )
+    track("CONTRACT", b)
+
+    # ── Government Schemes ──────────────────────────────────────────────
+    b = len(issues)
+    checks_run += 1
+    if sc.totalGovSchemes == 0:
+        issues.append(
+            _iss(
+                "GOV-001", "GOV_SCHEME", "WARNING",
+                "No government schemes configured",
+                "Set up PMJAY, CGHS, ECHS, or state schemes for government-insured patients.",
+                "Go to Government Schemes and add scheme configurations.",
+            )
+        )
+    track("GOV_SCHEME", b)
+
+    # ── Pricing Tiers ───────────────────────────────────────────────────
+    b = len(issues)
+    checks_run += 1
+    if sc.totalPricingTiers == 0:
+        issues.append(
+            _iss(
+                "TIER-001", "PRICING_TIER", "WARNING",
+                "No patient pricing tiers configured",
+                "Pricing tiers (General, BPL, Staff, Senior Citizen, etc.) enable differential pricing.",
+                "Go to Pricing Tiers and create tier configurations.",
+            )
+        )
+    track("PRICING_TIER", b)
+
+    # ── Price History ───────────────────────────────────────────────────
+    b = len(issues)
+    checks_run += 1
+    if sc.priceChangeCount == 0:
+        issues.append(
+            _iss(
+                "PRICE-001", "PRICE_HISTORY", "INFO",
+                "No price change history recorded",
+                "Price history helps audit rate changes over time.",
+                "Price history is auto-tracked when service prices change.",
+            )
+        )
+    track("PRICE_HISTORY", b)
+
+    # ── Service Catalogues ──────────────────────────────────────────────
+    b = len(issues)
+    checks_run += 1
+    if sc.totalServiceItems == 0 and sc.totalChargeMaster == 0:
+        issues.append(
+            _iss(
+                "CAT-001", "SERVICE_CATALOGUE", "WARNING",
+                "No service catalogue can be built yet",
+                "Service items and charge master items are needed before creating catalogues.",
+                "Set up Service Items and Charge Master first.",
+            )
+        )
+    track("SERVICE_CATALOGUE", b)
+
+    # ═══════════════════════════════════════════════════════════════════════
     return _build_result(checks_run, issues, cs)
 
 

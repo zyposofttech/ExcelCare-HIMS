@@ -28,10 +28,10 @@ const buttonVariants = cva(
         destructive: "bg-zc-danger text-white hover:opacity-90",
         
         // Success variant added exactly as requested
-        success: "bg-[rgb(4,120,87)] text-white shadow-elev-1 hover:opacity-90",
-        warning: "bg-[rgb(242,65,61)] text-white shadow-elev-1 hover:opacity-90",
-        info: "bg-[rgb(159,11,244)] text-white shadow-elev-1 hover:opacity-90",
-        neutral: "bg-zc-panel text-zc-text border border-zc-border hover:bg-zc-panel/70",
+        success: "bg-[rgb(47,168,72)] text-white shadow-elev-1 hover:opacity-90",
+        warning: "bg-[rgb(255,69,56)] text-white shadow-elev-1 hover:opacity-90",
+        info: "bg-[rgb(146,84,222)] text-white shadow-elev-1 hover:opacity-90",
+        neutral: "bg-[rgb(56, 56, 56)] text-white shadow-elev-1 hover:opacity-90",
         link: "bg-transparent text-zc-accent underline-offset-4 hover:underline",
       },
       size: {

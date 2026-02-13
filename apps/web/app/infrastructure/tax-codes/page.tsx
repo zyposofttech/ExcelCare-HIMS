@@ -1,8 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { AppLink as Link } from "@/components/app-link";
-
 import { AppShell } from "@/components/AppShell";
 import { RequirePerm } from "@/components/RequirePerm";
 import { Button } from "@/components/ui/button";
@@ -12,9 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Dialog,
@@ -39,10 +35,9 @@ import { cn } from "@/lib/cn";
 
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import { useActiveBranchStore } from "@/lib/branch/active-branch";
+import { usePageInsights } from "@/lib/copilot/usePageInsights";
+import { PageInsightBanner } from "@/components/copilot/PageInsightBanner";
 import {
-  AlertTriangle,
-  ExternalLink,
-  Filter,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -114,10 +109,6 @@ function toNumber(v: any) {
   return Number.isFinite(n) ? n : NaN;
 }
 
-function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("animate-pulse rounded-md bg-zc-panel/30", className)} />;
-}
-
 function drawerClassName(extra?: string) {
   return cn(
     "left-auto right-0 top-0 h-screen w-[95vw] max-w-[980px] translate-x-0 translate-y-0",
@@ -127,16 +118,6 @@ function drawerClassName(extra?: string) {
     "overflow-y-auto",
     extra,
   );
-}
-
-function activeBadge(isActive: boolean) {
-  return isActive ? <Badge variant="ok">ACTIVE</Badge> : <Badge variant="secondary">INACTIVE</Badge>;
-}
-
-function taxTypeBadge(t: TaxType) {
-  if (t === "GST") return <Badge variant="secondary">GST</Badge>;
-  if (t === "TDS") return <Badge variant="warning">TDS</Badge>;
-  return <Badge variant="secondary">OTHER</Badge>;
 }
 
 function ModalHeader({
@@ -190,23 +171,21 @@ export default function SuperAdminTaxCodesPage() {
   const effectiveBranchId = branchCtx.branchId ?? activeBranchId ?? "";
 
 
-  const [activeTab, setActiveTab] = React.useState<"taxCodes" | "guide">("taxCodes");
-  const [showFilters, setShowFilters] = React.useState(false);
-
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
-  const [err, setErr] = React.useState<string | null>(null);
 
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
   const [branchId, setBranchId] = React.useState<string>("");
 
-  const [rows, setRows] = React.useState<TaxCodeRow[]>([]);
-  const [selectedId, setSelectedId] = React.useState<string>("");
-  const [selected, setSelected] = React.useState<TaxCodeRow | null>(null);
+  // AI Copilot
+  const { insights, loading: insightsLoading, dismiss: dismissInsight } = usePageInsights({
+    module: "tax-codes",
+    enabled: !!branchId,
+  });
 
+  const [rows, setRows] = React.useState<TaxCodeRow[]>([]);
   // filters
   const [q, setQ] = React.useState("");
-  const [taxType, setTaxType] = React.useState<TaxType | "all">("all");
   const [includeInactive, setIncludeInactive] = React.useState(false);
 
   // modals
@@ -227,20 +206,18 @@ export default function SuperAdminTaxCodesPage() {
     const first = list[0]?.id || null;
     const next = (stored && list.some((b) => b.id === stored) ? stored : null) || first;
 
-    if (next) if (isGlobalScope) setActiveBranchId(next || null);
-setBranchId(next || "");
+    if (next && isGlobalScope) setActiveBranchId(next || null);
+    setBranchId(next || "");
     return next;
   }
 
   async function loadTaxCodes(showToast = false) {
     if (!branchId) return;
-    setErr(null);
     setLoading(true);
     try {
       const qs = buildQS({
         branchId,
         q: q.trim() || undefined,
-        taxType: taxType !== "all" ? taxType : undefined,
         includeInactive: includeInactive ? "true" : undefined,
         includeCounts: "true",
       });
@@ -254,11 +231,6 @@ setBranchId(next || "");
       const list: TaxCodeRow[] = Array.isArray(res) ? res : (res?.rows || []);
       setRows(list);
 
-      const nextSelected =
-        selectedId && list.some((x) => x.id === selectedId) ? selectedId : list[0]?.id || "";
-      setSelectedId(nextSelected);
-      setSelected(nextSelected ? list.find((x) => x.id === nextSelected) || null : null);
-
       if (showToast) {
         toast({
           title: "Tax codes refreshed",
@@ -267,10 +239,7 @@ setBranchId(next || "");
       }
     } catch (e: any) {
       const msg = e?.message || "Failed to load tax codes";
-      setErr(msg);
       setRows([]);
-      setSelectedId("");
-      setSelected(null);
       if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
     } finally {
       setLoading(false);
@@ -279,7 +248,6 @@ setBranchId(next || "");
 
   async function refreshAll(showToast = false) {
     setLoading(true);
-    setErr(null);
     try {
       const bid = branchId || (await loadBranches());
       if (!bid) {
@@ -290,7 +258,6 @@ setBranchId(next || "");
       if (showToast) toast({ title: "Ready", description: "Branch scope and tax codes are up to date." });
     } catch (e: any) {
       const msg = e?.message || "Refresh failed";
-      setErr(msg);
       if (showToast) toast({ title: "Refresh failed", description: msg, variant: "destructive" as any });
     } finally {
       setLoading(false);
@@ -304,50 +271,21 @@ setBranchId(next || "");
 
   React.useEffect(() => {
     if (!branchId) return;
-    setSelectedId("");
-    setSelected(null);
+    if (isGlobalScope) setActiveBranchId(branchId || null);
     void loadTaxCodes(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId, includeInactive]);
+  }, [branchId]);
 
   React.useEffect(() => {
-    if (!branchId) return;
-    const t = setTimeout(() => void loadTaxCodes(false), 250);
+    const t = setTimeout(() => {
+      if (!branchId) return;
+      void loadTaxCodes(false);
+    }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, taxType]);
+  }, [q, includeInactive, branchId]);
 
-  React.useEffect(() => {
-    if (!selectedId) {
-      setSelected(null);
-      return;
-    }
-    setSelected(rows.find((x) => x.id === selectedId) || null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, rows]);
-
-  async function onBranchChange(nextId: string) {
-    setBranchId(nextId);
-    if (isGlobalScope) setActiveBranchId(nextId || null);
-setQ("");
-    setTaxType("all");
-    setIncludeInactive(false);
-    setSelectedId("");
-    setSelected(null);
-
-    setErr(null);
-    setLoading(true);
-    try {
-      await loadTaxCodes(false);
-      toast({ title: "Branch scope changed", description: "Loaded tax codes for selected branch." });
-    } catch (e: any) {
-      toast({ title: "Load failed", description: e?.message || "Request failed", variant: "destructive" as any });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const stats = React.useMemo(() => {
+  const metrics = React.useMemo(() => {
     const total = rows.length;
     const active = rows.filter((r) => r.isActive).length;
     const inactive = total - active;
@@ -420,9 +358,9 @@ setQ("");
   }
 
   return (
-    <AppShell title="Infrastructure • Tax Codes">
+    <AppShell title="Infrastructure - Tax Codes">
       <RequirePerm perm="INFRA_TAX_CODE_READ">
-      <div className="grid gap-6">
+        <div className="grid gap-6">
         {/* Header */}
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-center gap-3">
@@ -437,49 +375,23 @@ setQ("");
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-nowrap overflow-x-auto">
-            <Button
-              variant="outline"
-              className="px-5 gap-2 whitespace-nowrap shrink-0"
-              onClick={() => refreshAll(true)}
-              disabled={loading || busy}
-            >
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" className="px-5 gap-2" onClick={() => refreshAll(true)} disabled={busy || loading}>
               <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
               Refresh
             </Button>
 
-            <Button variant="outline" asChild className="px-5 gap-2 whitespace-nowrap shrink-0">
-              <Link href="/infrastructure/fixit">
-                <Wrench className="h-4 w-4" />
-                FixIt Inbox
-              </Link>
-            </Button>
-
             <Button
               variant="primary"
-              className="px-5 gap-2 whitespace-nowrap shrink-0"
+              className="px-5 gap-2"
               onClick={openCreate}
-              disabled={mustSelectBranch}
+              disabled={mustSelectBranch || busy || loading}
             >
               <Plus className="h-4 w-4" />
               New Tax Code
             </Button>
           </div>
         </div>
-
-        {err ? (
-          <Card className="border-zc-danger/40">
-            <CardHeader className="py-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 h-4 w-4 text-zc-danger" />
-                <div>
-                  <CardTitle className="text-base">Could not load tax codes</CardTitle>
-                  <CardDescription className="mt-1">{err}</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
-        ) : null}
 
         {/* Overview */}
         <Card className="overflow-hidden">
@@ -494,36 +406,38 @@ setQ("");
           <CardContent className="grid gap-4">
             <div className="grid gap-2">
               <Label>Branch</Label>
-              <Select value={branchId || ""} onValueChange={onBranchChange}>
+              <Select value={branchId || ""} onValueChange={(v) => setBranchId(v)}>
                 <SelectTrigger className="h-11 w-full rounded-xl border-zc-border bg-zc-card">
                   <SelectValue placeholder="Select branch..." />
                 </SelectTrigger>
                 <SelectContent className="max-h-[320px] overflow-y-auto">
                   {branches.filter((b) => b.id).map((b) => (
                     <SelectItem key={b.id} value={b.id}>
-                      {b.code} - {b.name} ({b.city})
+                      {b.name} ({b.code}){b.city ? ` - ${b.city}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
+            <PageInsightBanner insights={insights} loading={insightsLoading} onDismiss={dismissInsight} />
+
             <div className="grid gap-3 md:grid-cols-4">
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900/50 dark:bg-blue-900/10">
-                <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Tax Codes</div>
-                <div className="mt-1 text-lg font-bold text-blue-700 dark:text-blue-300">{stats.total}</div>
+                <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Total</div>
+                <div className="mt-1 text-lg font-bold text-blue-700 dark:text-blue-300">{metrics.total}</div>
               </div>
               <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900/50 dark:bg-emerald-900/10">
                 <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Active</div>
-                <div className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-300">{stats.active}</div>
+                <div className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-300">{metrics.active}</div>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 dark:border-slate-900/50 dark:bg-slate-900/10">
-                <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Inactive</div>
-                <div className="mt-1 text-lg font-bold text-slate-700 dark:text-slate-300">{stats.inactive}</div>
+              <div className="rounded-xl border border-sky-200 bg-sky-50/50 p-3 dark:border-sky-900/50 dark:bg-sky-900/10">
+                <div className="text-xs font-medium text-sky-600 dark:text-sky-400">Inactive</div>
+                <div className="mt-1 text-lg font-bold text-sky-700 dark:text-sky-300">{metrics.inactive}</div>
               </div>
-              <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900/50 dark:bg-amber-900/10">
-                <div className="text-xs font-medium text-amber-700 dark:text-amber-300">Inactive but used</div>
-                <div className="mt-1 text-lg font-bold text-amber-800 dark:text-amber-200">{stats.usedInactive}</div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/50 dark:bg-amber-900/10">
+                <div className="text-xs font-medium text-amber-700 dark:text-amber-300">Inactive used</div>
+                <div className="mt-1 text-lg font-bold text-amber-800 dark:text-amber-200">{metrics.usedInactive}</div>
               </div>
             </div>
 
@@ -533,320 +447,164 @@ setQ("");
                 <Input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search by code/name/HSN…"
+                  placeholder="Search code/name/HSN..."
                   className="pl-10"
-                  disabled={mustSelectBranch}
+                  disabled={!branchId}
                 />
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
-                  <Switch checked={includeInactive} onCheckedChange={setIncludeInactive} disabled={mustSelectBranch} />
-                  <div className="text-sm">
-                    <div className="font-semibold text-zc-text">Include inactive</div>
-                    <div className="text-xs text-zc-muted">Usually keep off</div>
-                  </div>
+                <div className="text-xs text-zc-muted">
+                  Showing <span className="font-semibold tabular-nums text-zc-text">{rows.length}</span>
                 </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  onClick={() => setShowFilters((s) => !s)}
-                  disabled={mustSelectBranch}
-                >
-                  <Filter className="h-4 w-4" />
-                  {showFilters ? "Hide Filters" : "Show Filters"}
-                </Button>
+                <div className="flex items-center gap-2 rounded-xl border border-zc-border bg-zc-card px-3 py-2">
+                  <Switch checked={includeInactive} onCheckedChange={(v) => setIncludeInactive(!!v)} disabled={!branchId} />
+                  <span className="text-sm text-zc-muted">Include inactive</span>
+                </div>
               </div>
             </div>
 
-            {showFilters ? (
-              <div className="grid gap-3 rounded-xl border border-zc-border bg-zc-panel/20 p-4">
-                <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                  <Filter className="h-4 w-4 text-zc-accent" />
-                  Filters
-                </div>
 
-                <div className="grid gap-3 md:grid-cols-12">
-                  <div className="md:col-span-4">
-                    <Label className="text-xs text-zc-muted">Tax Type</Label>
-                    <Select value={taxType} onValueChange={(v) => setTaxType(v as any)} disabled={mustSelectBranch}>
-                      <SelectTrigger className="h-10">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Any</SelectItem>
-                        <SelectItem value="GST">GST</SelectItem>
-                        <SelectItem value="TDS">TDS</SelectItem>
-                        <SelectItem value="OTHER">OTHER</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">Branch scoped</Badge>
-              <Badge variant="ok">Active required for usage</Badge>
-              <Badge variant="warning">Inactive used → FixIt</Badge>
-            </div>
           </CardContent>
         </Card>
 
-        {/* Workspace */}
+        {/* Manage */}
         <Card>
           <CardHeader className="py-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <CardTitle className="text-base">Tax Code Workspace</CardTitle>
-                <CardDescription>Create, maintain, and activate tax codes used in billing.</CardDescription>
-              </div>
-
-              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-                <TabsList className={cn("h-10 rounded-2xl border border-zc-border bg-zc-panel/20 p-1")}>
-                  <TabsTrigger
-                    value="taxCodes"
-                    className={cn(
-                      "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
-                    )}
-                  >
-                    <BadgePercent className="mr-2 h-4 w-4" />
-                    Tax Codes
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="guide"
-                    className={cn(
-                      "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
-                    )}
-                  >
-                    <Wrench className="mr-2 h-4 w-4" />
-                    Guide
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
+            <div>
+              <CardTitle className="text-base">Manage Tax Codes</CardTitle>
+              <CardDescription>Update tax definitions and activation status.</CardDescription>
             </div>
           </CardHeader>
 
-          <CardContent className="pb-6">
-            <Tabs value={activeTab}>
-              <TabsContent value="taxCodes" className="mt-0">
-                <div className="grid gap-4 lg:grid-cols-12">
-                  {/* Left list */}
-                  <div className="lg:col-span-5">
-                    <div className="rounded-xl border border-zc-border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-[160px]">Code</TableHead>
-                            <TableHead>Name</TableHead>
-                            <TableHead className="w-[140px]">Status</TableHead>
-                            <TableHead className="w-[56px]" />
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {loading ? (
-                            Array.from({ length: 10 }).map((_, i) => (
-                              <TableRow key={i}>
-                                <TableCell colSpan={4}>
-                                  <Skeleton className="h-6 w-full" />
-                                </TableCell>
-                              </TableRow>
-                            ))
-                          ) : rows.length === 0 ? (
-                            <TableRow>
-                              <TableCell colSpan={4}>
-                                <div className="flex items-center justify-center gap-3 py-10 text-sm text-zc-muted">
-                                  <BadgePercent className="h-4 w-4" />
-                                  No tax codes found. Create one to begin.
+          <CardContent>
+            <div className="overflow-auto rounded-xl border border-zc-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[160px]">Code</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="w-[160px]">Type</TableHead>
+                    <TableHead className="w-[120px]">Flags</TableHead>
+                    <TableHead className="w-[240px]">Usage</TableHead>
+                    <TableHead className="w-[260px] text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="py-8 text-center text-sm text-zc-muted">
+                        Loading...
+                      </TableCell>
+                    </TableRow>
+                  ) : rows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="py-10 text-center text-sm text-zc-muted">
+                        No tax codes found.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    rows.map((r) => {
+                      const counts = r._count || {};
+                      const used =
+                        (counts.chargeMasterItems || 0) +
+                        (counts.tariffRates || 0) +
+                        (counts.serviceItems || 0) +
+                        (counts.servicePackages || 0);
+                      const isWarn = !r.isActive && used > 0;
+
+                      return (
+                        <TableRow key={r.id}>
+                          <TableCell className="font-mono text-xs">{r.code}</TableCell>
+                          <TableCell>
+                            <div className="font-medium">{r.name}</div>
+                            <div className="text-xs text-zc-muted">
+                              Rate: {String(r.ratePercent)}%
+                              {r.hsnSac ? ` • HSN/SAC: ${r.hsnSac}` : ""}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-sm">{r.taxType}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              {r.isActive ? (
+                                <Badge className="w-fit bg-emerald-600 text-white">Active</Badge>
+                              ) : (
+                                <Badge variant="secondary" className="w-fit">
+                                  Inactive
+                                </Badge>
+                              )}
+                              {used > 0 ? (
+                                <Badge className={cn("w-fit", isWarn ? "bg-amber-600 text-white" : "bg-sky-600 text-white")}>
+                                  Used
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary" className="w-fit">
+                                  Unused
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {used > 0 ? (
+                              <div>
+                                <div className="text-xs font-mono text-zc-muted">Refs: {used}</div>
+                                <div className={cn("text-sm", isWarn ? "text-amber-700 dark:text-amber-300" : "text-zc-text")}>
+                                  {isWarn ? "Inactive but referenced" : "Referenced in billing"}
                                 </div>
-                              </TableCell>
-                            </TableRow>
-                          ) : (
-                            rows.map((r) => {
-                              const used =
-                                (r._count?.chargeMasterItems || 0) +
-                                (r._count?.tariffRates || 0) +
-                                (r._count?.serviceItems || 0) +
-                                (r._count?.servicePackages || 0);
-
-                              const isWarn = !r.isActive && used > 0;
-
-                              return (
-                                <TableRow
-                                  key={r.id}
-                                  className={cn("cursor-pointer", selectedId === r.id ? "bg-zc-panel/30" : "")}
-                                  onClick={() => setSelectedId(r.id)}
+                                <div className="text-xs text-zc-muted">
+                                  CM {counts.chargeMasterItems || 0} · Tariff {counts.tariffRates || 0} · Services{" "}
+                                  {counts.serviceItems || 0} · Packs {counts.servicePackages || 0}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-sm text-zc-muted">
+                                Not used
+                                <div className="text-xs text-zc-muted">No references yet</div>
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" disabled={busy}>
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-[220px]">
+                                <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                <DropdownMenuItem onClick={() => openEdit(r)}>
+                                  <Wrench className="mr-2 h-4 w-4" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setComponentsPayload(r.components ?? null);
+                                    setComponentsOpen(true);
+                                  }}
                                 >
-                                  <TableCell className="font-mono text-xs">
-                                    <div className="flex flex-col gap-1">
-                                      <span className="font-semibold text-zc-text">{r.code}</span>
-                                      <span className="text-[11px] text-zc-muted">{r.taxType}</span>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex flex-col gap-1">
-                                      <span className="font-semibold text-zc-text">{r.name}</span>
-                                      <span className={cn("text-xs", isWarn ? "text-amber-700 dark:text-amber-300" : "text-zc-muted")}>
-                                        Rate: <span className="font-semibold text-zc-text">{String(r.ratePercent)}%</span>
-                                        {r.hsnSac ? (
-                                          <>
-                                            {" "}
-                                            • HSN/SAC: <span className="font-semibold text-zc-text">{r.hsnSac}</span>
-                                          </>
-                                        ) : null}
-                                      </span>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>{isWarn ? <Badge variant="warning">USED+INACTIVE</Badge> : activeBadge(r.isActive)}</TableCell>
-                                  <TableCell onClick={(e) => e.stopPropagation()}>
-                                    <DropdownMenu>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                                          <MoreHorizontal className="h-4 w-4" />
-                                        </Button>
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end" className="w-[220px]">
-                                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => openEdit(r)}>
-                                          <Wrench className="mr-2 h-4 w-4" />
-                                          Edit tax code
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem
-                                          onClick={() => {
-                                            setComponentsPayload(r.components ?? null);
-                                            setComponentsOpen(true);
-                                          }}
-                                        >
-                                          <Eye className="mr-2 h-4 w-4" />
-                                          View components
-                                        </DropdownMenuItem>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => quickToggle(r, !r.isActive)}>
-                                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                                          {r.isActive ? "Deactivate" : "Activate"}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => remove(r)}>
-                                          <Trash2 className="mr-2 h-4 w-4" />
-                                          Delete
-                                        </DropdownMenuItem>
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })
-                          )}
-                        </TableBody>
-                      </Table>
-
-                      <div className="flex flex-col gap-3 border-t border-zc-border p-4 md:flex-row md:items-center md:justify-between">
-                        <div className="text-sm text-zc-muted">
-                          Total: <span className="font-semibold text-zc-text">{rows.length}</span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button variant="outline" size="sm" className="gap-2" asChild>
-                            <Link href="/infrastructure/service-mapping">
-                              Service Mapping <ExternalLink className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right detail */}
-                  <div className="lg:col-span-7">
-                    {!selected ? (
-                      <Card className="border-zc-border">
-                        <CardHeader className="py-4">
-                          <CardTitle className="text-base">Select a tax code</CardTitle>
-                          <CardDescription>Pick a tax code from the left list to view details and take actions.</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 text-sm text-zc-muted">
-                            Tip: Create separate GST codes like GST-0, GST-5, GST-12, GST-18, GST-28 with optional HSN/SAC defaults.
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ) : (
-                      <TaxCodeDetail
-                        row={selected}
-                        busy={busy}
-                        onEdit={() => openEdit(selected)}
-                        onToggle={() => quickToggle(selected, !selected.isActive)}
-                        onViewComponents={() => {
-                          setComponentsPayload(selected.components ?? null);
-                          setComponentsOpen(true);
-                        }}
-                      />
-                    )}
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="guide" className="mt-0">
-                <Card className="border-zc-border">
-                  <CardHeader className="py-4">
-                    <CardTitle className="text-base">How to use Tax Codes</CardTitle>
-                    <CardDescription>Tax codes are referenced by billing items and tariff rates.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-4">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                          <Badge variant="ok">1</Badge> Create branch tax codes
-                        </div>
-                        <div className="mt-1 text-sm text-zc-muted">
-                          Example: <span className="font-mono font-semibold text-zc-text">GST-18</span> (rate 18.0000).
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                          <Badge variant="ok">2</Badge> Link to Charge Master Items
-                        </div>
-                        <div className="mt-1 text-sm text-zc-muted">
-                          Charge master should enforce <span className="font-semibold text-zc-text">active tax code</span>.
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                          <Badge variant="ok">3</Badge> Tariff Rates can override
-                        </div>
-                        <div className="mt-1 text-sm text-zc-muted">
-                          Tariff rate can inherit tax code from Charge Master or override as per plan rules.
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                          <Badge variant="warning">4</Badge> Deactivation creates FixIts
-                        </div>
-                        <div className="mt-1 text-sm text-zc-muted">
-                          If inactive tax code is still referenced, FixIt should alert until you reactivate or remap.
-                        </div>
-                      </div>
-                    </div>
-
-                    <Separator />
-
-                    <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
-                        <AlertTriangle className="h-4 w-4 text-zc-warn" />
-                        Recommended practice
-                      </div>
-                      <div className="mt-1 text-sm text-zc-muted">
-                        Avoid editing the meaning of an existing tax code used in billing. Prefer creating a new code/version and updating mappings.
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  View components
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => quickToggle(r, !r.isActive)}>
+                                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                                  {r.isActive ? "Deactivate" : "Activate"}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => remove(r)}>
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -888,113 +646,8 @@ setQ("");
           </DialogFooter>
         </DialogContent>
       </Dialog>
-          </RequirePerm>
-</AppShell>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*                            Detail Right Panel                               */
-/* -------------------------------------------------------------------------- */
-
-function TaxCodeDetail({
-  row,
-  busy,
-  onEdit,
-  onToggle,
-  onViewComponents,
-}: {
-  row: TaxCodeRow;
-  busy: boolean;
-  onEdit: () => void;
-  onToggle: () => void;
-  onViewComponents: () => void;
-}) {
-  const c = row._count || {};
-  const usedTotal =
-    (c.chargeMasterItems || 0) + (c.tariffRates || 0) + (c.serviceItems || 0) + (c.servicePackages || 0);
-
-  const warnInactiveUsed = !row.isActive && usedTotal > 0;
-
-  return (
-    <div className="grid gap-4">
-      <Card className="border-zc-border">
-        <CardHeader className="py-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <CardTitle className="text-base">
-                <span className="font-mono">{row.code}</span> • {row.name}
-              </CardTitle>
-              <CardDescription>
-                {activeBadge(row.isActive)} <span className="mx-2 text-zc-muted">•</span>
-                {taxTypeBadge(row.taxType)} <span className="mx-2 text-zc-muted">•</span>
-                Rate: <span className="font-semibold text-zc-text">{String(row.ratePercent)}%</span>
-              </CardDescription>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" className="gap-2" onClick={onEdit} disabled={busy}>
-                <Wrench className="h-4 w-4" />
-                Edit
-              </Button>
-              <Button variant="outline" className="gap-2" onClick={onViewComponents} disabled={busy}>
-                <Eye className="h-4 w-4" />
-                Components
-              </Button>
-              <Button variant={row.isActive ? "outline" : "primary"} className="gap-2" onClick={onToggle} disabled={busy}>
-                <CheckCircle2 className="h-4 w-4" />
-                {row.isActive ? "Deactivate" : "Activate"}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-
-        <CardContent className="grid gap-4">
-          {warnInactiveUsed ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-900/10 dark:text-amber-200">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-700 dark:text-amber-300" />
-                <div>
-                  <div className="font-semibold">Inactive tax code is still referenced</div>
-                  <div className="mt-1 text-sm opacity-90">
-                    This should generate FixIts until you reactivate or remap the dependent items/rates.
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-              <div className="text-xs font-semibold text-zc-muted">HSN/SAC (default)</div>
-              <div className="mt-1 text-sm font-semibold text-zc-text">{row.hsnSac || "—"}</div>
-              <div className="mt-2 text-xs text-zc-muted">Updated: {fmtDateTime(row.updatedAt || null)}</div>
-            </div>
-
-            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-              <div className="text-xs font-semibold text-zc-muted">Usage</div>
-              <div className="mt-1 flex flex-wrap gap-2">
-                <Badge variant="secondary">ChargeMaster: {c.chargeMasterItems || 0}</Badge>
-                <Badge variant="secondary">TariffRates: {c.tariffRates || 0}</Badge>
-                <Badge variant="secondary">ServiceItems: {c.serviceItems || 0}</Badge>
-                <Badge variant="secondary">Packages: {c.servicePackages || 0}</Badge>
-              </div>
-              <div className="mt-2 text-xs text-zc-muted">Total refs: {usedTotal}</div>
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-            <div className="text-sm font-semibold text-zc-text">Notes</div>
-            <div className="mt-1 text-sm text-zc-muted">
-              Use <span className="font-semibold text-zc-text">components</span> to store breakdown JSON
-              (CGST/SGST/IGST) or exemptions. Keep tax codes stable; prefer creating a new code for major changes.
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+      </RequirePerm>
+    </AppShell>
   );
 }
 
@@ -1027,13 +680,21 @@ function TaxCodeEditModal({
     ratePercent: "18.0000",
     hsnSac: "",
     isActive: true,
-    componentsText: "",
+    cgstRate: "",
+    sgstRate: "",
+    igstRate: "",
+    exemptions: "",
+    legalReference: "",
+    notificationNumber: "",
+    applicableCategories: "",
+    notes: "",
   });
 
   React.useEffect(() => {
     if (!open) return;
 
     if (mode === "edit" && editing) {
+      const comp = editing.components as any;
       setForm({
         code: editing.code || "",
         name: editing.name || "",
@@ -1041,8 +702,14 @@ function TaxCodeEditModal({
         ratePercent: String(editing.ratePercent ?? ""),
         hsnSac: editing.hsnSac || "",
         isActive: Boolean(editing.isActive),
-        componentsText:
-          editing.components != null ? JSON.stringify(editing.components, null, 2) : "",
+        cgstRate: comp?.cgst != null ? String(comp.cgst) : "",
+        sgstRate: comp?.sgst != null ? String(comp.sgst) : "",
+        igstRate: comp?.igst != null ? String(comp.igst) : "",
+        exemptions: Array.isArray(comp?.exemptions) ? comp.exemptions.join(", ") : (comp?.exemptions || ""),
+        legalReference: comp?.legal_reference || comp?.legalReference || "",
+        notificationNumber: comp?.notification_number || comp?.notificationNumber || "",
+        applicableCategories: Array.isArray(comp?.applicableCategories) ? comp.applicableCategories.join(", ") : (comp?.applicableCategories || ""),
+        notes: comp?.notes || "",
       });
     } else {
       setForm({
@@ -1052,7 +719,14 @@ function TaxCodeEditModal({
         ratePercent: "18.0000",
         hsnSac: "",
         isActive: true,
-        componentsText: "",
+        cgstRate: "",
+        sgstRate: "",
+        igstRate: "",
+        exemptions: "",
+        legalReference: "",
+        notificationNumber: "",
+        applicableCategories: "",
+        notes: "",
       });
     }
   }, [open, mode, editing]);
@@ -1079,15 +753,32 @@ function TaxCodeEditModal({
       return;
     }
 
+    // Build components from structured fields
     let components: any = null;
-    const ct = String(form.componentsText || "").trim();
-    if (ct) {
-      try {
-        components = JSON.parse(ct);
-      } catch {
-        toast({ title: "Invalid JSON", description: "Components must be valid JSON (or leave blank)." });
-        return;
-      }
+
+    // Merge explicit GST component fields
+    const cgst = form.cgstRate ? Number(form.cgstRate) : null;
+    const sgst = form.sgstRate ? Number(form.sgstRate) : null;
+    const igst = form.igstRate ? Number(form.igstRate) : null;
+    if (cgst != null || sgst != null || igst != null) {
+      components = { ...(components || {}), cgst, sgst, igst };
+    }
+
+    // Merge metadata fields
+    const exemptions = (form.exemptions || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+    const applicableCategories = (form.applicableCategories || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+    const legalRef = (form.legalReference || "").trim();
+    const notifNum = (form.notificationNumber || "").trim();
+    const notesStr = (form.notes || "").trim();
+    if (exemptions.length > 0 || legalRef || notifNum || applicableCategories.length > 0 || notesStr) {
+      components = {
+        ...(components || {}),
+        ...(exemptions.length > 0 ? { exemptions } : {}),
+        ...(legalRef ? { legal_reference: legalRef } : {}),
+        ...(notifNum ? { notification_number: notifNum } : {}),
+        ...(applicableCategories.length > 0 ? { applicableCategories } : {}),
+        ...(notesStr ? { notes: notesStr } : {}),
+      };
     }
 
     const payload: any = {
@@ -1172,6 +863,45 @@ function TaxCodeEditModal({
               <div className="text-xs text-zc-muted">Store with precision (Decimal). Example: 18.0000</div>
             </div>
 
+            {/* GST Component Rates */}
+            {form.taxType === "GST" && (
+              <div className="grid gap-4 md:grid-cols-3 md:col-span-2">
+                <div className="grid gap-2">
+                  <Label>CGST Rate %</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={form.cgstRate || ""}
+                    onChange={(e) => patch({ cgstRate: e.target.value })}
+                    placeholder="e.g., 9"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>SGST Rate %</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={form.sgstRate || ""}
+                    onChange={(e) => patch({ sgstRate: e.target.value })}
+                    placeholder="e.g., 9"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>IGST Rate %</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={form.igstRate || ""}
+                    onChange={(e) => patch({ igstRate: e.target.value })}
+                    placeholder="e.g., 18"
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="grid gap-2">
               <Label>Default HSN/SAC (optional)</Label>
               <Input value={form.hsnSac || ""} onChange={(e) => patch({ hsnSac: e.target.value })} placeholder="e.g., 999312" />
@@ -1188,16 +918,57 @@ function TaxCodeEditModal({
               </div>
             </div>
 
-            <div className="grid gap-2 md:col-span-2">
-              <Label>Components JSON (optional)</Label>
-              <Textarea
-                value={form.componentsText || ""}
-                onChange={(e) => patch({ componentsText: e.target.value })}
-                placeholder={`{\n  "cgst": 9,\n  "sgst": 9,\n  "notes": "GST split example"\n}`}
-                className="min-h-[180px]"
-              />
-              <div className="text-xs text-zc-muted">
-                Example fields: cgst/sgst/igst, exemptions, notes, effective rules (if any).
+            {/* ── Additional Metadata (structured) ── */}
+            <div className="md:col-span-2 rounded-xl border border-purple-200 bg-purple-50/30 p-4 space-y-4">
+              <div className="text-sm font-semibold text-purple-700">Additional Metadata (optional)</div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>Legal Reference</Label>
+                  <Input
+                    value={form.legalReference || ""}
+                    onChange={(e) => patch({ legalReference: e.target.value })}
+                    placeholder="e.g., Section 9(1) of CGST Act"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Notification Number</Label>
+                  <Input
+                    value={form.notificationNumber || ""}
+                    onChange={(e) => patch({ notificationNumber: e.target.value })}
+                    placeholder="e.g., 11/2017-CT(Rate)"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>Exemptions</Label>
+                  <Input
+                    value={form.exemptions || ""}
+                    onChange={(e) => patch({ exemptions: e.target.value })}
+                    placeholder="e.g., healthcare, education, charity"
+                  />
+                  <div className="text-xs text-zc-muted">Comma-separated list of exemption categories</div>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Applicable Categories</Label>
+                  <Input
+                    value={form.applicableCategories || ""}
+                    onChange={(e) => patch({ applicableCategories: e.target.value })}
+                    placeholder="e.g., consultation, pharmacy, lab"
+                  />
+                  <div className="text-xs text-zc-muted">Comma-separated list of applicable service categories</div>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label>Notes</Label>
+                <Input
+                  value={form.notes || ""}
+                  onChange={(e) => patch({ notes: e.target.value })}
+                  placeholder="e.g., Exemption applicable for healthcare services under Notification 12/2017"
+                />
               </div>
             </div>
           </div>

@@ -25,6 +25,8 @@ import { cn } from "@/lib/cn";
 
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import { useActiveBranchStore } from "@/lib/branch/active-branch";
+import { usePageInsights } from "@/lib/copilot/usePageInsights";
+import { PageInsightBanner } from "@/components/copilot/PageInsightBanner";
 import {
   AlertTriangle,
   Archive,
@@ -217,6 +219,12 @@ export default function Page() {
 
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
   const [branchId, setBranchId] = React.useState<string>("");
+
+  // AI Copilot
+  const { insights, loading: insightsLoading, dismiss: dismissInsight } = usePageInsights({
+    module: "order-sets",
+    enabled: !!branchId,
+  });
 
   const [rows, setRows] = React.useState<OrderSetRow[]>([]);
   const [selectedId, setSelectedId] = React.useState<string>("");
@@ -467,6 +475,8 @@ setQ("");
             </CardHeader>
           </Card>
         ) : null}
+
+        <PageInsightBanner insights={insights} loading={insightsLoading} onDismiss={dismissInsight} />
 
         {/* Overview */}
         <Card className="overflow-hidden">

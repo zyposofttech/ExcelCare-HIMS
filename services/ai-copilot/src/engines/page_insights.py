@@ -47,6 +47,38 @@ def get_page_insights(module: str, ctx: BranchContext) -> PageInsightsResult:
         insights = _pharmacy_suppliers_insights(ctx)
     elif module == "pharmacy-inventory":
         insights = _pharmacy_inventory_insights(ctx)
+    elif module == "payers":
+        insights = _payers_insights(ctx)
+    elif module == "payer-contracts":
+        insights = _payer_contracts_insights(ctx)
+    elif module == "gov-schemes":
+        insights = _gov_schemes_insights(ctx)
+    elif module == "pricing-tiers":
+        insights = _pricing_tiers_insights(ctx)
+    elif module == "service-items":
+        insights = _service_items_insights(ctx)
+    elif module == "price-history":
+        insights = _price_history_insights(ctx)
+    elif module == "tax-codes":
+        insights = _tax_codes_insights(ctx)
+    elif module == "charge-master":
+        insights = _charge_master_insights(ctx)
+    elif module == "tariff-plans":
+        insights = _tariff_plans_insights(ctx)
+    elif module == "service-catalogues":
+        insights = _service_catalogues_insights(ctx)
+    elif module == "service-library":
+        insights = _service_library_insights(ctx)
+    elif module == "service-mapping":
+        insights = _service_mapping_insights(ctx)
+    elif module == "service-packages":
+        insights = _service_packages_insights(ctx)
+    elif module == "order-sets":
+        insights = _order_sets_insights(ctx)
+    elif module == "service-availability":
+        insights = _service_availability_insights(ctx)
+    elif module == "service-bulk-import":
+        insights = _service_bulk_import_insights(ctx)
 
     return PageInsightsResult(
         module=module,
@@ -887,5 +919,477 @@ def _pharmacy_inventory_insights(ctx: BranchContext) -> list[PageInsight]:
                 message=f"{coverage_pct}% of active drugs have inventory levels configured ({ph.inventoryConfigCount} of {ph.activeDrugs}).",
                 entityCount=ph.inventoryConfigCount,
             ))
+
+    return insights
+
+
+# ── Service Catalog & Financial ──────────────────────────────────────────
+
+
+def _payers_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalPayers == 0:
+        insights.append(PageInsight(
+            id="pay-none",
+            level="critical",
+            message="No payers configured. Add CASH, Insurance, TPA, and Government payers.",
+            actionHint="Create your first payer",
+        ))
+        return insights
+
+    if not sc.hasCashPayer:
+        insights.append(PageInsight(
+            id="pay-no-cash",
+            level="critical",
+            message="No CASH payer found. Self-pay patients need a default billing path.",
+            actionHint="Create a CASH-type payer",
+        ))
+
+    inactive = sc.totalPayers - sc.activePayers
+    if inactive > 0:
+        insights.append(PageInsight(
+            id="pay-inactive",
+            level="info",
+            message=f"{inactive} payer(s) are inactive.",
+            entityCount=inactive,
+        ))
+
+    if sc.totalContracts == 0 and sc.totalPayers > 0:
+        insights.append(PageInsight(
+            id="pay-no-contracts",
+            level="warning",
+            message=f"{sc.totalPayers} payer(s) but no contracts configured.",
+            actionHint="Create contracts to define negotiated rates per payer",
+            entityCount=sc.totalPayers,
+        ))
+
+    return insights
+
+
+def _payer_contracts_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalContracts == 0:
+        insights.append(PageInsight(
+            id="pc-none",
+            level="warning",
+            message="No payer contracts configured.",
+            actionHint="Create contracts for your active payers",
+        ))
+        return insights
+
+    if sc.expiredContracts > 0:
+        insights.append(PageInsight(
+            id="pc-expired",
+            level="warning",
+            message=f"{sc.expiredContracts} contract(s) have expired and need renewal.",
+            actionHint="Review and renew expired contracts",
+            entityCount=sc.expiredContracts,
+        ))
+
+    if sc.activeContracts == 0:
+        insights.append(PageInsight(
+            id="pc-no-active",
+            level="critical",
+            message="No active contracts — billing for insured patients will fail.",
+            actionHint="Activate or create new contracts",
+        ))
+
+    return insights
+
+
+def _gov_schemes_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalGovSchemes == 0:
+        insights.append(PageInsight(
+            id="gs-none",
+            level="info",
+            message="No government schemes configured. Add PMJAY, CGHS, or ECHS if applicable.",
+            actionHint="Configure government scheme if the hospital is empaneled",
+        ))
+    else:
+        inactive = sc.totalGovSchemes - sc.activeGovSchemes
+        if inactive > 0:
+            insights.append(PageInsight(
+                id="gs-inactive",
+                level="warning",
+                message=f"{inactive} government scheme(s) are inactive.",
+                entityCount=inactive,
+            ))
+
+    return insights
+
+
+def _pricing_tiers_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalPricingTiers == 0:
+        insights.append(PageInsight(
+            id="pt-none",
+            level="info",
+            message="No patient pricing tiers. Consider adding tiers for differential pricing (General, Staff, BPL).",
+            actionHint="Create pricing tiers",
+        ))
+    elif sc.activePricingTiers == 0:
+        insights.append(PageInsight(
+            id="pt-no-active",
+            level="warning",
+            message="All pricing tiers are inactive.",
+            actionHint="Activate at least one pricing tier",
+        ))
+
+    return insights
+
+
+def _service_items_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalServiceItems == 0:
+        insights.append(PageInsight(
+            id="si-none",
+            level="critical",
+            message="No service items configured. Services are required for ordering and billing.",
+            actionHint="Create service items or use bulk import",
+        ))
+        return insights
+
+    if sc.withoutBasePrice > 0:
+        insights.append(PageInsight(
+            id="si-no-price",
+            level="warning",
+            message=f"{sc.withoutBasePrice} service(s) have no base price set.",
+            actionHint="Set base prices for accurate billing",
+            entityCount=sc.withoutBasePrice,
+        ))
+
+    inactive = sc.totalServiceItems - sc.activeServiceItems
+    if inactive > 5:
+        insights.append(PageInsight(
+            id="si-inactive",
+            level="info",
+            message=f"{inactive} service item(s) are inactive.",
+            entityCount=inactive,
+        ))
+
+    return insights
+
+
+def _price_history_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.priceChangeCount == 0:
+        insights.append(PageInsight(
+            id="ph-empty",
+            level="info",
+            message="No price changes recorded yet. History is auto-tracked when prices change.",
+        ))
+    else:
+        insights.append(PageInsight(
+            id="ph-count",
+            level="info",
+            message=f"{sc.priceChangeCount} price change(s) recorded.",
+            entityCount=sc.priceChangeCount,
+        ))
+
+    return insights
+
+
+# ── Tax Codes ───────────────────────────────────────────────────────────
+
+
+def _tax_codes_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalTaxCodes == 0:
+        insights.append(PageInsight(
+            id="tax-none",
+            level="critical",
+            message="No GST/tax codes configured. Tax codes are required for compliant invoicing.",
+            actionHint="Create tax codes for applicable GST rates (5%, 12%, 18%, exempt).",
+        ))
+    elif sc.totalTaxCodes < 3:
+        insights.append(PageInsight(
+            id="tax-few",
+            level="warning",
+            message=f"Only {sc.totalTaxCodes} tax code(s) found. Indian healthcare typically needs 3-4 GST slabs.",
+            actionHint="Verify all applicable GST rates are covered.",
+        ))
+    else:
+        insights.append(PageInsight(
+            id="tax-ok",
+            level="info",
+            message=f"{sc.totalTaxCodes} tax code(s) configured.",
+            entityCount=sc.totalTaxCodes,
+        ))
+
+    if sc.totalServiceItems > 0 and sc.totalTaxCodes == 0:
+        insights.append(PageInsight(
+            id="tax-svc-mismatch",
+            level="warning",
+            message="Services exist but no tax codes. Billing will lack tax computation.",
+            actionHint="Set up GST codes before going live with billing.",
+        ))
+
+    return insights
+
+
+# ── Charge Master ───────────────────────────────────────────────────────
+
+
+def _charge_master_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalChargeMaster == 0:
+        insights.append(PageInsight(
+            id="chg-none",
+            level="critical",
+            message="No charge master items. The charge master is the backbone of revenue cycle.",
+            actionHint="Add billable items — lab tests, procedures, consumables, room charges, etc.",
+        ))
+    else:
+        inactive = sc.totalChargeMaster - sc.activeChargeMaster
+        insights.append(PageInsight(
+            id="chg-summary",
+            level="info",
+            message=f"{sc.totalChargeMaster} charge master item(s) ({sc.activeChargeMaster} active, {inactive} inactive).",
+            entityCount=sc.totalChargeMaster,
+        ))
+        if inactive > sc.activeChargeMaster:
+            insights.append(PageInsight(
+                id="chg-inactive-ratio",
+                level="warning",
+                message=f"More inactive ({inactive}) than active ({sc.activeChargeMaster}) charge items. Review and clean up.",
+                actionHint="Deactivate obsolete items or re-activate needed ones.",
+            ))
+
+    return insights
+
+
+# ── Tariff Plans ────────────────────────────────────────────────────────
+
+
+def _tariff_plans_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalTariffPlans == 0:
+        insights.append(PageInsight(
+            id="tar-none",
+            level="critical",
+            message="No tariff plans configured. Tariff plans define rates for payers and patient categories.",
+            actionHint="Create at least one tariff plan (e.g. 'Standard Rates') and link rate cards.",
+        ))
+    else:
+        inactive = sc.totalTariffPlans - sc.activeTariffPlans
+        insights.append(PageInsight(
+            id="tar-summary",
+            level="info",
+            message=f"{sc.totalTariffPlans} tariff plan(s) ({sc.activeTariffPlans} active).",
+            entityCount=sc.totalTariffPlans,
+        ))
+        if sc.activeTariffPlans == 0:
+            insights.append(PageInsight(
+                id="tar-all-inactive",
+                level="warning",
+                message="All tariff plans are inactive. No rates will apply to billing.",
+                actionHint="Activate at least one tariff plan.",
+            ))
+
+    if sc.totalPayers > 0 and sc.totalTariffPlans == 0:
+        insights.append(PageInsight(
+            id="tar-payer-gap",
+            level="warning",
+            message="Payers configured but no tariff plans. Payer-specific rates cannot be applied.",
+            actionHint="Create tariff plans and associate with payer contracts.",
+        ))
+
+    return insights
+
+
+# ── Service Catalogues ──────────────────────────────────────────────────
+
+
+def _service_catalogues_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalServiceItems == 0:
+        insights.append(PageInsight(
+            id="cat-no-svc",
+            level="warning",
+            message="No service items exist yet. Create services before building catalogues.",
+            actionHint="Go to Service Items first.",
+        ))
+    elif sc.totalServiceItems > 0 and sc.totalChargeMaster == 0:
+        insights.append(PageInsight(
+            id="cat-no-chg",
+            level="warning",
+            message="Services exist but no charge master items. Catalogues need mapped charges for billing.",
+            actionHint="Set up the Charge Master, then map services.",
+        ))
+    else:
+        insights.append(PageInsight(
+            id="cat-ready",
+            level="info",
+            message=f"{sc.activeServiceItems} active service(s) and {sc.activeChargeMaster} charge item(s) available for catalogues.",
+        ))
+
+    return insights
+
+
+# ── Service Library ─────────────────────────────────────────────────────
+
+
+def _service_library_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    insights.append(PageInsight(
+        id="lib-summary",
+        level="info",
+        message=f"Branch has {sc.totalServiceItems} service item(s) and {sc.totalChargeMaster} charge master item(s).",
+        entityCount=sc.totalServiceItems + sc.totalChargeMaster,
+    ))
+
+    if sc.totalServiceItems == 0 and sc.totalChargeMaster == 0:
+        insights.append(PageInsight(
+            id="lib-empty",
+            level="warning",
+            message="No services or charges defined. Populate these to use the service library.",
+            actionHint="Start with Service Items or Charge Master.",
+        ))
+
+    return insights
+
+
+# ── Service Mapping ─────────────────────────────────────────────────────
+
+
+def _service_mapping_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalServiceItems == 0 or sc.totalChargeMaster == 0:
+        insights.append(PageInsight(
+            id="map-prereq",
+            level="warning",
+            message="Both service items and charge master items are needed before mapping.",
+            actionHint="Ensure Service Items and Charge Master have entries first.",
+        ))
+    else:
+        insights.append(PageInsight(
+            id="map-ready",
+            level="info",
+            message=f"{sc.activeServiceItems} service(s) and {sc.activeChargeMaster} charge item(s) available for mapping.",
+        ))
+
+    return insights
+
+
+# ── Service Packages ────────────────────────────────────────────────────
+
+
+def _service_packages_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalServiceItems == 0:
+        insights.append(PageInsight(
+            id="pkg-no-svc",
+            level="warning",
+            message="No service items to bundle into packages.",
+            actionHint="Create service items first, then build packages.",
+        ))
+    else:
+        insights.append(PageInsight(
+            id="pkg-svc-count",
+            level="info",
+            message=f"{sc.activeServiceItems} active service(s) available for packaging.",
+            entityCount=sc.activeServiceItems,
+        ))
+
+    return insights
+
+
+# ── Order Sets ──────────────────────────────────────────────────────────
+
+
+def _order_sets_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalServiceItems == 0:
+        insights.append(PageInsight(
+            id="os-no-svc",
+            level="warning",
+            message="No service items available. Order sets require services to group.",
+            actionHint="Create service items first.",
+        ))
+    else:
+        insights.append(PageInsight(
+            id="os-ready",
+            level="info",
+            message=f"{sc.activeServiceItems} active service(s) can be grouped into order sets.",
+            entityCount=sc.activeServiceItems,
+        ))
+
+    return insights
+
+
+# ── Service Availability ────────────────────────────────────────────────
+
+
+def _service_availability_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    if sc.totalServiceItems == 0:
+        insights.append(PageInsight(
+            id="avail-no-svc",
+            level="warning",
+            message="No service items configured. Create services before setting availability.",
+            actionHint="Go to Service Items.",
+        ))
+    else:
+        insights.append(PageInsight(
+            id="avail-svc-count",
+            level="info",
+            message=f"{sc.activeServiceItems} active service(s). Set availability schedules per service.",
+            entityCount=sc.activeServiceItems,
+        ))
+
+    return insights
+
+
+# ── Service Bulk Import ─────────────────────────────────────────────────
+
+
+def _service_bulk_import_insights(ctx: BranchContext) -> list[PageInsight]:
+    insights: list[PageInsight] = []
+    sc = ctx.serviceCatalog
+
+    insights.append(PageInsight(
+        id="import-summary",
+        level="info",
+        message=f"Current branch: {sc.totalServiceItems} service(s), {sc.totalChargeMaster} charge item(s), {sc.totalPayers} payer(s).",
+    ))
+
+    if sc.totalServiceItems == 0 and sc.totalChargeMaster == 0:
+        insights.append(PageInsight(
+            id="import-hint",
+            level="info",
+            message="Bulk import is ideal for initial setup. Prepare your CSV/Excel with codes, names, and categories.",
+            actionHint="Download the template, fill it, and upload.",
+        ))
 
     return insights

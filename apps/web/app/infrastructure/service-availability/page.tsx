@@ -39,6 +39,8 @@ import { cn } from "@/lib/cn";
 
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import { useActiveBranchStore } from "@/lib/branch/active-branch";
+import { usePageInsights } from "@/lib/copilot/usePageInsights";
+import { PageInsightBanner } from "@/components/copilot/PageInsightBanner";
 import {
   AlertTriangle,
   CalendarClock,
@@ -227,7 +229,9 @@ type CalendarPolicy = {
   maxPerSlot: number | null;
   effectiveFrom: string; // YYYY-MM-DD
   notes: string;
-  rulesJsonText: string; // optional (stored trimmed)
+  advPriorityLevel: string;
+  advRequiresApproval: boolean;
+  advNotes: string;
 };
 
 const DAY_TO_DOW: Record<string, number> = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
@@ -321,8 +325,8 @@ function buildCalendarName(policy: CalendarPolicy) {
   const from = safeMeta(policy.effectiveFrom || "");
   const note = safeMeta(policy.notes || "").slice(0, 40);
 
-  // optional advanced json stored trimmed (small only)
-  const adv = safeMeta(policy.rulesJsonText || "").slice(0, 60);
+  // optional advanced fields (priority / notes)
+  const adv = (policy.advNotes || policy.advPriorityLevel || "").slice(0, 60);
 
   const meta = [
     `mode=${mode}`,
@@ -355,7 +359,9 @@ function parseCalendarName(name: string): CalendarPolicy {
     maxPerSlot: null,
     effectiveFrom: "",
     notes: "",
-    rulesJsonText: "",
+    advPriorityLevel: "",
+    advRequiresApproval: false,
+    advNotes: "",
   };
 
   const m = /\{(.+)\}$/.exec(String(name || "").trim());
@@ -391,7 +397,9 @@ function parseCalendarName(name: string): CalendarPolicy {
     maxPerSlot: Number.isFinite(maxSlot) ? maxSlot : null,
     effectiveFrom: map.from || "",
     notes: map.note || "",
-    rulesJsonText: map.adv || "",
+    advPriorityLevel: "",
+    advRequiresApproval: false,
+    advNotes: map.adv || "",
   };
 }
 
@@ -424,7 +432,9 @@ function calendarToRuleRow(cal: ServiceAvailabilityCalendarApi): AvailabilityRul
     notes: p.notes || null,
 
     windows: rulesToWindows(cal.rules),
-    rulesJson: p.rulesJsonText ? { adv: p.rulesJsonText } : null,
+    rulesJson: (p.advPriorityLevel || p.advRequiresApproval || p.advNotes)
+      ? { adv: JSON.stringify({ priorityLevel: p.advPriorityLevel || undefined, requiresApproval: p.advRequiresApproval || undefined, notes: p.advNotes || undefined }) }
+      : null,
 
     createdAt: cal.createdAt,
     updatedAt: cal.updatedAt,
@@ -520,6 +530,12 @@ export default function SuperAdminServiceAvailabilityPage() {
 
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
   const [branchId, setBranchId] = React.useState<string>("");
+
+  // AI Copilot
+  const { insights, loading: insightsLoading, dismiss: dismissInsight } = usePageInsights({
+    module: "service-availability",
+    enabled: !!branchId,
+  });
 
   const [serviceItems, setServiceItems] = React.useState<ServiceItemRow[]>([]);
   const [selectedItemId, setSelectedItemId] = React.useState<string>("");
@@ -885,6 +901,8 @@ setQ("");
             </CardHeader>
           </Card>
         ) : null}
+
+        <PageInsightBanner insights={insights} loading={insightsLoading} onDismiss={dismissInsight} />
 
         {/* Overview */}
         <Card className="overflow-hidden">
@@ -1423,7 +1441,9 @@ function AvailabilityRuleModal(props: {
     maxPerSlot: null,
     effectiveFrom: new Date().toISOString().slice(0, 10),
     notes: "",
-    rulesJsonText: "",
+    advPriorityLevel: "",
+    advRequiresApproval: false,
+    advNotes: "",
     isActive: true,
     windowsJsonText: JSON.stringify(
       [
@@ -1456,7 +1476,9 @@ function AvailabilityRuleModal(props: {
         maxPerSlot: editing.maxPerSlot ?? null,
         effectiveFrom: editing.effectiveFrom ? new Date(editing.effectiveFrom).toISOString().slice(0, 10) : "",
         notes: editing.notes || "",
-        rulesJsonText: editing.rulesJson?.adv ? String(editing.rulesJson.adv) : "",
+        advPriorityLevel: "",
+        advRequiresApproval: false,
+        advNotes: editing.rulesJson?.adv ? String(editing.rulesJson.adv) : "",
         isActive: Boolean(editing.isActive),
         windowsJsonText:
           editing.windows != null ? JSON.stringify(editing.windows, null, 2) : prev.windowsJsonText,
@@ -1467,7 +1489,9 @@ function AvailabilityRuleModal(props: {
         effectiveFrom: new Date().toISOString().slice(0, 10),
         isActive: true,
         notes: "",
-        rulesJsonText: "",
+        advPriorityLevel: "",
+        advRequiresApproval: false,
+        advNotes: "",
       }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1500,7 +1524,9 @@ function AvailabilityRuleModal(props: {
       maxPerSlot: form.maxPerSlot == null || form.maxPerSlot === ("" as any) ? null : Number(form.maxPerSlot),
       effectiveFrom: String(form.effectiveFrom || "").trim(),
       notes: String(form.notes || "").trim(),
-      rulesJsonText: String(form.rulesJsonText || "").trim(),
+      advPriorityLevel: form.advPriorityLevel || "",
+      advRequiresApproval: Boolean(form.advRequiresApproval),
+      advNotes: (form.advNotes || "").trim(),
     };
 
     const name = buildCalendarName(policy);
@@ -1801,14 +1827,37 @@ function AvailabilityRuleModal(props: {
             </TabsContent>
 
             <TabsContent value="advanced" className="mt-4">
-              <div className="grid gap-2">
-                <Label>Advanced Rules JSON (optional)</Label>
-                <Textarea
-                  className="rounded-2xl bg-zc-panel/10 min-h-[180px] font-mono text-xs"
-                  value={form.rulesJsonText}
-                  onChange={(e) => patch({ rulesJsonText: e.target.value })}
-                  placeholder="Optional advanced JSON (stored trimmed in calendar name metadata)."
-                />
+              <div className="rounded-xl border border-purple-200 bg-purple-50/30 p-4 space-y-4">
+                <div className="text-sm font-semibold text-purple-700">Advanced Settings (optional)</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label>Priority Level</Label>
+                    <Select value={form.advPriorityLevel || "_none"} onValueChange={(v) => patch({ advPriorityLevel: v === "_none" ? "" : v })}>
+                      <SelectTrigger><SelectValue placeholder="Default" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_none">Default</SelectItem>
+                        <SelectItem value="HIGH">High</SelectItem>
+                        <SelectItem value="MEDIUM">Medium</SelectItem>
+                        <SelectItem value="LOW">Low</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Requires Approval</Label>
+                    <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
+                      <Switch checked={form.advRequiresApproval} onCheckedChange={(v) => patch({ advRequiresApproval: v })} />
+                      <div className="text-sm text-zc-muted">{form.advRequiresApproval ? "Yes, requires approval" : "No approval needed"}</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Notes</Label>
+                  <Input
+                    value={form.advNotes || ""}
+                    onChange={(e) => patch({ advNotes: e.target.value })}
+                    placeholder="e.g., Only available with prior booking"
+                  />
+                </div>
               </div>
             </TabsContent>
           </Tabs>

@@ -25,6 +25,8 @@ import { cn } from "@/lib/cn";
 
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import { useActiveBranchStore } from "@/lib/branch/active-branch";
+import { usePageInsights } from "@/lib/copilot/usePageInsights";
+import { PageInsightBanner } from "@/components/copilot/PageInsightBanner";
 import {
   AlertTriangle,
   Archive,
@@ -106,6 +108,18 @@ type ServicePackageRow = {
 
   effectiveFrom?: string;
   effectiveTo?: string | null;
+
+  durationDays?: number | null;
+  allowComponentAddition?: boolean;
+  allowComponentRemoval?: boolean;
+  allowQuantityChange?: boolean;
+  overUtilizationPolicy?: string | null;
+  underUtilizationRefund?: string | null;
+  minAge?: number | null;
+  maxAge?: number | null;
+  genderRestriction?: string | null;
+  requiresPreauth?: boolean;
+  applicablePayerIds?: string[];
 
   components?: ServicePackageComponentRow[];
 
@@ -189,6 +203,12 @@ export default function SuperAdminServicePackagesPage() {
 
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
   const [branchId, setBranchId] = React.useState<string>("");
+
+  // AI Copilot
+  const { insights, loading: insightsLoading, dismiss: dismissInsight } = usePageInsights({
+    module: "service-packages",
+    enabled: !!branchId,
+  });
 
   const [rows, setRows] = React.useState<ServicePackageRow[]>([]);
   const [selectedId, setSelectedId] = React.useState<string>("");
@@ -428,6 +448,8 @@ setQ("");
             </CardHeader>
           </Card>
         ) : null}
+
+        <PageInsightBanner insights={insights} loading={insightsLoading} onDismiss={dismissInsight} />
 
         {/* Overview */}
         <Card className="overflow-hidden">
@@ -833,10 +855,18 @@ function PackageEditModal({
   const { toast } = useToast();
   const [saving, setSaving] = React.useState(false);
 
-  const [form, setForm] = React.useState<{ code: string; name: string; description: string }>({
-    code: "",
-    name: "",
-    description: "",
+  const [form, setForm] = React.useState<{
+    code: string; name: string; description: string;
+    durationDays: string; allowComponentAddition: boolean; allowComponentRemoval: boolean;
+    allowQuantityChange: boolean; overUtilizationPolicy: string; underUtilizationRefund: string;
+    minAge: string; maxAge: string; genderRestriction: string; requiresPreauth: boolean;
+    applicablePayerIdsText: string;
+  }>({
+    code: "", name: "", description: "",
+    durationDays: "", allowComponentAddition: false, allowComponentRemoval: false,
+    allowQuantityChange: false, overUtilizationPolicy: "", underUtilizationRefund: "",
+    minAge: "", maxAge: "", genderRestriction: "", requiresPreauth: false,
+    applicablePayerIdsText: "",
   });
 
   React.useEffect(() => {
@@ -846,9 +876,26 @@ function PackageEditModal({
         code: editing.code || "",
         name: editing.name || "",
         description: editing.description || "",
+        durationDays: editing.durationDays != null ? String(editing.durationDays) : "",
+        allowComponentAddition: !!(editing as any).allowComponentAddition,
+        allowComponentRemoval: !!(editing as any).allowComponentRemoval,
+        allowQuantityChange: !!(editing as any).allowQuantityChange,
+        overUtilizationPolicy: (editing as any).overUtilizationPolicy || "",
+        underUtilizationRefund: (editing as any).underUtilizationRefund || "",
+        minAge: (editing as any).minAge != null ? String((editing as any).minAge) : "",
+        maxAge: (editing as any).maxAge != null ? String((editing as any).maxAge) : "",
+        genderRestriction: (editing as any).genderRestriction || "",
+        requiresPreauth: !!(editing as any).requiresPreauth,
+        applicablePayerIdsText: Array.isArray(editing.applicablePayerIds) ? editing.applicablePayerIds.join(", ") : "",
       });
     } else {
-      setForm({ code: "", name: "", description: "" });
+      setForm({
+        code: "", name: "", description: "",
+        durationDays: "", allowComponentAddition: false, allowComponentRemoval: false,
+        allowQuantityChange: false, overUtilizationPolicy: "", underUtilizationRefund: "",
+        minAge: "", maxAge: "", genderRestriction: "", requiresPreauth: false,
+        applicablePayerIdsText: "",
+      });
     }
   }, [open, mode, editing]);
 
@@ -863,6 +910,19 @@ function PackageEditModal({
       code: String(form.code || "").trim(),
       name: String(form.name || "").trim(),
       description: form.description?.trim() ? String(form.description).trim() : null,
+      durationDays: form.durationDays ? Number(form.durationDays) : null,
+      allowComponentAddition: !!form.allowComponentAddition,
+      allowComponentRemoval: !!form.allowComponentRemoval,
+      allowQuantityChange: !!form.allowQuantityChange,
+      overUtilizationPolicy: form.overUtilizationPolicy || null,
+      underUtilizationRefund: form.underUtilizationRefund || null,
+      minAge: form.minAge ? Number(form.minAge) : null,
+      maxAge: form.maxAge ? Number(form.maxAge) : null,
+      genderRestriction: form.genderRestriction || null,
+      requiresPreauth: !!form.requiresPreauth,
+      applicablePayerIds: form.applicablePayerIdsText
+        ? form.applicablePayerIdsText.split(",").map((s: string) => s.trim()).filter(Boolean)
+        : [],
     };
 
     if (!payload.code || !payload.name) {
@@ -933,6 +993,101 @@ function PackageEditModal({
               <div className="text-xs text-zc-muted min-h-[16px]">Keep it short — visible in ordering UI.</div>
             </div>
 
+            {/* ── Utilization & Restrictions ── */}
+            <div className="md:col-span-2">
+              <Separator className="my-2" />
+              <div className="flex items-center gap-2 mt-2 mb-1 text-sm font-semibold text-zc-text">
+                <ShieldCheck className="h-4 w-4 text-zc-accent" />
+                Utilization &amp; Restrictions
+              </div>
+              <div className="text-xs text-zc-muted mb-2">Configure package duration, policies, age/gender limits and payer scope.</div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Duration (days)</Label>
+              <Input type="number" min="0" value={form.durationDays} onChange={(e) => patch({ durationDays: e.target.value })} placeholder="e.g. 30" />
+            </div>
+            <div className="grid gap-2">
+              <Label>Gender Restriction</Label>
+              <Select value={form.genderRestriction || "_none"} onValueChange={(v) => patch({ genderRestriction: v === "_none" ? "" : v })}>
+                <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">None</SelectItem>
+                  <SelectItem value="MALE">Male</SelectItem>
+                  <SelectItem value="FEMALE">Female</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Min Age</Label>
+              <Input type="number" min="0" max="150" value={form.minAge} onChange={(e) => patch({ minAge: e.target.value })} placeholder="e.g. 18" />
+            </div>
+            <div className="grid gap-2">
+              <Label>Max Age</Label>
+              <Input type="number" min="0" max="150" value={form.maxAge} onChange={(e) => patch({ maxAge: e.target.value })} placeholder="e.g. 65" />
+            </div>
+            <div className="grid gap-2">
+              <Label>Over-Utilization Policy</Label>
+              <Select value={form.overUtilizationPolicy || "_none"} onValueChange={(v) => patch({ overUtilizationPolicy: v === "_none" ? "" : v })}>
+                <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">None</SelectItem>
+                  <SelectItem value="CHARGE_ADDITIONAL">Charge Additional</SelectItem>
+                  <SelectItem value="ABSORB">Absorb</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Under-Utilization Refund</Label>
+              <Select value={form.underUtilizationRefund || "_none"} onValueChange={(v) => patch({ underUtilizationRefund: v === "_none" ? "" : v })}>
+                <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">None</SelectItem>
+                  <SelectItem value="NO_REFUND">No Refund</SelectItem>
+                  <SelectItem value="PARTIAL">Partial</SelectItem>
+                  <SelectItem value="FULL">Full</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Toggle switches */}
+            <div className="md:col-span-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-xl border border-zc-border bg-zc-card p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-medium">Allow Add</div>
+                  <Switch checked={form.allowComponentAddition} onCheckedChange={(v) => patch({ allowComponentAddition: !!v })} />
+                </div>
+              </div>
+              <div className="rounded-xl border border-zc-border bg-zc-card p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-medium">Allow Remove</div>
+                  <Switch checked={form.allowComponentRemoval} onCheckedChange={(v) => patch({ allowComponentRemoval: !!v })} />
+                </div>
+              </div>
+              <div className="rounded-xl border border-zc-border bg-zc-card p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-medium">Qty Change</div>
+                  <Switch checked={form.allowQuantityChange} onCheckedChange={(v) => patch({ allowQuantityChange: !!v })} />
+                </div>
+              </div>
+              <div className="rounded-xl border border-zc-border bg-zc-card p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-medium">Preauth</div>
+                  <Switch checked={form.requiresPreauth} onCheckedChange={(v) => patch({ requiresPreauth: !!v })} />
+                </div>
+              </div>
+            </div>
+
+            <div className="md:col-span-2 grid gap-2">
+              <Label>Applicable Payer IDs</Label>
+              <Input
+                value={form.applicablePayerIdsText}
+                onChange={(e) => patch({ applicablePayerIdsText: e.target.value })}
+                placeholder="Comma-separated payer IDs, e.g. PAYER-001, PAYER-002"
+              />
+              <div className="text-xs text-zc-muted min-h-[16px]">Leave empty to allow all payers. Separate multiple IDs with commas.</div>
+            </div>
+
             {mode === "edit" && editing ? (
               <div className="md:col-span-2 grid gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
                 <div className="flex flex-wrap items-center gap-2">
@@ -1001,7 +1156,8 @@ function PackageItemsDrawer({
   // component fields
   const [qty, setQty] = React.useState<string>("1");
   const [isIncluded, setIsIncluded] = React.useState(true);
-  const [rulesText, setRulesText] = React.useState("");
+  const [ruleMaxQty, setRuleMaxQty] = React.useState("");
+  const [ruleNote, setRuleNote] = React.useState("");
 
   React.useEffect(() => {
     if (!open) return;
@@ -1011,7 +1167,8 @@ function PackageItemsDrawer({
     setPickedSvc(null);
     setQty("1");
     setIsIncluded(true);
-    setRulesText("");
+    setRuleMaxQty("");
+    setRuleNote("");
     void loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, pkg?.id]);
@@ -1060,13 +1217,13 @@ function PackageItemsDrawer({
   }, [svcQ, open]);
 
   function parseRules(): any {
-    const t = (rulesText || "").trim();
-    if (!t) return undefined;
-    try {
-      return JSON.parse(t);
-    } catch {
-      throw new Error("Rules must be valid JSON.");
-    }
+    const maxQty = ruleMaxQty ? Number(ruleMaxQty) : undefined;
+    const note = (ruleNote || "").trim() || undefined;
+    if (maxQty === undefined && note === undefined) return undefined;
+    return {
+      ...(maxQty !== undefined ? { maxQty } : {}),
+      ...(note !== undefined ? { note } : {}),
+    };
   }
 
   async function upsertComponent() {
@@ -1103,7 +1260,8 @@ function PackageItemsDrawer({
       setPickedSvc(null);
       setQty("1");
       setIsIncluded(true);
-      setRulesText("");
+      setRuleMaxQty("");
+      setRuleNote("");
 
       await loadDetail();
       onSaved();
@@ -1156,6 +1314,75 @@ function PackageItemsDrawer({
         <Separator className="my-4" />
 
         <div className="px-6 pb-6 grid gap-6">
+          {/* Package Detail Summary */}
+          {detail ? (
+            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 grid gap-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-zc-text">
+                <ShieldCheck className="h-4 w-4 text-zc-accent" />
+                Utilization &amp; Restrictions
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="grid gap-0.5">
+                  <div className="text-xs text-zc-muted">Duration (days)</div>
+                  <div className="text-sm font-medium text-zc-text">{detail.durationDays != null ? detail.durationDays : "—"}</div>
+                </div>
+                <div className="grid gap-0.5">
+                  <div className="text-xs text-zc-muted">Over-Utilization Policy</div>
+                  <div className="text-sm font-medium text-zc-text">{detail.overUtilizationPolicy || "—"}</div>
+                </div>
+                <div className="grid gap-0.5">
+                  <div className="text-xs text-zc-muted">Under-Utilization Refund</div>
+                  <div className="text-sm font-medium text-zc-text">{detail.underUtilizationRefund || "—"}</div>
+                </div>
+                <div className="grid gap-0.5">
+                  <div className="text-xs text-zc-muted">Min Age</div>
+                  <div className="text-sm font-medium text-zc-text">{detail.minAge != null ? detail.minAge : "—"}</div>
+                </div>
+                <div className="grid gap-0.5">
+                  <div className="text-xs text-zc-muted">Max Age</div>
+                  <div className="text-sm font-medium text-zc-text">{detail.maxAge != null ? detail.maxAge : "—"}</div>
+                </div>
+                <div className="grid gap-0.5">
+                  <div className="text-xs text-zc-muted">Gender Restriction</div>
+                  <div className="text-sm font-medium text-zc-text">{detail.genderRestriction || "All Genders"}</div>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="flex items-center gap-2 rounded-xl border border-zc-border bg-zc-card px-3 py-2">
+                  <div className="text-xs font-medium text-zc-muted">Allow Add</div>
+                  <Badge variant={detail.allowComponentAddition ? "ok" : "secondary"}>{detail.allowComponentAddition ? "YES" : "NO"}</Badge>
+                </div>
+                <div className="flex items-center gap-2 rounded-xl border border-zc-border bg-zc-card px-3 py-2">
+                  <div className="text-xs font-medium text-zc-muted">Allow Remove</div>
+                  <Badge variant={detail.allowComponentRemoval ? "ok" : "secondary"}>{detail.allowComponentRemoval ? "YES" : "NO"}</Badge>
+                </div>
+                <div className="flex items-center gap-2 rounded-xl border border-zc-border bg-zc-card px-3 py-2">
+                  <div className="text-xs font-medium text-zc-muted">Qty Change</div>
+                  <Badge variant={detail.allowQuantityChange ? "ok" : "secondary"}>{detail.allowQuantityChange ? "YES" : "NO"}</Badge>
+                </div>
+                <div className="flex items-center gap-2 rounded-xl border border-zc-border bg-zc-card px-3 py-2">
+                  <div className="text-xs font-medium text-zc-muted">Preauth</div>
+                  <Badge variant={detail.requiresPreauth ? "warning" : "secondary"}>{detail.requiresPreauth ? "YES" : "NO"}</Badge>
+                </div>
+              </div>
+              {Array.isArray(detail.applicablePayerIds) && detail.applicablePayerIds.length > 0 ? (
+                <div className="grid gap-0.5">
+                  <div className="text-xs text-zc-muted">Applicable Payer IDs</div>
+                  <div className="flex flex-wrap gap-1">
+                    {detail.applicablePayerIds.map((pid) => (
+                      <Badge key={pid} variant="secondary" className="font-mono text-xs">{pid}</Badge>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-0.5">
+                  <div className="text-xs text-zc-muted">Applicable Payer IDs</div>
+                  <div className="text-sm font-medium text-zc-text">All payers (no restriction)</div>
+                </div>
+              )}
+            </div>
+          ) : null}
+
           {/* Add/Update */}
           <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4 grid gap-4">
             <div className="flex items-center justify-between gap-3">
@@ -1255,15 +1482,24 @@ function PackageItemsDrawer({
                 </div>
               </div>
 
-              <div className="grid gap-2 md:col-span-3">
-                <Label>Rules (JSON, optional)</Label>
-                <Textarea
-                  value={rulesText}
-                  onChange={(e) => setRulesText(e.target.value)}
-                  placeholder='e.g., {"maxQty": 1, "note": "Only once per visit"}'
-                  className="min-h-[42px]"
+              <div className="grid gap-2">
+                <Label>Max Qty per Visit</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={ruleMaxQty}
+                  onChange={(e) => setRuleMaxQty(e.target.value)}
+                  placeholder="e.g., 1"
                 />
-                <div className="text-xs text-zc-muted">Stored as component.condition in backend.</div>
+              </div>
+              <div className="grid gap-2 md:col-span-2">
+                <Label>Condition Note</Label>
+                <Input
+                  value={ruleNote}
+                  onChange={(e) => setRuleNote(e.target.value)}
+                  placeholder="e.g., Only once per visit"
+                />
+                <div className="text-xs text-zc-muted">Stored as component condition in backend.</div>
               </div>
             </div>
 
@@ -1346,7 +1582,8 @@ function PackageItemsDrawer({
                                 setPickedSvc(c.serviceItem || null);
                                 setQty(String(c.quantity ?? 1));
                                 setIsIncluded(Boolean(c.isIncluded));
-                                setRulesText(c.condition ? JSON.stringify(c.condition, null, 2) : "");
+                                setRuleMaxQty(c.condition?.maxQty != null ? String(c.condition.maxQty) : "");
+                                setRuleNote(c.condition?.note ?? "");
                               }}
                             >
                               <Wrench className="h-4 w-4" />

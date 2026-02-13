@@ -189,6 +189,31 @@ class PharmacySummary(BaseModel):
     byScheduleClass: dict[str, int] = {}
 
 
+class ServiceCatalogSummary(BaseModel):
+    totalServiceItems: int = 0
+    activeServiceItems: int = 0
+    byCategory: dict[str, int] = {}
+    withBasePrice: int = 0
+    withoutBasePrice: int = 0
+    totalChargeMaster: int = 0
+    activeChargeMaster: int = 0
+    totalPayers: int = 0
+    activePayers: int = 0
+    byPayerKind: dict[str, int] = {}
+    totalContracts: int = 0
+    activeContracts: int = 0
+    expiredContracts: int = 0
+    totalGovSchemes: int = 0
+    activeGovSchemes: int = 0
+    totalPricingTiers: int = 0
+    activePricingTiers: int = 0
+    totalTariffPlans: int = 0
+    activeTariffPlans: int = 0
+    totalTaxCodes: int = 0
+    priceChangeCount: int = 0
+    hasCashPayer: bool = False
+
+
 class BranchContext(BaseModel):
     branch: BranchSnapshot
     location: LocationSummary
@@ -196,4 +221,5 @@ class BranchContext(BaseModel):
     departments: DepartmentSummary
     specialties: SpecialtySummary = SpecialtySummary()
     pharmacy: PharmacySummary = PharmacySummary()
+    serviceCatalog: ServiceCatalogSummary = ServiceCatalogSummary()
     textSummary: str = ""

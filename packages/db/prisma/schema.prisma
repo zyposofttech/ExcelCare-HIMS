@@ -268,12 +268,27 @@ model Branch {
   ExternalDirectorySource     ExternalDirectorySource[]
   ExternalDirectoryMapping    ExternalDirectoryMapping[]
 
+  // Financial Config (Module 3.13)
+  governmentSchemes GovernmentSchemeConfig[]
+  pricingTiers      PatientPricingTier[]
+
   // Pharmacy Infrastructure
-  pharmacyStores     PharmacyStore[]
-  drugMasters        DrugMaster[]
-  formularies        Formulary[]
-  pharmSuppliers     PharmSupplier[]
-  drugCategoryNodes  DrugCategoryNode[]
+  pharmacyStores    PharmacyStore[]
+  drugMasters       DrugMaster[]
+  formularies       Formulary[]
+  pharmSuppliers    PharmSupplier[]
+  drugCategoryNodes DrugCategoryNode[]
+
+  // Insurance Claims Transaction Layer
+  insurancePolicies       PatientInsurancePolicy[]
+  insuranceCases          InsuranceCase[]
+  preauthRequests         PreauthRequest[]
+  insuranceClaims         Claim[]
+  insuranceDocuments      InsuranceDocument[]
+  payerIntegrationConfigs PayerIntegrationConfig[]
+  paymentAdvices          PaymentAdvice[]
+  gatewayTransactions       GatewayTransaction[]
+  payerDocumentTemplates    PayerDocumentTemplate[]
 }
 
 model FacilityCatalog {
@@ -448,6 +463,7 @@ model Specialty {
   departmentLinks       DepartmentSpecialty[]
   staffAssignments      StaffAssignment[]
   staffProviderProfiles StaffProviderProfile[]
+  serviceItems          ServiceItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -991,6 +1007,9 @@ model Staff {
 
   // Pharmacy Infrastructure
   pharmacyStoresInCharge PharmacyStore[] @relation("PharmacistInCharge")
+
+  // Insurance relations
+  treatingCases InsuranceCase[] @relation("InsuranceCase_TreatingDoctor")
 
   @@index([name])
   @@index([displayName])
@@ -1859,6 +1878,23 @@ model User {
   publishedFormularies Formulary[]          @relation("FormularyPublisher")
   narcoticsPerformed   NarcoticsRegister[]  @relation("NarcoticsPerformedBy")
   drugLicensesUploaded DrugLicenseHistory[] @relation("DrugLicenseUploader")
+
+  // ---------------- Financial Config (Module 3.13) ----------------
+  approvedPriceChanges   ServicePriceHistory[] @relation("PriceHistoryApprovedBy")
+  createdPriceChanges    ServicePriceHistory[] @relation("PriceHistoryCreatedBy")
+  approvedPayerContracts PayerContract[]       @relation("PayerContractApprovedBy")
+
+  // ---------------- Insurance Claims Transaction Layer ----------------
+  verifiedPolicies         PatientInsurancePolicy[] @relation("PolicyVerifiedBy")
+  assignedInsuranceCases   InsuranceCase[]          @relation("InsuranceCase_AssignedTo")
+  submittedPreauths        PreauthRequest[]         @relation("Preauth_SubmittedBy")
+  preauthQueriesRaised     PreauthQuery[]           @relation("PreauthQuery_QueriedBy")
+  preauthQueriesResponded  PreauthQuery[]           @relation("PreauthQuery_RespondedBy")
+  submittedClaims          Claim[]                  @relation("Claim_SubmittedBy")
+  createdClaimVersions     ClaimVersion[]           @relation("ClaimVersion_CreatedBy")
+  uploadedInsuranceDocs    InsuranceDocument[]      @relation("InsDoc_UploadedBy")
+  verifiedInsuranceDocs    InsuranceDocument[]      @relation("InsDoc_VerifiedBy")
+  reconciledPaymentAdvices PaymentAdvice[]          @relation("PaymentAdvice_ReconciledBy")
 }
 
 model Patient {
@@ -1885,6 +1921,10 @@ model Patient {
   rtbfRequests   RtbfRequest[]
   statutoryCases StatutoryCase[]
 
+  // Insurance relations
+  insurancePolicies PatientInsurancePolicy[]
+  insuranceCases    InsuranceCase[]
+
   @@unique([branchId, uhid])
 }
 
@@ -1903,7 +1943,8 @@ model Encounter {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  admissions Admission[]
+  admissions     Admission[]
+  insuranceCases InsuranceCase[]
 }
 
 model Ward {
@@ -1986,6 +2027,8 @@ model Admission {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  insuranceCases InsuranceCase[]
 }
 
 model Asset {
@@ -2042,11 +2085,60 @@ model Payer {
   branchId String
   branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
-  code String @db.VarChar(48)
-  name String @db.VarChar(160)
+  code        String  @db.VarChar(48)
+  name        String  @db.VarChar(160)
+  shortName   String? @db.VarChar(100)
+  displayName String? @db.VarChar(200)
 
-  kind     PayerKind @default(OTHER)
-  isActive Boolean   @default(true)
+  kind     PayerKind   @default(OTHER)
+  status   PayerStatus @default(ACTIVE)
+  isActive Boolean     @default(true)
+
+  // Regulatory information
+  irdaiRegistration String?   @db.VarChar(64)
+  licenseNumber     String?   @db.VarChar(64)
+  licenseValidTill  DateTime?
+  panNumber         String?   @db.VarChar(10)
+  gstinNumber       String?   @db.VarChar(15)
+  cinNumber         String?   @db.VarChar(21)
+
+  // Addresses (JSONB: {registered, billing, claims})
+  addresses Json?
+  // Contacts (JSONB: {primary, claims, emergency})
+  contacts  Json?
+  portalUrl String? @db.VarChar(500)
+
+  // Financial terms
+  creditDays           Int?
+  creditLimit          Decimal? @db.Decimal(14, 2)
+  gracePeriodDays      Int?
+  interestRate         Decimal? @db.Decimal(5, 2)
+  earlyPaymentDiscount Decimal? @db.Decimal(5, 2)
+
+  // Settlement terms (JSONB)
+  settlementTerms Json?
+
+  // Operational config
+  requiresPreauth       Boolean  @default(false)
+  preauthThreshold      Decimal? @db.Decimal(12, 2)
+  supportingDocs        String[] @default([])
+  claimSubmissionMethod String[] @default([])
+
+  // Network config
+  networkType      String?  @db.VarChar(32)
+  empanelmentLevel String?  @db.VarChar(32)
+  roomRentLimit    Decimal? @db.Decimal(12, 2)
+  icuRentLimit     Decimal? @db.Decimal(12, 2)
+
+  // Integration
+  apiEndpoint String? @db.VarChar(500)
+  authMethod  String? @db.VarChar(32)
+  webhookUrl  String? @db.VarChar(500)
+
+  // Empanelment dates
+  empanelmentStartDate DateTime?
+  empanelmentEndDate   DateTime?
+  autoRenewal          Boolean   @default(false)
 
   meta Json?
 
@@ -2056,8 +2148,15 @@ model Payer {
   contracts   PayerContract[]
   tariffPlans TariffPlan[]
 
+  // Insurance relations
+  insurancePolicies  PatientInsurancePolicy[]
+  insuranceCases     InsuranceCase[]
+  integrationConfigs PayerIntegrationConfig[]
+  documentTemplates  PayerDocumentTemplate[]  @relation("Payer_DocTemplates")
+
   @@unique([branchId, code])
   @@index([branchId, kind, isActive])
+  @@index([branchId, status])
 }
 
 model PayerContract {
@@ -2068,12 +2167,40 @@ model PayerContract {
   payerId String
   payer   Payer  @relation(fields: [payerId], references: [id], onDelete: Cascade)
 
-  code String @db.VarChar(48)
-  name String @db.VarChar(160)
+  code        String  @db.VarChar(48)
+  name        String  @db.VarChar(160)
+  description String?
 
-  status  ContractStatus @default(ACTIVE)
-  startAt DateTime?
-  endAt   DateTime?
+  status   ContractStatus @default(ACTIVE)
+  priority Int            @default(100)
+  startAt  DateTime?
+  endAt    DateTime?
+
+  // Pricing strategy
+  pricingStrategy       PricingStrategy?
+  globalDiscountPercent Decimal?         @db.Decimal(5, 2)
+
+  // Loading percents
+  emergencyLoadingPercent  Decimal? @db.Decimal(5, 2)
+  afterHoursLoadingPercent Decimal? @db.Decimal(5, 2)
+  weekendLoadingPercent    Decimal? @db.Decimal(5, 2)
+  statLoadingPercent       Decimal? @db.Decimal(5, 2)
+
+  // Co-payment rules (JSONB)
+  copaymentRules Json?
+
+  // Exclusions
+  excludedServiceIds String[] @default([])
+  excludedCategories String[] @default([])
+
+  // Approval
+  approvalStatus   String?   @db.VarChar(32)
+  approvedByUserId String?
+  approvedByUser   User?     @relation("PayerContractApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  approvedAt       DateTime?
+
+  gracePeriodDays Int?
+  autoRenewal     Boolean @default(false)
 
   terms Json?
   meta  Json?
@@ -2081,7 +2208,12 @@ model PayerContract {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tariffPlans TariffPlan[]
+  tariffPlans   TariffPlan[]
+  contractRates ContractServiceRate[]
+
+  // Insurance relations
+  insurancePolicies PatientInsurancePolicy[]
+  insuranceCases    InsuranceCase[]
 
   @@unique([branchId, code])
   @@index([branchId, payerId, status])
@@ -3017,6 +3149,10 @@ model ChargeMasterItem {
   ServicePackageComponent ServicePackageComponent[]
   tariffRates             TariffRate[]
   billedPackages          ServicePackage[]          @relation("ServicePackage_BillingChargeMaster")
+  priceHistory            ServicePriceHistory[]     @relation("PriceHistory_ChargeMaster")
+  contractRates           ContractServiceRate[]     @relation("ContractRate_ChargeMaster")
+  tierRates               PatientPricingTierRate[]  @relation("TierRate_ChargeMaster")
+  claimLineItems          ClaimLineItem[]           @relation("ClaimLine_ChargeMaster")
 
   @@unique([branchId, code], name: "branchId_code")
   @@index([branchId, isActive])
@@ -3094,6 +3230,24 @@ model ServiceItem {
   taxCode          TaxCode?           @relation(fields: [taxCodeId], references: [id], onDelete: SetNull)
   billingPolicy    Json? // rounding, deposit, refund, inclusive/exclusive flags, etc.
 
+  // ── Service Catalog spec additions ──
+  shortName          String?    @db.VarChar(100)
+  displayName        String?    @db.VarChar(200)
+  description        String?
+  searchAliases      String[]   @default([])
+  specialtyId        String?
+  specialty          Specialty? @relation(fields: [specialtyId], references: [id], onDelete: SetNull)
+  subCategory        String?    @db.VarChar(80)
+  requiresScheduling Boolean    @default(false)
+  statAvailable      Boolean    @default(false)
+  defaultTatHours    Int?
+  basePrice          Decimal?   @db.Decimal(12, 2)
+  costPrice          Decimal?   @db.Decimal(12, 2)
+  allowDiscount      Boolean    @default(true)
+  maxDiscountPercent Decimal?   @db.Decimal(5, 2)
+  effectiveFrom      DateTime   @default(now())
+  effectiveTill      DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -3118,11 +3272,18 @@ model ServiceItem {
   ServiceAvailabilityCalendar ServiceAvailabilityCalendar[]
   ExternalDirectoryMapping    ExternalDirectoryMapping[]
 
+  // Financial config relations
+  priceHistory   ServicePriceHistory[]    @relation("PriceHistory_ServiceItem")
+  contractRates  ContractServiceRate[]    @relation("ContractRate_ServiceItem")
+  tierRates      PatientPricingTierRate[] @relation("TierRate_ServiceItem")
+  claimLineItems ClaimLineItem[]          @relation("ClaimLine_ServiceItem")
+
   @@unique([branchId, code], name: "branchId_serviceCode")
   @@unique([branchId, externalId], name: "branchId_serviceExternalId")
   @@index([branchId, category, isActive])
   @@index([branchId, type, isActive])
   @@index([branchId, lifecycleStatus, isActive])
+  @@index([branchId, specialtyId, isActive])
 }
 
 model ServiceItemAlias {
@@ -3271,6 +3432,10 @@ model ServiceCatalogue {
   context    CareContext?
   payerGroup String?
 
+  // ── Catalogue spec additions ──
+  filterRules Json?
+  visibility  String? @db.VarChar(32) // ALL | ROLE_BASED | USER_SPECIFIC
+
   status  CatalogueStatus @default(DRAFT)
   version Int             @default(1)
 
@@ -3381,6 +3546,19 @@ model ServicePackage {
   effectiveFrom DateTime  @default(now())
   effectiveTo   DateTime?
 
+  // ── Package spec additions ──
+  durationDays           Int?
+  allowComponentAddition Boolean                 @default(false)
+  allowComponentRemoval  Boolean                 @default(false)
+  allowQuantityChange    Boolean                 @default(false)
+  overUtilizationPolicy  OverUtilizationPolicy?
+  underUtilizationRefund UnderUtilizationRefund?
+  minAge                 Int?
+  maxAge                 Int?
+  genderRestriction      String?                 @db.VarChar(16)
+  applicablePayerIds     String[]                @default([])
+  requiresPreauth        Boolean                 @default(false)
+
   // Governance / workflow actors (maker-checker)
   createdByUserId   String?
   createdByUser     User?     @relation("ServicePackageCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
@@ -3399,9 +3577,10 @@ model ServicePackage {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  components   ServicePackageComponent[]
-  versions     ServicePackageVersion[]
-  OrderSetItem OrderSetItem[]
+  components    ServicePackageComponent[]
+  versions      ServicePackageVersion[]
+  OrderSetItem  OrderSetItem[]
+  contractRates ContractServiceRate[]     @relation("ContractRate_ServicePackage")
 
   @@unique([branchId, code])
   @@index([branchId, status])
@@ -3423,8 +3602,9 @@ model ServicePackageComponent {
   diagnosticItem DiagnosticItem?   @relation(fields: [diagnosticItemId], references: [id], onDelete: Restrict)
   chargeMaster   ChargeMasterItem? @relation(fields: [chargeMasterItemId], references: [id], onDelete: Restrict)
 
-  quantity   Int     @default(1)
-  isIncluded Boolean @default(true)
+  quantity   Int      @default(1)
+  unitPrice  Decimal? @db.Decimal(12, 2)
+  isIncluded Boolean  @default(true)
 
   // Conditional rules, auto-add, exclusions, etc.
   condition Json?
@@ -3741,6 +3921,172 @@ model ExternalDirectoryMapping {
 
   @@unique([branchId, sourceId, entryId])
   @@index([branchId, isPrimary])
+}
+
+// =====================================================================
+// SERVICE CATALOG & FINANCIAL CONFIG — NEW MODELS (Spec 3.7 / 3.13)
+// =====================================================================
+
+model ServicePriceHistory {
+  id       String @id @default(cuid())
+  branchId String
+
+  serviceItemId      String?
+  serviceItem        ServiceItem?      @relation("PriceHistory_ServiceItem", fields: [serviceItemId], references: [id], onDelete: Cascade)
+  chargeMasterItemId String?
+  chargeMasterItem   ChargeMasterItem? @relation("PriceHistory_ChargeMaster", fields: [chargeMasterItemId], references: [id], onDelete: Cascade)
+  tariffRateId       String?
+
+  oldPrice      Decimal @db.Decimal(12, 2)
+  newPrice      Decimal @db.Decimal(12, 2)
+  changeAmount  Decimal @db.Decimal(12, 2)
+  changePercent Decimal @db.Decimal(7, 4)
+  changeReason  String? @db.VarChar(500)
+
+  effectiveFrom DateTime
+  effectiveTill DateTime?
+
+  approvedByUserId String?
+  approvedByUser   User?     @relation("PriceHistoryApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  approvedAt       DateTime?
+
+  createdByUserId String?
+  createdByUser   User?   @relation("PriceHistoryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([branchId, serviceItemId, effectiveFrom])
+  @@index([branchId, chargeMasterItemId, effectiveFrom])
+}
+
+model ContractServiceRate {
+  id         String        @id @default(cuid())
+  contractId String
+  contract   PayerContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  serviceItemId      String?
+  serviceItem        ServiceItem?      @relation("ContractRate_ServiceItem", fields: [serviceItemId], references: [id], onDelete: Restrict)
+  packageId          String?
+  pkg                ServicePackage?   @relation("ContractRate_ServicePackage", fields: [packageId], references: [id], onDelete: Restrict)
+  chargeMasterItemId String?
+  chargeMasterItem   ChargeMasterItem? @relation("ContractRate_ChargeMaster", fields: [chargeMasterItemId], references: [id], onDelete: Restrict)
+  category           String?           @db.VarChar(80)
+
+  rateType         ContractRateType @default(FIXED_PRICE)
+  fixedPrice       Decimal?         @db.Decimal(12, 2)
+  percentageOfBase Decimal?         @db.Decimal(7, 4)
+  discountPercent  Decimal?         @db.Decimal(5, 2)
+  minPrice         Decimal?         @db.Decimal(12, 2)
+  maxPrice         Decimal?         @db.Decimal(12, 2)
+
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  version       Int       @default(1)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([contractId, serviceItemId])
+  @@index([contractId, chargeMasterItemId])
+  @@index([contractId, category])
+}
+
+model GovernmentSchemeConfig {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  schemeType SchemeType
+  schemeName String     @db.VarChar(160)
+  schemeCode String     @db.VarChar(48)
+
+  // Registration
+  registrationNumber String?   @db.VarChar(64)
+  registrationDate   DateTime?
+  validTill          DateTime?
+  shaCode            String?   @db.VarChar(64)
+  nhaCode            String?   @db.VarChar(64)
+  nhaHospitalCode    String?   @db.VarChar(64)
+
+  // Empaneled specialties (array of specialty IDs)
+  empaneledSpecialtyIds String[] @default([])
+
+  // Preauth config
+  preauthRequired          Boolean  @default(true)
+  preauthAutoApprovalLimit Decimal? @db.Decimal(12, 2)
+  verificationMethod       String?  @db.VarChar(32)
+
+  // Package mapping (JSONB: maps scheme package codes to hospital packages)
+  packageMapping Json?
+
+  // Claim config
+  claimSubmissionUrl        String?  @db.VarChar(500)
+  claimSubmissionMethod     String?  @db.VarChar(32)
+  claimSubmissionWindowDays Int?
+  claimProcessingTimeDays   Int?
+  requiredDocuments         String[] @default([])
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  insuranceCases InsuranceCase[]
+
+  @@unique([branchId, schemeCode])
+  @@index([branchId, schemeType, isActive])
+}
+
+model PatientPricingTier {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  kind        PricingTierKind
+  name        String          @db.VarChar(100)
+  code        String          @db.VarChar(48)
+  description String?
+
+  assignmentRules        Json?
+  defaultDiscountPercent Decimal? @db.Decimal(5, 2)
+  defaultMarkupPercent   Decimal? @db.Decimal(5, 2)
+  maxDiscountCap         Decimal? @db.Decimal(12, 2)
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tierRates PatientPricingTierRate[]
+
+  @@unique([branchId, code])
+  @@index([branchId, kind, isActive])
+}
+
+model PatientPricingTierRate {
+  id     String             @id @default(cuid())
+  tierId String
+  tier   PatientPricingTier @relation(fields: [tierId], references: [id], onDelete: Cascade)
+
+  serviceItemId      String?
+  serviceItem        ServiceItem?      @relation("TierRate_ServiceItem", fields: [serviceItemId], references: [id], onDelete: Restrict)
+  chargeMasterItemId String?
+  chargeMasterItem   ChargeMasterItem? @relation("TierRate_ChargeMaster", fields: [chargeMasterItemId], references: [id], onDelete: Restrict)
+
+  rateAmount      Decimal? @db.Decimal(12, 2)
+  discountPercent Decimal? @db.Decimal(5, 2)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tierId, serviceItemId])
+  @@index([tierId, chargeMasterItemId])
 }
 
 // ---------------- Fix-It Queue ----------------
@@ -5036,7 +5382,57 @@ enum PayerKind {
   TPA
   CORPORATE
   GOVERNMENT
+  TRUST
+  EMPLOYEE
   OTHER
+}
+
+enum PayerStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  BLOCKED
+}
+
+enum PricingTierKind {
+  GENERAL
+  SENIOR_CITIZEN
+  STAFF
+  EMPLOYEE_FAMILY
+  BPL
+  MEDICAL_COUNCIL
+  CUSTOM
+}
+
+enum SchemeType {
+  PMJAY
+  CGHS
+  ECHS
+  STATE_SCHEME
+  OTHER
+}
+
+enum ContractRateType {
+  FIXED_PRICE
+  PERCENTAGE_OF_BASE
+  DISCOUNT
+}
+
+enum OverUtilizationPolicy {
+  CHARGE_ADDITIONAL
+  ABSORB
+}
+
+enum UnderUtilizationRefund {
+  NO_REFUND
+  PARTIAL
+  FULL
+}
+
+enum PricingStrategy {
+  GLOBAL_DISCOUNT
+  CATEGORY_WISE
+  SERVICE_SPECIFIC
 }
 
 enum ContractStatus {
@@ -5337,14 +5733,14 @@ model DrugMaster {
   drugCategoryNode   DrugCategoryNode? @relation(fields: [drugCategoryNodeId], references: [id], onDelete: SetNull)
 
   // Reverse relations
-  interactionsA          DrugInteraction[]         @relation("DrugInteractionA")
-  interactionsB          DrugInteraction[]         @relation("DrugInteractionB")
-  formularyItems         FormularyItem[]
-  substitutionsFrom      TherapeuticSubstitution[] @relation("SubstitutionSource")
-  substitutionsTo        TherapeuticSubstitution[] @relation("SubstitutionTarget")
-  inventoryConfigs       InventoryConfig[]
-  narcoticsRegisters     NarcoticsRegister[]
-  supplierDrugMappings   SupplierDrugMapping[]
+  interactionsA        DrugInteraction[]         @relation("DrugInteractionA")
+  interactionsB        DrugInteraction[]         @relation("DrugInteractionB")
+  formularyItems       FormularyItem[]
+  substitutionsFrom    TherapeuticSubstitution[] @relation("SubstitutionSource")
+  substitutionsTo      TherapeuticSubstitution[] @relation("SubstitutionTarget")
+  inventoryConfigs     InventoryConfig[]
+  narcoticsRegisters   NarcoticsRegister[]
+  supplierDrugMappings SupplierDrugMapping[]
 
   @@unique([branchId, drugCode])
   @@index([branchId, genericName])
@@ -5466,8 +5862,8 @@ model PharmSupplier {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  storeMappings     SupplierStoreMapping[]
-  drugMappings      SupplierDrugMapping[]
+  storeMappings SupplierStoreMapping[]
+  drugMappings  SupplierDrugMapping[]
 
   @@unique([branchId, supplierCode])
   @@index([branchId, status])
@@ -5625,4 +6021,749 @@ model DrugCategoryNode {
 
   @@unique([branchId, code])
   @@index([branchId, parentId])
+}
+
+// ===========================================================================================
+// INSURANCE CLAIMS TRANSACTION LAYER — HCX-First Architecture
+// ===========================================================================================
+
+// ---- Insurance Enums ----
+
+enum PolicyStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  SUSPENDED
+  LAPSED
+}
+
+enum PolicyRelationship {
+  SELF
+  SPOUSE
+  CHILD
+  PARENT
+  OTHER
+}
+
+enum InsuranceCaseType {
+  CASHLESS
+  REIMBURSEMENT
+  PACKAGE
+}
+
+enum InsuranceCaseStatus {
+  DRAFT
+  POLICY_VERIFIED
+  PREAUTH_PENDING
+  PREAUTH_APPROVED
+  ADMITTED
+  DISCHARGE_PENDING
+  CLAIM_SUBMITTED
+  CLAIM_APPROVED
+  SETTLED
+  CLOSED
+  CANCELLED
+}
+
+enum PreauthStatus {
+  PREAUTH_DRAFT
+  PREAUTH_SUBMITTED
+  PREAUTH_QUERY_RAISED
+  PREAUTH_RESPONDED
+  PREAUTH_APPROVED
+  PREAUTH_REJECTED
+  PREAUTH_ENHANCEMENT_REQUESTED
+  PREAUTH_ENHANCEMENT_APPROVED
+  PREAUTH_EXPIRED
+}
+
+enum PreauthQuerySource {
+  TPA
+  HOSPITAL
+}
+
+enum ClaimStatus {
+  CLAIM_DRAFT
+  CLAIM_SUBMITTED
+  CLAIM_ACKNOWLEDGED
+  CLAIM_QUERY_RAISED
+  CLAIM_RESPONDED
+  CLAIM_UNDER_REVIEW
+  CLAIM_APPROVED
+  CLAIM_PARTIALLY_APPROVED
+  CLAIM_REJECTED
+  CLAIM_DEDUCTED
+  CLAIM_PAID
+  CLAIM_CLOSED
+  CLAIM_RESUBMITTED
+}
+
+enum ClaimType {
+  FINAL
+  INTERIM
+  ENHANCEMENT
+}
+
+enum DeductionCategory {
+  NON_PAYABLE
+  EXCESS
+  COPAY
+  DEDUCTIBLE
+  NON_MEDICAL
+  TARIFF_DIFF
+  OTHER
+}
+
+enum IntegrationMode {
+  HCX
+  NHCX
+  DIRECT_API
+  SFTP_BATCH
+  PORTAL_ASSISTED
+  MANUAL
+}
+
+enum GatewayTxType {
+  PREAUTH_SUBMIT
+  PREAUTH_STATUS
+  CLAIM_SUBMIT
+  CLAIM_STATUS
+  COVERAGE_CHECK
+  PAYMENT_NOTICE
+  WEBHOOK_INBOUND
+}
+
+enum GatewayTxStatus {
+  GATEWAY_QUEUED
+  GATEWAY_SENT
+  GATEWAY_ACK_RECEIVED
+  GATEWAY_RESPONSE_RECEIVED
+  GATEWAY_FAILED
+  GATEWAY_TIMED_OUT
+}
+
+enum InsuranceDocRole {
+  PREAUTH_FORM
+  DISCHARGE_SUMMARY
+  INVESTIGATION_REPORT
+  PRESCRIPTION
+  BILL_SUMMARY
+  CLAIM_FORM
+  ID_PROOF
+  INSURANCE_CARD
+  QUERY_RESPONSE
+  ENHANCEMENT_FORM
+  DOC_OTHER
+}
+
+enum InsuranceDocEntityType {
+  INSURANCE_CASE
+  PREAUTH
+  CLAIM
+  PATIENT_POLICY
+}
+
+enum PaymentAdviceStatus {
+  PA_RECEIVED
+  PA_RECONCILED
+  PA_DISPUTED
+  PA_PARTIAL
+}
+
+enum PaymentMode {
+  NEFT
+  RTGS
+  CHEQUE
+  UPI
+  CASH_PAYMENT
+  OTHER_MODE
+}
+
+// ---- 1. PatientInsurancePolicy ----
+model PatientInsurancePolicy {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  payerId String
+  payer   Payer  @relation(fields: [payerId], references: [id], onDelete: Cascade)
+
+  contractId String?
+  contract   PayerContract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  policyNumber String  @db.VarChar(64)
+  memberId     String  @db.VarChar(64)
+  groupId      String? @db.VarChar(64)
+  employerName String? @db.VarChar(160)
+  planName     String? @db.VarChar(160)
+
+  relationship PolicyRelationship @default(SELF)
+
+  status    PolicyStatus @default(ACTIVE)
+  validFrom DateTime
+  validTo   DateTime
+
+  sumInsured       Decimal? @db.Decimal(14, 2)
+  balanceRemaining Decimal? @db.Decimal(14, 2)
+
+  cardNumber   String? @db.VarChar(64)
+  cardImageUrl String? @db.VarChar(500)
+
+  verifiedAt       DateTime?
+  verifiedByUserId String?
+  verifiedByUser   User?     @relation("PolicyVerifiedBy", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+
+  meta Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  insuranceCases InsuranceCase[]
+  documentLinks  InsuranceDocumentLink[]
+
+  @@unique([branchId, patientId, payerId, policyNumber])
+  @@index([branchId, patientId])
+  @@index([branchId, payerId, status])
+}
+
+// ---- 2. InsuranceCase ----
+model InsuranceCase {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  caseNumber String @db.VarChar(48)
+
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  encounterId String
+  encounter   Encounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+
+  admissionId String?
+  admission   Admission? @relation(fields: [admissionId], references: [id], onDelete: SetNull)
+
+  policyId String
+  policy   PatientInsurancePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  payerId String
+  payer   Payer  @relation(fields: [payerId], references: [id], onDelete: Cascade)
+
+  contractId String?
+  contract   PayerContract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  schemeConfigId String?
+  schemeConfig   GovernmentSchemeConfig? @relation(fields: [schemeConfigId], references: [id], onDelete: SetNull)
+
+  caseType InsuranceCaseType   @default(CASHLESS)
+  status   InsuranceCaseStatus @default(DRAFT)
+
+  treatingDoctorId String?
+  treatingDoctor   Staff?  @relation("InsuranceCase_TreatingDoctor", fields: [treatingDoctorId], references: [id], onDelete: SetNull)
+
+  primaryDiagnosis String?
+  procedures       String[] @default([])
+  packageCode      String?  @db.VarChar(48)
+  packageName      String?  @db.VarChar(160)
+
+  estimatedAmount Decimal? @db.Decimal(14, 2)
+  approvedAmount  Decimal? @db.Decimal(14, 2)
+  claimedAmount   Decimal? @db.Decimal(14, 2)
+  settledAmount   Decimal? @db.Decimal(14, 2)
+
+  assignedToUserId String?
+  assignedToUser   User?   @relation("InsuranceCase_AssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  slaDeadline DateTime?
+  escalatedAt DateTime?
+
+  notes String?
+  meta  Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  preauthRequests PreauthRequest[]
+  claims          Claim[]
+  documentLinks   InsuranceDocumentLink[]
+
+  @@unique([branchId, caseNumber])
+  @@index([branchId, status])
+  @@index([branchId, patientId])
+  @@index([branchId, payerId, status])
+  @@index([branchId, encounterId])
+}
+
+// ---- 3. PreauthRequest ----
+model PreauthRequest {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  insuranceCaseId String
+  insuranceCase   InsuranceCase @relation(fields: [insuranceCaseId], references: [id], onDelete: Cascade)
+
+  requestNumber String        @db.VarChar(48)
+  version       Int           @default(1)
+  status        PreauthStatus @default(PREAUTH_DRAFT)
+
+  requestedAmount Decimal? @db.Decimal(14, 2)
+  approvedAmount  Decimal? @db.Decimal(14, 2)
+
+  packageCode      String? @db.VarChar(48)
+  procedureSummary String?
+  clinicalNotes    String?
+
+  // Clinical coding (structured, for NHCX/FHIR submission)
+  primaryDiagnosisCode  String? @db.VarChar(16) // ICD-10
+  primaryDiagnosisDesc  String? @db.VarChar(240)
+  secondaryDiagnosisCodes String[] @default([]) // additional ICD-10 codes
+  procedureCodes        String[] @default([]) // ICD-10-PCS / CPT / internal
+  hbpPackageCode        String? @db.VarChar(48) // PM-JAY HBP code
+  implantDetails        String? // implant description if applicable
+  investigationSummary  String? // summary of investigations
+  otNotes               String? // OT/surgical notes summary
+
+  submittedAt       DateTime?
+  submittedByUserId String?
+  submittedByUser   User?     @relation("Preauth_SubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
+
+  approvedAt       DateTime?
+  approvedByUserId String?
+
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  validTill DateTime?
+
+  enhancementAmount Decimal? @db.Decimal(14, 2)
+  enhancementReason String?
+
+  gatewayRefId String? @db.VarChar(128)
+
+  meta Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  queries       PreauthQuery[]
+  documentLinks InsuranceDocumentLink[]
+
+  @@index([insuranceCaseId, status])
+  @@index([branchId, status])
+}
+
+// ---- 4. PreauthQuery ----
+model PreauthQuery {
+  id String @id @default(cuid())
+
+  preauthId String
+  preauth   PreauthRequest @relation(fields: [preauthId], references: [id], onDelete: Cascade)
+
+  queryText   String
+  querySource PreauthQuerySource
+
+  queriedAt       DateTime @default(now())
+  queriedByUserId String?
+  queriedByUser   User?    @relation("PreauthQuery_QueriedBy", fields: [queriedByUserId], references: [id], onDelete: SetNull)
+
+  responseText      String?
+  respondedAt       DateTime?
+  respondedByUserId String?
+  respondedByUser   User?     @relation("PreauthQuery_RespondedBy", fields: [respondedByUserId], references: [id], onDelete: SetNull)
+
+  deadline       DateTime?
+  attachmentUrls String[]  @default([])
+
+  meta Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([preauthId, queriedAt])
+}
+
+// ---- 5. Claim ----
+model Claim {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  insuranceCaseId String
+  insuranceCase   InsuranceCase @relation(fields: [insuranceCaseId], references: [id], onDelete: Cascade)
+
+  claimNumber String      @db.VarChar(48)
+  claimType   ClaimType   @default(FINAL)
+  version     Int         @default(1)
+  status      ClaimStatus @default(CLAIM_DRAFT)
+
+  totalAmount    Decimal? @db.Decimal(14, 2)
+  approvedAmount Decimal? @db.Decimal(14, 2)
+  deductedAmount Decimal? @db.Decimal(14, 2)
+  paidAmount     Decimal? @db.Decimal(14, 2)
+
+  submittedAt       DateTime?
+  submittedByUserId String?
+  submittedByUser   User?     @relation("Claim_SubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
+
+  acknowledgedAt DateTime?
+
+  approvedAt       DateTime?
+  approvedByUserId String?
+
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  paidAt DateTime?
+
+  gatewayRefId String? @db.VarChar(128)
+
+  // Self-relation for resubmission chain
+  resubmissionOfId String?
+  resubmissionOf   Claim?  @relation("ClaimResubmission", fields: [resubmissionOfId], references: [id], onDelete: SetNull)
+  resubmissions    Claim[] @relation("ClaimResubmission")
+
+  notes String?
+  meta  Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lineItems      ClaimLineItem[]
+  deductions     ClaimDeduction[]
+  versions       ClaimVersion[]
+  documentLinks  InsuranceDocumentLink[]
+  paymentAdvices PaymentAdvice[]
+
+  @@unique([branchId, claimNumber])
+  @@index([insuranceCaseId, status])
+  @@index([branchId, status])
+}
+
+// ---- 6. ClaimLineItem ----
+model ClaimLineItem {
+  id String @id @default(cuid())
+
+  claimId String
+  claim   Claim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  serviceItemId String?
+  serviceItem   ServiceItem? @relation("ClaimLine_ServiceItem", fields: [serviceItemId], references: [id], onDelete: Restrict)
+
+  chargeMasterItemId String?
+  chargeMasterItem   ChargeMasterItem? @relation("ClaimLine_ChargeMaster", fields: [chargeMasterItemId], references: [id], onDelete: Restrict)
+
+  description String  @db.VarChar(240)
+  quantity    Int     @default(1)
+  unitPrice   Decimal @db.Decimal(12, 2)
+  totalPrice  Decimal @db.Decimal(12, 2)
+
+  // Clinical coding (structured, for NHCX/FHIR compliant submissions)
+  icdCode        String? @db.VarChar(16) // ICD-10-CM diagnosis code
+  icdDescription String? @db.VarChar(240)
+  cptCode        String? @db.VarChar(16) // CPT / ASHA / local procedure code
+  cptDescription String? @db.VarChar(240)
+  snomedCode     String? @db.VarChar(24) // SNOMED CT concept id
+  modifiers      String[] @default([]) // up to 4 HCPCS/CPT modifiers
+  placeOfService String? @db.VarChar(4) // "IP" | "OP" | "ER" | "DC" (day-care)
+  diagnosisRef   String? @db.VarChar(64) // reference to clinical diagnosis (encounter-level)
+
+  approvedQuantity  Int?
+  approvedUnitPrice Decimal? @db.Decimal(12, 2)
+  approvedTotal     Decimal? @db.Decimal(12, 2)
+
+  deniedAmount     Decimal? @db.Decimal(12, 2)
+  denialReasonCode String?  @db.VarChar(48)
+  denialNotes      String?
+
+  packageCode String? @db.VarChar(48)
+  hsnSac      String? @db.VarChar(16)
+
+  meta Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([claimId])
+}
+
+// ---- 7. ClaimDeduction ----
+model ClaimDeduction {
+  id String @id @default(cuid())
+
+  claimId String
+  claim   Claim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  reasonCode     String            @db.VarChar(48)
+  reasonCategory DeductionCategory @default(OTHER)
+  description    String
+  amount         Decimal           @db.Decimal(12, 2)
+
+  isDisputed   Boolean @default(false)
+  disputeNotes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([claimId])
+}
+
+// ---- 8. ClaimVersion ----
+model ClaimVersion {
+  id String @id @default(cuid())
+
+  claimId String
+  claim   Claim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  versionNumber Int
+  snapshot      Json // full claim + line items frozen
+
+  createdAt       DateTime @default(now())
+  createdByUserId String?
+  createdByUser   User?    @relation("ClaimVersion_CreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  changeReason String?
+
+  @@unique([claimId, versionNumber])
+}
+
+// ---- 9. InsuranceDocument ----
+model InsuranceDocument {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  title         String  @db.VarChar(240)
+  fileUrl       String  @db.VarChar(500)
+  fileMime      String? @db.VarChar(128)
+  fileSizeBytes Int?
+  checksum      String? @db.VarChar(128)
+
+  docRole InsuranceDocRole @default(DOC_OTHER)
+  version Int              @default(1)
+
+  uploadedAt       DateTime @default(now())
+  uploadedByUserId String?
+  uploadedByUser   User?    @relation("InsDoc_UploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  verifiedAt       DateTime?
+  verifiedByUserId String?
+  verifiedByUser   User?     @relation("InsDoc_VerifiedBy", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+
+  tags String[] @default([])
+  meta Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  links InsuranceDocumentLink[]
+
+  @@index([branchId, docRole])
+}
+
+// ---- 10. InsuranceDocumentLink ----
+model InsuranceDocumentLink {
+  id String @id @default(cuid())
+
+  documentId String
+  document   InsuranceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  entityType InsuranceDocEntityType
+  entityId   String
+
+  isRequired Boolean @default(false)
+
+  // Optional typed relations (Prisma requires these for referential integrity)
+  insuranceCaseId String?
+  insuranceCase   InsuranceCase? @relation(fields: [insuranceCaseId], references: [id], onDelete: SetNull)
+
+  preauthRequestId String?
+  preauthRequest   PreauthRequest? @relation(fields: [preauthRequestId], references: [id], onDelete: SetNull)
+
+  claimId String?
+  claim   Claim?  @relation(fields: [claimId], references: [id], onDelete: SetNull)
+
+  policyId String?
+  policy   PatientInsurancePolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([documentId, entityType, entityId])
+  @@index([entityType, entityId])
+}
+
+// ---- 11. PayerIntegrationConfig ----
+model PayerIntegrationConfig {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  payerId String
+  payer   Payer  @relation(fields: [payerId], references: [id], onDelete: Cascade)
+
+  integrationMode IntegrationMode @default(MANUAL)
+
+  // HCX / NHCX
+  hcxParticipantCode String? @db.VarChar(128)
+  hcxEndpointUrl     String? @db.VarChar(500)
+  hcxAuthConfig      Json?
+
+  // Direct API
+  apiBaseUrl    String? @db.VarChar(500)
+  apiAuthMethod String? @db.VarChar(32)
+  apiAuthConfig Json?
+
+  // SFTP
+  sftpHost       String? @db.VarChar(256)
+  sftpPort       Int?
+  sftpPath       String? @db.VarChar(256)
+  sftpAuthConfig Json?
+
+  // Portal-assisted
+  portalUrl   String? @db.VarChar(500)
+  portalNotes String?
+
+  // Webhook
+  webhookSecret String? @db.VarChar(256)
+  webhookUrl    String? @db.VarChar(500)
+
+  // Retry config
+  retryMaxAttempts  Int  @default(3)
+  retryBackoffMs    Int  @default(5000)
+  pollingIntervalMs Int?
+
+  isActive Boolean @default(true)
+  meta     Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  gatewayTransactions GatewayTransaction[]
+
+  @@unique([branchId, payerId])
+  @@index([branchId, integrationMode, isActive])
+}
+
+// ---- 12. PaymentAdvice ----
+model PaymentAdvice {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  claimId String
+  claim   Claim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  adviceNumber String?  @db.VarChar(64)
+  utrNumber    String?  @db.VarChar(64)
+  paymentDate  DateTime
+
+  amount      Decimal     @db.Decimal(14, 2)
+  paymentMode PaymentMode @default(NEFT)
+
+  status PaymentAdviceStatus @default(PA_RECEIVED)
+
+  bankReference      String? @db.VarChar(128)
+  shortPaymentReason String?
+
+  reconciledAt       DateTime?
+  reconciledByUserId String?
+  reconciledByUser   User?     @relation("PaymentAdvice_ReconciledBy", fields: [reconciledByUserId], references: [id], onDelete: SetNull)
+
+  meta Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([claimId])
+  @@index([branchId, paymentDate])
+}
+
+// ---- 13. GatewayTransaction ----
+model GatewayTransaction {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  payerIntegrationConfigId String
+  payerIntegrationConfig   PayerIntegrationConfig @relation(fields: [payerIntegrationConfigId], references: [id], onDelete: Cascade)
+
+  txType   GatewayTxType
+  txStatus GatewayTxStatus @default(GATEWAY_QUEUED)
+
+  entityType String @db.VarChar(32) // "PREAUTH" | "CLAIM"
+  entityId   String
+
+  requestPayload  Json?
+  responsePayload Json?
+  externalRefId   String? @db.VarChar(128)
+
+  sentAt      DateTime?
+  respondedAt DateTime?
+
+  attempts    Int       @default(0)
+  lastError   String?
+  nextRetryAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([txStatus, nextRetryAt])
+  @@index([branchId, txType])
+}
+
+// ================================================================
+// Document Checklist System (payer-wise required document templates)
+// ================================================================
+
+enum DocChecklistScope {
+  ALL_CASES
+  CASHLESS_ONLY
+  REIMBURSEMENT_ONLY
+  PACKAGE_ONLY
+}
+
+// ---- PayerDocumentTemplate — defines a set of required documents per payer + case type ----
+model PayerDocumentTemplate {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  payerId String
+  payer   Payer  @relation("Payer_DocTemplates", fields: [payerId], references: [id], onDelete: Cascade)
+
+  name        String              @db.VarChar(160) // e.g. "Star Health — Cashless IPD"
+  scope       DocChecklistScope   @default(ALL_CASES)
+  caseTypes   InsuranceCaseType[] @default([]) // empty = all types
+  description String?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rules PayerDocumentRule[]
+
+  @@unique([branchId, payerId, name])
+  @@index([branchId, payerId])
+}
+
+// ---- PayerDocumentRule — individual required doc within a template ----
+model PayerDocumentRule {
+  id         String                  @id @default(cuid())
+  templateId String
+  template   PayerDocumentTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  docRole       InsuranceDocRole // which document role is required
+  label         String           @db.VarChar(160) // human-readable name
+  description   String?          // instructions / help text for upload
+  isRequired    Boolean          @default(true) // required vs recommended
+  requiredAt    String?          @db.VarChar(48) // stage: "PREAUTH_SUBMIT" | "CLAIM_SUBMIT" | "DISCHARGE"
+  sortOrder     Int              @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([templateId])
 }

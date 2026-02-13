@@ -14,19 +14,28 @@ from sqlalchemy.orm import selectinload
 
 from src.db.models import (
     Branch,
+    ChargeMasterItem,
     Department,
     DepartmentSpecialty,
     DrugInteraction,
     DrugMaster,
     Formulary,
     FormularyItem,
+    GovernmentSchemeConfig,
     InventoryConfig,
     LocationNode,
     LocationNodeRevision,
+    PatientPricingTier,
+    Payer,
+    PayerContract,
     PharmacyStore,
     PharmSupplier,
+    ServiceItem,
+    ServicePriceHistory,
     Specialty,
     StaffAssignment,
+    TariffPlan,
+    TaxCode,
     Unit,
     UnitResource,
     UnitRoom,
@@ -47,6 +56,7 @@ from .models import (
     PharmStoreSnapshot,
     ResourceSummary,
     RoomDetail,
+    ServiceCatalogSummary,
     SpecialtyDetail,
     SpecialtySummary,
     UnitDetail,
@@ -73,8 +83,9 @@ async def collect_branch_context(branch_id: str) -> BranchContext:
         departments = await _collect_departments(session, branch_id)
         specialties = await _collect_specialties(session, branch_id)
         pharmacy = await _collect_pharmacy(session, branch_id)
+        service_catalog = await _collect_service_catalog(session, branch_id)
 
-    text_summary = _build_text_summary(branch, location, units, departments, pharmacy)
+    text_summary = _build_text_summary(branch, location, units, departments, pharmacy, service_catalog)
     return BranchContext(
         branch=branch,
         location=location,
@@ -82,6 +93,7 @@ async def collect_branch_context(branch_id: str) -> BranchContext:
         departments=departments,
         specialties=specialties,
         pharmacy=pharmacy,
+        serviceCatalog=service_catalog,
         textSummary=text_summary,
     )
 
@@ -533,12 +545,127 @@ async def _collect_pharmacy(
 # ── Text Summary ──────────────────────────────────────────────────────────
 
 
+async def _collect_service_catalog(
+    session: AsyncSession, branch_id: str
+) -> ServiceCatalogSummary:
+    """Collect service catalog & financial config summary for a branch."""
+    from collections import Counter
+
+    # Service Items
+    si_result = await session.execute(
+        select(ServiceItem).where(ServiceItem.branchId == branch_id)
+    )
+    si_rows = si_result.scalars().all()
+    active_si = [r for r in si_rows if r.isActive]
+    by_cat: dict[str, int] = dict(Counter(r.category for r in si_rows if r.category))
+    with_price = sum(1 for r in si_rows if r.basePrice and r.basePrice > 0)
+    without_price = len(si_rows) - with_price
+
+    # Charge Master
+    cm_result = await session.execute(
+        select(func.count()).select_from(ChargeMasterItem).where(ChargeMasterItem.branchId == branch_id)
+    )
+    total_cm = cm_result.scalar() or 0
+    cm_active_result = await session.execute(
+        select(func.count()).select_from(ChargeMasterItem).where(
+            ChargeMasterItem.branchId == branch_id, ChargeMasterItem.isActive == True  # noqa: E712
+        )
+    )
+    active_cm = cm_active_result.scalar() or 0
+
+    # Payers
+    payer_result = await session.execute(
+        select(Payer).where(Payer.branchId == branch_id)
+    )
+    payer_rows = payer_result.scalars().all()
+    active_payers = [p for p in payer_rows if p.isActive]
+    by_kind: dict[str, int] = dict(Counter(p.kind for p in payer_rows))
+    has_cash = any(p.kind == "CASH" for p in payer_rows)
+
+    # Contracts
+    contract_result = await session.execute(
+        select(PayerContract).where(PayerContract.branchId == branch_id)
+    )
+    contract_rows = contract_result.scalars().all()
+    active_contracts = [c for c in contract_rows if c.status == "ACTIVE"]
+    expired_contracts = [c for c in contract_rows if c.status == "EXPIRED"]
+
+    # Government Schemes
+    gs_result = await session.execute(
+        select(GovernmentSchemeConfig).where(GovernmentSchemeConfig.branchId == branch_id)
+    )
+    gs_rows = gs_result.scalars().all()
+    active_gs = [g for g in gs_rows if g.isActive]
+
+    # Pricing Tiers
+    pt_result = await session.execute(
+        select(PatientPricingTier).where(PatientPricingTier.branchId == branch_id)
+    )
+    pt_rows = pt_result.scalars().all()
+    active_pt = [t for t in pt_rows if t.isActive]
+
+    # Tariff Plans
+    tp_result = await session.execute(
+        select(func.count()).select_from(TariffPlan).where(TariffPlan.branchId == branch_id)
+    )
+    total_tp = tp_result.scalar() or 0
+    tp_active_result = await session.execute(
+        select(func.count()).select_from(TariffPlan).where(
+            TariffPlan.branchId == branch_id, TariffPlan.isActive == True  # noqa: E712
+        )
+    )
+    active_tp = tp_active_result.scalar() or 0
+
+    # Tax Codes
+    tx_result = await session.execute(
+        select(func.count()).select_from(TaxCode).where(TaxCode.branchId == branch_id)
+    )
+    total_tax = tx_result.scalar() or 0
+
+    # Price History count
+    ph_result = await session.execute(
+        select(func.count()).select_from(ServicePriceHistory).where(
+            ServicePriceHistory.branchId == branch_id
+        )
+    )
+    price_changes = ph_result.scalar() or 0
+
+    return ServiceCatalogSummary(
+        totalServiceItems=len(si_rows),
+        activeServiceItems=len(active_si),
+        byCategory=by_cat,
+        withBasePrice=with_price,
+        withoutBasePrice=without_price,
+        totalChargeMaster=total_cm,
+        activeChargeMaster=active_cm,
+        totalPayers=len(payer_rows),
+        activePayers=len(active_payers),
+        byPayerKind=by_kind,
+        totalContracts=len(contract_rows),
+        activeContracts=len(active_contracts),
+        expiredContracts=len(expired_contracts),
+        totalGovSchemes=len(gs_rows),
+        activeGovSchemes=len(active_gs),
+        totalPricingTiers=len(pt_rows),
+        activePricingTiers=len(active_pt),
+        totalTariffPlans=total_tp,
+        activeTariffPlans=active_tp,
+        totalTaxCodes=total_tax,
+        priceChangeCount=price_changes,
+        hasCashPayer=has_cash,
+    )
+
+
+# ── Text Summary ──────────────────────────────────────────────────────────
+
+
 def _build_text_summary(
     branch: BranchSnapshot,
     location: LocationSummary,
     units: UnitSummary,
     departments: DepartmentSummary,
     pharmacy: PharmacySummary | None = None,
+    service_catalog: ServiceCatalogSummary | None = None,
 ) -> str:
     lines: list[str] = []
 
@@ -618,5 +745,24 @@ def _build_text_summary(
         lines.append(f"Suppliers: {pharmacy.supplierCount}, Interactions: {pharmacy.interactionCount}")
     elif pharmacy:
         lines.append("Pharmacy: Not set up")
+
+    # Service Catalog & Financial
+    sc = service_catalog
+    if sc and (sc.totalServiceItems > 0 or sc.totalPayers > 0):
+        lines.append(
+            f"Service items: {sc.totalServiceItems} "
+            f"({sc.activeServiceItems} active, {sc.withoutBasePrice} without base price)"
+        )
+        lines.append(f"Charge master items: {sc.totalChargeMaster} ({sc.activeChargeMaster} active)")
+        lines.append(f"Payers: {sc.totalPayers} ({sc.activePayers} active) — {', '.join(f'{k}:{v}' for k, v in sc.byPayerKind.items())}")
+        lines.append(f"Contracts: {sc.totalContracts} ({sc.activeContracts} active, {sc.expiredContracts} expired)")
+        lines.append(f"Government schemes: {sc.totalGovSchemes} ({sc.activeGovSchemes} active)")
+        lines.append(f"Pricing tiers: {sc.totalPricingTiers} ({sc.activePricingTiers} active)")
+        lines.append(f"Tariff plans: {sc.totalTariffPlans} ({sc.activeTariffPlans} active)")
+        lines.append(f"Tax codes: {sc.totalTaxCodes}, Price changes logged: {sc.priceChangeCount}")
+        if not sc.hasCashPayer:
+            lines.append("WARNING: No CASH payer configured!")
+    elif sc:
+        lines.append("Service catalog: Not set up")
 
     return "\n".join(lines)

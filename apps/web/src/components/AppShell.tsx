@@ -287,6 +287,13 @@ const NAV_WORKSPACES: NavNode[] = [
           { label: "Tax Codes (GST)", href: "/infrastructure/tax-codes" },
           { label: "Charge Master", href: "/infrastructure/charge-master" },
           { label: "Tariff Plans & Rates", href: "/infrastructure/tariff-plans" },
+          { label: "Payer Management", href: "/infrastructure/payers" },
+          { label: "Payer Contracts", href: "/infrastructure/payer-contracts" },
+          { label: "Payer Outstanding", href: "/infrastructure/payer-outstanding" },
+          { label: "Government Schemes", href: "/infrastructure/gov-schemes" },
+          { label: "Pricing Tiers", href: "/infrastructure/pricing-tiers" },
+          { label: "Pricing Rules", href: "/infrastructure/pricing-rules" },
+          { label: "Price History", href: "/infrastructure/price-history" },
         ],
       },
       {
@@ -300,6 +307,7 @@ const NAV_WORKSPACES: NavNode[] = [
           { label: "Service Packages", href: "/infrastructure/service-packages" },
           { label: "Order Sets", href: "/infrastructure/order-sets" },
           { label: "Service Availability", href: "/infrastructure/service-availability" },
+          { label: "Service Bulk Import", href: "/infrastructure/service-bulk-import" },
         ],
       },
       {
@@ -396,11 +404,19 @@ const NAV_CARE: NavNode[] = [
     href: "/billing",
     icon: IconReceipt,
     children: [
+      { label: "Insurance Policies", href: "/billing/insurance-policies" },
+      { label: "Insurance Cases", href: "/billing/insurance-cases" },
+      { label: "Pre-authorization", href: "/billing/preauth" },
+      { label: "Claims", href: "/billing/claims" },
+      { label: "Claims Dashboard", href: "/billing/claims-dashboard" },
+      { label: "Reconciliation", href: "/billing/reconciliation" },
+      { label: "Insurance Documents", href: "/billing/insurance-documents" },
+      { label: "Document Checklists", href: "/billing/document-checklists" },
+      { label: "Payer Integrations", href: "/billing/payer-integrations" },
       { label: "Tariffs", href: "/billing/tariffs" },
       { label: "Packages", href: "/billing/packages" },
       { label: "Billing Desk", href: "/billing/billing-desk" },
       { label: "Cashier", href: "/billing/cashier" },
-      { label: "TPA Claims", href: "/billing/tpa" },
     ],
   },
 ];
@@ -510,10 +526,11 @@ function hasAnyPrefix(perms: string[], prefixes: string[]) {
 type NavCtx = {
   scope: "GLOBAL" | "BRANCH";
   perms: string[] | null; // null => not loaded/unknown
+  isSuperAdmin?: boolean;
 };
 
 /**
- * Route â†’ permission prefix rules.
+ * Route → permission prefix rules.
  * Used for:
  * - Sidebar visibility
  * - Command Center filtering
@@ -585,6 +602,7 @@ function isUnderKnownModuleRoot(href: string) {
  */
 function allowHrefByPerm(href: string, ctx: NavCtx) {
   const { scope, perms } = ctx;
+  if (ctx.isSuperAdmin) return true;
 
   // Always allow core landing pages
   if (href === "/welcome" || href === "/dashboard") return true;
@@ -619,7 +637,7 @@ function allowHrefByPerm(href: string, ctx: NavCtx) {
 
 
 function rewriteHref(label: string, href: string, _ctx: { scope: "GLOBAL" | "BRANCH" }) {
-  // Fix â€œApp Usersâ€ link so GLOBAL users land on the corporate user screen
+  // Fix “App Users” link so GLOBAL users land on the corporate user screen
   if (label === "App Users") return "/access/users";
   return href;
 }
@@ -627,7 +645,9 @@ function rewriteHref(label: string, href: string, _ctx: { scope: "GLOBAL" | "BRA
 function filterNavGroupsForUser(groups: NavGroup[], user: any): NavGroup[] {
   const scope = inferScopeFromUser(user);
   const perms = getUserPerms(user);
-  const ctx: NavCtx = { scope, perms };
+  const roleCode = normRole(user?.roleCode ?? user?.role);
+  const isSuperAdmin = roleCode === "SUPER_ADMIN";
+  const ctx: NavCtx = { scope, perms, isSuperAdmin };
 
   // Keep your existing UX:
   // - Admin personas see Workspaces first and hide Care Delivery.
@@ -645,6 +665,7 @@ function filterNavGroupsForUser(groups: NavGroup[], user: any): NavGroup[] {
     if (persona === "ADMIN") {
       if (title === "Workspaces") return true;
       if (title === "Governance & Ops") return true;
+      if (title === "Care Delivery" && isSuperAdmin) return true;
       return false; // hide Care Delivery for admin personas
     }
 
@@ -686,7 +707,7 @@ function filterNavGroupsForUser(groups: NavGroup[], user: any): NavGroup[] {
       }
 
       // Keep the node if:
-      // - itâ€™s allowed directly, OR
+      // - it’s allowed directly, OR
       // - it has at least one allowed child
       if (!nodeHrefAllowed && (!nextChildren || nextChildren.length === 0)) continue;
 
@@ -1013,7 +1034,11 @@ export function AppShell({
     if (!authzReady) return;
 
     const perms = getUserPerms(user);
-    const navCtx: NavCtx = { scope: inferScopeFromUser(user), perms };
+    const navCtx: NavCtx = {
+      scope: inferScopeFromUser(user),
+      perms,
+      isSuperAdmin: normRole(user?.roleCode ?? user?.role) === "SUPER_ADMIN",
+    };
 
     // BRANCH users: never allow GLOBAL-only workspaces
     if (
@@ -1114,7 +1139,7 @@ export function AppShell({
   const roleCommandActions = React.useMemo<CommandItem[]>(() => {
     const scope = inferScopeFromUser(user);
     const perms = getUserPerms(user);
-    const ctx: NavCtx = { scope, perms };
+    const ctx: NavCtx = { scope, perms, isSuperAdmin: normRole(user?.roleCode ?? user?.role) === "SUPER_ADMIN" };
 
     return COMMAND_ACTIONS
       .map((a) => ({
@@ -1131,7 +1156,7 @@ export function AppShell({
   const commandNavItems = React.useMemo<CommandItem[]>(() => {
     const scope = inferScopeFromUser(user);
     const perms = getUserPerms(user);
-    const ctx: NavCtx = { scope, perms };
+    const ctx: NavCtx = { scope, perms, isSuperAdmin: normRole(user?.roleCode ?? user?.role) === "SUPER_ADMIN" };
 
     return allNavItems
       .map((item) => ({ ...item, href: rewriteHref(item.label, item.href, { scope }) }))
@@ -1141,7 +1166,7 @@ export function AppShell({
         label: item.label,
         group: item.group,
         icon: item.icon,
-        subtitle: item.parent ? `${item.parent} â€¢ ${item.group}` : item.group,
+        subtitle: item.parent ? `${item.parent} • ${item.group}` : item.group,
         keywords: [item.parent, item.group, item.label].filter(Boolean) as string[],
         href: item.href,
       }));
@@ -1323,7 +1348,7 @@ export function AppShell({
                     ))}
                   </div>
                   <div className="pt-4 text-xs text-zc-muted">
-                    Loading access rightsâ€¦
+                    Loading access rights…
                   </div>
                 </div>
               </main>
@@ -1423,7 +1448,7 @@ export function AppShell({
               })()}
             </div>
             <div className="flex items-center justify-between border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 px-4 py-2.5 text-[10px] text-zinc-500">
-              <div>â†‘/â†“ to navigate â€¢ Enter to open</div>
+              <div>↑/↓ to navigate • Enter to open</div>
               <div>Zypocare Command Center</div>
             </div>
           </DialogContent>
@@ -1750,7 +1775,7 @@ export function AppShell({
                         {user?.name ?? "Super Admin"}
                       </div>
                       <div className="mt-0.5 truncate text-xs text-zc-muted">
-                        ZypoCare Hospital â€¢ Bengaluru
+                        ZypoCare Hospital • Bengaluru
                       </div>
                     </div>
                   </>

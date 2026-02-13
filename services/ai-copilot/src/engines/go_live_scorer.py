@@ -123,25 +123,56 @@ def compute_go_live_score(
             else:
                 unit_passed += 1
 
+    # -- 4. Financial & Service Readiness (15%) ----------------------------
+
+    fin_blockers: list[str] = []
+    fin_warnings: list[str] = []
+    fin_passed = 0
+    fin_total = 0
+
+    _FIN_CATEGORIES = {
+        "SERVICE_CATALOG", "SERVICE_CATALOGUE", "SERVICE_MAPPING",
+        "SERVICE_LIBRARY", "SERVICE_PACKAGE", "SERVICE_AVAILABILITY",
+        "ORDER_SET", "SERVICE_BULK_IMPORT",
+        "CHARGE_MASTER", "TARIFF_PLAN", "TAX_CODE",
+        "PAYER", "CONTRACT", "GOV_SCHEME",
+        "PRICING_TIER", "PRICE_HISTORY",
+        "FINANCIAL",
+    }
+    for issue in consistency.issues:
+        if issue.category in _FIN_CATEGORIES:
+            fin_total += 1
+            if issue.severity == "BLOCKER":
+                fin_blockers.append(issue.title)
+            elif issue.severity == "WARNING":
+                fin_warnings.append(issue.title)
+            else:
+                fin_passed += 1
+
     # -- Aggregate ---------------------------------------------------------
 
     branch_config = _build_category(
-        "Branch Configuration", 30,
+        "Branch Configuration", 25,
         branch_total, branch_passed,
         branch_blockers, branch_warnings,
     )
     location_safety = _build_category(
-        "Location & Safety", 35,
+        "Location & Safety", 30,
         loc_total, loc_passed,
         loc_blockers, loc_warnings,
     )
     units_resources = _build_category(
-        "Units & Resources", 35,
+        "Units & Resources", 30,
         unit_total, unit_passed,
         unit_blockers, unit_warnings,
     )
+    financial_readiness = _build_category(
+        "Financial & Services", 15,
+        fin_total, fin_passed,
+        fin_blockers, fin_warnings,
+    )
 
-    all_categories = [branch_config, location_safety, units_resources]
+    all_categories = [branch_config, location_safety, units_resources, financial_readiness]
 
     overall = round(sum(c.weightedScore for c in all_categories))
 
@@ -193,6 +224,7 @@ def compute_go_live_score(
             "branchConfig": branch_config,
             "locationSafety": location_safety,
             "unitsResources": units_resources,
+            "financialReadiness": financial_readiness,
         },
         totalBlockers=total_blockers,
         totalWarnings=total_warnings,

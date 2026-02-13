@@ -810,8 +810,40 @@ exports.Prisma.PayerScalarFieldEnum = {
   branchId: 'branchId',
   code: 'code',
   name: 'name',
+  shortName: 'shortName',
+  displayName: 'displayName',
   kind: 'kind',
+  status: 'status',
   isActive: 'isActive',
+  irdaiRegistration: 'irdaiRegistration',
+  licenseNumber: 'licenseNumber',
+  licenseValidTill: 'licenseValidTill',
+  panNumber: 'panNumber',
+  gstinNumber: 'gstinNumber',
+  cinNumber: 'cinNumber',
+  addresses: 'addresses',
+  contacts: 'contacts',
+  portalUrl: 'portalUrl',
+  creditDays: 'creditDays',
+  creditLimit: 'creditLimit',
+  gracePeriodDays: 'gracePeriodDays',
+  interestRate: 'interestRate',
+  earlyPaymentDiscount: 'earlyPaymentDiscount',
+  settlementTerms: 'settlementTerms',
+  requiresPreauth: 'requiresPreauth',
+  preauthThreshold: 'preauthThreshold',
+  supportingDocs: 'supportingDocs',
+  claimSubmissionMethod: 'claimSubmissionMethod',
+  networkType: 'networkType',
+  empanelmentLevel: 'empanelmentLevel',
+  roomRentLimit: 'roomRentLimit',
+  icuRentLimit: 'icuRentLimit',
+  apiEndpoint: 'apiEndpoint',
+  authMethod: 'authMethod',
+  webhookUrl: 'webhookUrl',
+  empanelmentStartDate: 'empanelmentStartDate',
+  empanelmentEndDate: 'empanelmentEndDate',
+  autoRenewal: 'autoRenewal',
   meta: 'meta',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
@@ -823,9 +855,25 @@ exports.Prisma.PayerContractScalarFieldEnum = {
   payerId: 'payerId',
   code: 'code',
   name: 'name',
+  description: 'description',
   status: 'status',
+  priority: 'priority',
   startAt: 'startAt',
   endAt: 'endAt',
+  pricingStrategy: 'pricingStrategy',
+  globalDiscountPercent: 'globalDiscountPercent',
+  emergencyLoadingPercent: 'emergencyLoadingPercent',
+  afterHoursLoadingPercent: 'afterHoursLoadingPercent',
+  weekendLoadingPercent: 'weekendLoadingPercent',
+  statLoadingPercent: 'statLoadingPercent',
+  copaymentRules: 'copaymentRules',
+  excludedServiceIds: 'excludedServiceIds',
+  excludedCategories: 'excludedCategories',
+  approvalStatus: 'approvalStatus',
+  approvedByUserId: 'approvedByUserId',
+  approvedAt: 'approvedAt',
+  gracePeriodDays: 'gracePeriodDays',
+  autoRenewal: 'autoRenewal',
   terms: 'terms',
   meta: 'meta',
   createdAt: 'createdAt',
@@ -1282,6 +1330,21 @@ exports.Prisma.ServiceItemScalarFieldEnum = {
   taxApplicability: 'taxApplicability',
   taxCodeId: 'taxCodeId',
   billingPolicy: 'billingPolicy',
+  shortName: 'shortName',
+  displayName: 'displayName',
+  description: 'description',
+  searchAliases: 'searchAliases',
+  specialtyId: 'specialtyId',
+  subCategory: 'subCategory',
+  requiresScheduling: 'requiresScheduling',
+  statAvailable: 'statAvailable',
+  defaultTatHours: 'defaultTatHours',
+  basePrice: 'basePrice',
+  costPrice: 'costPrice',
+  allowDiscount: 'allowDiscount',
+  maxDiscountPercent: 'maxDiscountPercent',
+  effectiveFrom: 'effectiveFrom',
+  effectiveTill: 'effectiveTill',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 };
@@ -1373,6 +1436,8 @@ exports.Prisma.ServiceCatalogueScalarFieldEnum = {
   departmentId: 'departmentId',
   context: 'context',
   payerGroup: 'payerGroup',
+  filterRules: 'filterRules',
+  visibility: 'visibility',
   status: 'status',
   version: 'version',
   createdByUserId: 'createdByUserId',
@@ -1430,6 +1495,17 @@ exports.Prisma.ServicePackageScalarFieldEnum = {
   isTaxInclusive: 'isTaxInclusive',
   effectiveFrom: 'effectiveFrom',
   effectiveTo: 'effectiveTo',
+  durationDays: 'durationDays',
+  allowComponentAddition: 'allowComponentAddition',
+  allowComponentRemoval: 'allowComponentRemoval',
+  allowQuantityChange: 'allowQuantityChange',
+  overUtilizationPolicy: 'overUtilizationPolicy',
+  underUtilizationRefund: 'underUtilizationRefund',
+  minAge: 'minAge',
+  maxAge: 'maxAge',
+  genderRestriction: 'genderRestriction',
+  applicablePayerIds: 'applicablePayerIds',
+  requiresPreauth: 'requiresPreauth',
   createdByUserId: 'createdByUserId',
   updatedByUserId: 'updatedByUserId',
   submittedByUserId: 'submittedByUserId',
@@ -1450,6 +1526,7 @@ exports.Prisma.ServicePackageComponentScalarFieldEnum = {
   diagnosticItemId: 'diagnosticItemId',
   chargeMasterItemId: 'chargeMasterItemId',
   quantity: 'quantity',
+  unitPrice: 'unitPrice',
   isIncluded: 'isIncluded',
   condition: 'condition',
   sortOrder: 'sortOrder',
@@ -1621,6 +1698,103 @@ exports.Prisma.ExternalDirectoryMappingScalarFieldEnum = {
   serviceItemId: 'serviceItemId',
   status: 'status',
   isPrimary: 'isPrimary',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.ServicePriceHistoryScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  serviceItemId: 'serviceItemId',
+  chargeMasterItemId: 'chargeMasterItemId',
+  tariffRateId: 'tariffRateId',
+  oldPrice: 'oldPrice',
+  newPrice: 'newPrice',
+  changeAmount: 'changeAmount',
+  changePercent: 'changePercent',
+  changeReason: 'changeReason',
+  effectiveFrom: 'effectiveFrom',
+  effectiveTill: 'effectiveTill',
+  approvedByUserId: 'approvedByUserId',
+  approvedAt: 'approvedAt',
+  createdByUserId: 'createdByUserId',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.ContractServiceRateScalarFieldEnum = {
+  id: 'id',
+  contractId: 'contractId',
+  serviceItemId: 'serviceItemId',
+  packageId: 'packageId',
+  chargeMasterItemId: 'chargeMasterItemId',
+  category: 'category',
+  rateType: 'rateType',
+  fixedPrice: 'fixedPrice',
+  percentageOfBase: 'percentageOfBase',
+  discountPercent: 'discountPercent',
+  minPrice: 'minPrice',
+  maxPrice: 'maxPrice',
+  effectiveFrom: 'effectiveFrom',
+  effectiveTo: 'effectiveTo',
+  version: 'version',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.GovernmentSchemeConfigScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  schemeType: 'schemeType',
+  schemeName: 'schemeName',
+  schemeCode: 'schemeCode',
+  registrationNumber: 'registrationNumber',
+  registrationDate: 'registrationDate',
+  validTill: 'validTill',
+  shaCode: 'shaCode',
+  nhaCode: 'nhaCode',
+  nhaHospitalCode: 'nhaHospitalCode',
+  empaneledSpecialtyIds: 'empaneledSpecialtyIds',
+  preauthRequired: 'preauthRequired',
+  preauthAutoApprovalLimit: 'preauthAutoApprovalLimit',
+  verificationMethod: 'verificationMethod',
+  packageMapping: 'packageMapping',
+  claimSubmissionUrl: 'claimSubmissionUrl',
+  claimSubmissionMethod: 'claimSubmissionMethod',
+  claimSubmissionWindowDays: 'claimSubmissionWindowDays',
+  claimProcessingTimeDays: 'claimProcessingTimeDays',
+  requiredDocuments: 'requiredDocuments',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.PatientPricingTierScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  kind: 'kind',
+  name: 'name',
+  code: 'code',
+  description: 'description',
+  assignmentRules: 'assignmentRules',
+  defaultDiscountPercent: 'defaultDiscountPercent',
+  defaultMarkupPercent: 'defaultMarkupPercent',
+  maxDiscountCap: 'maxDiscountCap',
+  sortOrder: 'sortOrder',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.PatientPricingTierRateScalarFieldEnum = {
+  id: 'id',
+  tierId: 'tierId',
+  serviceItemId: 'serviceItemId',
+  chargeMasterItemId: 'chargeMasterItemId',
+  rateAmount: 'rateAmount',
+  discountPercent: 'discountPercent',
+  isActive: 'isActive',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 };
@@ -2374,6 +2548,320 @@ exports.Prisma.DrugCategoryNodeScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
+exports.Prisma.PatientInsurancePolicyScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  patientId: 'patientId',
+  payerId: 'payerId',
+  contractId: 'contractId',
+  policyNumber: 'policyNumber',
+  memberId: 'memberId',
+  groupId: 'groupId',
+  employerName: 'employerName',
+  planName: 'planName',
+  relationship: 'relationship',
+  status: 'status',
+  validFrom: 'validFrom',
+  validTo: 'validTo',
+  sumInsured: 'sumInsured',
+  balanceRemaining: 'balanceRemaining',
+  cardNumber: 'cardNumber',
+  cardImageUrl: 'cardImageUrl',
+  verifiedAt: 'verifiedAt',
+  verifiedByUserId: 'verifiedByUserId',
+  meta: 'meta',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.InsuranceCaseScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  caseNumber: 'caseNumber',
+  patientId: 'patientId',
+  encounterId: 'encounterId',
+  admissionId: 'admissionId',
+  policyId: 'policyId',
+  payerId: 'payerId',
+  contractId: 'contractId',
+  schemeConfigId: 'schemeConfigId',
+  caseType: 'caseType',
+  status: 'status',
+  treatingDoctorId: 'treatingDoctorId',
+  primaryDiagnosis: 'primaryDiagnosis',
+  procedures: 'procedures',
+  packageCode: 'packageCode',
+  packageName: 'packageName',
+  estimatedAmount: 'estimatedAmount',
+  approvedAmount: 'approvedAmount',
+  claimedAmount: 'claimedAmount',
+  settledAmount: 'settledAmount',
+  assignedToUserId: 'assignedToUserId',
+  slaDeadline: 'slaDeadline',
+  escalatedAt: 'escalatedAt',
+  notes: 'notes',
+  meta: 'meta',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.PreauthRequestScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  insuranceCaseId: 'insuranceCaseId',
+  requestNumber: 'requestNumber',
+  version: 'version',
+  status: 'status',
+  requestedAmount: 'requestedAmount',
+  approvedAmount: 'approvedAmount',
+  packageCode: 'packageCode',
+  procedureSummary: 'procedureSummary',
+  clinicalNotes: 'clinicalNotes',
+  primaryDiagnosisCode: 'primaryDiagnosisCode',
+  primaryDiagnosisDesc: 'primaryDiagnosisDesc',
+  secondaryDiagnosisCodes: 'secondaryDiagnosisCodes',
+  procedureCodes: 'procedureCodes',
+  hbpPackageCode: 'hbpPackageCode',
+  implantDetails: 'implantDetails',
+  investigationSummary: 'investigationSummary',
+  otNotes: 'otNotes',
+  submittedAt: 'submittedAt',
+  submittedByUserId: 'submittedByUserId',
+  approvedAt: 'approvedAt',
+  approvedByUserId: 'approvedByUserId',
+  rejectedAt: 'rejectedAt',
+  rejectionReason: 'rejectionReason',
+  validTill: 'validTill',
+  enhancementAmount: 'enhancementAmount',
+  enhancementReason: 'enhancementReason',
+  gatewayRefId: 'gatewayRefId',
+  meta: 'meta',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.PreauthQueryScalarFieldEnum = {
+  id: 'id',
+  preauthId: 'preauthId',
+  queryText: 'queryText',
+  querySource: 'querySource',
+  queriedAt: 'queriedAt',
+  queriedByUserId: 'queriedByUserId',
+  responseText: 'responseText',
+  respondedAt: 'respondedAt',
+  respondedByUserId: 'respondedByUserId',
+  deadline: 'deadline',
+  attachmentUrls: 'attachmentUrls',
+  meta: 'meta',
+  createdAt: 'createdAt'
+};
+
+exports.Prisma.ClaimScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  insuranceCaseId: 'insuranceCaseId',
+  claimNumber: 'claimNumber',
+  claimType: 'claimType',
+  version: 'version',
+  status: 'status',
+  totalAmount: 'totalAmount',
+  approvedAmount: 'approvedAmount',
+  deductedAmount: 'deductedAmount',
+  paidAmount: 'paidAmount',
+  submittedAt: 'submittedAt',
+  submittedByUserId: 'submittedByUserId',
+  acknowledgedAt: 'acknowledgedAt',
+  approvedAt: 'approvedAt',
+  approvedByUserId: 'approvedByUserId',
+  rejectedAt: 'rejectedAt',
+  rejectionReason: 'rejectionReason',
+  paidAt: 'paidAt',
+  gatewayRefId: 'gatewayRefId',
+  resubmissionOfId: 'resubmissionOfId',
+  notes: 'notes',
+  meta: 'meta',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.ClaimLineItemScalarFieldEnum = {
+  id: 'id',
+  claimId: 'claimId',
+  serviceItemId: 'serviceItemId',
+  chargeMasterItemId: 'chargeMasterItemId',
+  description: 'description',
+  quantity: 'quantity',
+  unitPrice: 'unitPrice',
+  totalPrice: 'totalPrice',
+  icdCode: 'icdCode',
+  icdDescription: 'icdDescription',
+  cptCode: 'cptCode',
+  cptDescription: 'cptDescription',
+  snomedCode: 'snomedCode',
+  modifiers: 'modifiers',
+  placeOfService: 'placeOfService',
+  diagnosisRef: 'diagnosisRef',
+  approvedQuantity: 'approvedQuantity',
+  approvedUnitPrice: 'approvedUnitPrice',
+  approvedTotal: 'approvedTotal',
+  deniedAmount: 'deniedAmount',
+  denialReasonCode: 'denialReasonCode',
+  denialNotes: 'denialNotes',
+  packageCode: 'packageCode',
+  hsnSac: 'hsnSac',
+  meta: 'meta',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.ClaimDeductionScalarFieldEnum = {
+  id: 'id',
+  claimId: 'claimId',
+  reasonCode: 'reasonCode',
+  reasonCategory: 'reasonCategory',
+  description: 'description',
+  amount: 'amount',
+  isDisputed: 'isDisputed',
+  disputeNotes: 'disputeNotes',
+  createdAt: 'createdAt'
+};
+
+exports.Prisma.ClaimVersionScalarFieldEnum = {
+  id: 'id',
+  claimId: 'claimId',
+  versionNumber: 'versionNumber',
+  snapshot: 'snapshot',
+  createdAt: 'createdAt',
+  createdByUserId: 'createdByUserId',
+  changeReason: 'changeReason'
+};
+
+exports.Prisma.InsuranceDocumentScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  title: 'title',
+  fileUrl: 'fileUrl',
+  fileMime: 'fileMime',
+  fileSizeBytes: 'fileSizeBytes',
+  checksum: 'checksum',
+  docRole: 'docRole',
+  version: 'version',
+  uploadedAt: 'uploadedAt',
+  uploadedByUserId: 'uploadedByUserId',
+  verifiedAt: 'verifiedAt',
+  verifiedByUserId: 'verifiedByUserId',
+  tags: 'tags',
+  meta: 'meta',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.InsuranceDocumentLinkScalarFieldEnum = {
+  id: 'id',
+  documentId: 'documentId',
+  entityType: 'entityType',
+  entityId: 'entityId',
+  isRequired: 'isRequired',
+  insuranceCaseId: 'insuranceCaseId',
+  preauthRequestId: 'preauthRequestId',
+  claimId: 'claimId',
+  policyId: 'policyId',
+  createdAt: 'createdAt'
+};
+
+exports.Prisma.PayerIntegrationConfigScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  payerId: 'payerId',
+  integrationMode: 'integrationMode',
+  hcxParticipantCode: 'hcxParticipantCode',
+  hcxEndpointUrl: 'hcxEndpointUrl',
+  hcxAuthConfig: 'hcxAuthConfig',
+  apiBaseUrl: 'apiBaseUrl',
+  apiAuthMethod: 'apiAuthMethod',
+  apiAuthConfig: 'apiAuthConfig',
+  sftpHost: 'sftpHost',
+  sftpPort: 'sftpPort',
+  sftpPath: 'sftpPath',
+  sftpAuthConfig: 'sftpAuthConfig',
+  portalUrl: 'portalUrl',
+  portalNotes: 'portalNotes',
+  webhookSecret: 'webhookSecret',
+  webhookUrl: 'webhookUrl',
+  retryMaxAttempts: 'retryMaxAttempts',
+  retryBackoffMs: 'retryBackoffMs',
+  pollingIntervalMs: 'pollingIntervalMs',
+  isActive: 'isActive',
+  meta: 'meta',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.PaymentAdviceScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  claimId: 'claimId',
+  adviceNumber: 'adviceNumber',
+  utrNumber: 'utrNumber',
+  paymentDate: 'paymentDate',
+  amount: 'amount',
+  paymentMode: 'paymentMode',
+  status: 'status',
+  bankReference: 'bankReference',
+  shortPaymentReason: 'shortPaymentReason',
+  reconciledAt: 'reconciledAt',
+  reconciledByUserId: 'reconciledByUserId',
+  meta: 'meta',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.GatewayTransactionScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  payerIntegrationConfigId: 'payerIntegrationConfigId',
+  txType: 'txType',
+  txStatus: 'txStatus',
+  entityType: 'entityType',
+  entityId: 'entityId',
+  requestPayload: 'requestPayload',
+  responsePayload: 'responsePayload',
+  externalRefId: 'externalRefId',
+  sentAt: 'sentAt',
+  respondedAt: 'respondedAt',
+  attempts: 'attempts',
+  lastError: 'lastError',
+  nextRetryAt: 'nextRetryAt',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.PayerDocumentTemplateScalarFieldEnum = {
+  id: 'id',
+  branchId: 'branchId',
+  payerId: 'payerId',
+  name: 'name',
+  scope: 'scope',
+  caseTypes: 'caseTypes',
+  description: 'description',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.PayerDocumentRuleScalarFieldEnum = {
+  id: 'id',
+  templateId: 'templateId',
+  docRole: 'docRole',
+  label: 'label',
+  description: 'description',
+  isRequired: 'isRequired',
+  requiredAt: 'requiredAt',
+  sortOrder: 'sortOrder',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
 exports.Prisma.SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -2793,7 +3281,16 @@ exports.PayerKind = exports.$Enums.PayerKind = {
   TPA: 'TPA',
   CORPORATE: 'CORPORATE',
   GOVERNMENT: 'GOVERNMENT',
+  TRUST: 'TRUST',
+  EMPLOYEE: 'EMPLOYEE',
   OTHER: 'OTHER'
+};
+
+exports.PayerStatus = exports.$Enums.PayerStatus = {
+  ACTIVE: 'ACTIVE',
+  INACTIVE: 'INACTIVE',
+  SUSPENDED: 'SUSPENDED',
+  BLOCKED: 'BLOCKED'
 };
 
 exports.ContractStatus = exports.$Enums.ContractStatus = {
@@ -2802,6 +3299,12 @@ exports.ContractStatus = exports.$Enums.ContractStatus = {
   SUSPENDED: 'SUSPENDED',
   EXPIRED: 'EXPIRED',
   TERMINATED: 'TERMINATED'
+};
+
+exports.PricingStrategy = exports.$Enums.PricingStrategy = {
+  GLOBAL_DISCOUNT: 'GLOBAL_DISCOUNT',
+  CATEGORY_WISE: 'CATEGORY_WISE',
+  SERVICE_SPECIFIC: 'SERVICE_SPECIFIC'
 };
 
 exports.TariffPlanKind = exports.$Enums.TariffPlanKind = {
@@ -3074,6 +3577,17 @@ exports.PackagePricingMode = exports.$Enums.PackagePricingMode = {
   CAP: 'CAP'
 };
 
+exports.OverUtilizationPolicy = exports.$Enums.OverUtilizationPolicy = {
+  CHARGE_ADDITIONAL: 'CHARGE_ADDITIONAL',
+  ABSORB: 'ABSORB'
+};
+
+exports.UnderUtilizationRefund = exports.$Enums.UnderUtilizationRefund = {
+  NO_REFUND: 'NO_REFUND',
+  PARTIAL: 'PARTIAL',
+  FULL: 'FULL'
+};
+
 exports.PackageComponentType = exports.$Enums.PackageComponentType = {
   SERVICE_ITEM: 'SERVICE_ITEM',
   DIAGNOSTIC_ITEM: 'DIAGNOSTIC_ITEM',
@@ -3109,6 +3623,30 @@ exports.ExternalSystemType = exports.$Enums.ExternalSystemType = {
   RIS: 'RIS',
   ERP: 'ERP',
   OTHER: 'OTHER'
+};
+
+exports.ContractRateType = exports.$Enums.ContractRateType = {
+  FIXED_PRICE: 'FIXED_PRICE',
+  PERCENTAGE_OF_BASE: 'PERCENTAGE_OF_BASE',
+  DISCOUNT: 'DISCOUNT'
+};
+
+exports.SchemeType = exports.$Enums.SchemeType = {
+  PMJAY: 'PMJAY',
+  CGHS: 'CGHS',
+  ECHS: 'ECHS',
+  STATE_SCHEME: 'STATE_SCHEME',
+  OTHER: 'OTHER'
+};
+
+exports.PricingTierKind = exports.$Enums.PricingTierKind = {
+  GENERAL: 'GENERAL',
+  SENIOR_CITIZEN: 'SENIOR_CITIZEN',
+  STAFF: 'STAFF',
+  EMPLOYEE_FAMILY: 'EMPLOYEE_FAMILY',
+  BPL: 'BPL',
+  MEDICAL_COUNCIL: 'MEDICAL_COUNCIL',
+  CUSTOM: 'CUSTOM'
 };
 
 exports.FixItTaskType = exports.$Enums.FixItTaskType = {
@@ -3457,6 +3995,163 @@ exports.NarcoticsTransactionType = exports.$Enums.NarcoticsTransactionType = {
   ADJUSTMENT: 'ADJUSTMENT'
 };
 
+exports.PolicyRelationship = exports.$Enums.PolicyRelationship = {
+  SELF: 'SELF',
+  SPOUSE: 'SPOUSE',
+  CHILD: 'CHILD',
+  PARENT: 'PARENT',
+  OTHER: 'OTHER'
+};
+
+exports.PolicyStatus = exports.$Enums.PolicyStatus = {
+  ACTIVE: 'ACTIVE',
+  EXPIRED: 'EXPIRED',
+  CANCELLED: 'CANCELLED',
+  SUSPENDED: 'SUSPENDED',
+  LAPSED: 'LAPSED'
+};
+
+exports.InsuranceCaseType = exports.$Enums.InsuranceCaseType = {
+  CASHLESS: 'CASHLESS',
+  REIMBURSEMENT: 'REIMBURSEMENT',
+  PACKAGE: 'PACKAGE'
+};
+
+exports.InsuranceCaseStatus = exports.$Enums.InsuranceCaseStatus = {
+  DRAFT: 'DRAFT',
+  POLICY_VERIFIED: 'POLICY_VERIFIED',
+  PREAUTH_PENDING: 'PREAUTH_PENDING',
+  PREAUTH_APPROVED: 'PREAUTH_APPROVED',
+  ADMITTED: 'ADMITTED',
+  DISCHARGE_PENDING: 'DISCHARGE_PENDING',
+  CLAIM_SUBMITTED: 'CLAIM_SUBMITTED',
+  CLAIM_APPROVED: 'CLAIM_APPROVED',
+  SETTLED: 'SETTLED',
+  CLOSED: 'CLOSED',
+  CANCELLED: 'CANCELLED'
+};
+
+exports.PreauthStatus = exports.$Enums.PreauthStatus = {
+  PREAUTH_DRAFT: 'PREAUTH_DRAFT',
+  PREAUTH_SUBMITTED: 'PREAUTH_SUBMITTED',
+  PREAUTH_QUERY_RAISED: 'PREAUTH_QUERY_RAISED',
+  PREAUTH_RESPONDED: 'PREAUTH_RESPONDED',
+  PREAUTH_APPROVED: 'PREAUTH_APPROVED',
+  PREAUTH_REJECTED: 'PREAUTH_REJECTED',
+  PREAUTH_ENHANCEMENT_REQUESTED: 'PREAUTH_ENHANCEMENT_REQUESTED',
+  PREAUTH_ENHANCEMENT_APPROVED: 'PREAUTH_ENHANCEMENT_APPROVED',
+  PREAUTH_EXPIRED: 'PREAUTH_EXPIRED'
+};
+
+exports.PreauthQuerySource = exports.$Enums.PreauthQuerySource = {
+  TPA: 'TPA',
+  HOSPITAL: 'HOSPITAL'
+};
+
+exports.ClaimType = exports.$Enums.ClaimType = {
+  FINAL: 'FINAL',
+  INTERIM: 'INTERIM',
+  ENHANCEMENT: 'ENHANCEMENT'
+};
+
+exports.ClaimStatus = exports.$Enums.ClaimStatus = {
+  CLAIM_DRAFT: 'CLAIM_DRAFT',
+  CLAIM_SUBMITTED: 'CLAIM_SUBMITTED',
+  CLAIM_ACKNOWLEDGED: 'CLAIM_ACKNOWLEDGED',
+  CLAIM_QUERY_RAISED: 'CLAIM_QUERY_RAISED',
+  CLAIM_RESPONDED: 'CLAIM_RESPONDED',
+  CLAIM_UNDER_REVIEW: 'CLAIM_UNDER_REVIEW',
+  CLAIM_APPROVED: 'CLAIM_APPROVED',
+  CLAIM_PARTIALLY_APPROVED: 'CLAIM_PARTIALLY_APPROVED',
+  CLAIM_REJECTED: 'CLAIM_REJECTED',
+  CLAIM_DEDUCTED: 'CLAIM_DEDUCTED',
+  CLAIM_PAID: 'CLAIM_PAID',
+  CLAIM_CLOSED: 'CLAIM_CLOSED',
+  CLAIM_RESUBMITTED: 'CLAIM_RESUBMITTED'
+};
+
+exports.DeductionCategory = exports.$Enums.DeductionCategory = {
+  NON_PAYABLE: 'NON_PAYABLE',
+  EXCESS: 'EXCESS',
+  COPAY: 'COPAY',
+  DEDUCTIBLE: 'DEDUCTIBLE',
+  NON_MEDICAL: 'NON_MEDICAL',
+  TARIFF_DIFF: 'TARIFF_DIFF',
+  OTHER: 'OTHER'
+};
+
+exports.InsuranceDocRole = exports.$Enums.InsuranceDocRole = {
+  PREAUTH_FORM: 'PREAUTH_FORM',
+  DISCHARGE_SUMMARY: 'DISCHARGE_SUMMARY',
+  INVESTIGATION_REPORT: 'INVESTIGATION_REPORT',
+  PRESCRIPTION: 'PRESCRIPTION',
+  BILL_SUMMARY: 'BILL_SUMMARY',
+  CLAIM_FORM: 'CLAIM_FORM',
+  ID_PROOF: 'ID_PROOF',
+  INSURANCE_CARD: 'INSURANCE_CARD',
+  QUERY_RESPONSE: 'QUERY_RESPONSE',
+  ENHANCEMENT_FORM: 'ENHANCEMENT_FORM',
+  DOC_OTHER: 'DOC_OTHER'
+};
+
+exports.InsuranceDocEntityType = exports.$Enums.InsuranceDocEntityType = {
+  INSURANCE_CASE: 'INSURANCE_CASE',
+  PREAUTH: 'PREAUTH',
+  CLAIM: 'CLAIM',
+  PATIENT_POLICY: 'PATIENT_POLICY'
+};
+
+exports.IntegrationMode = exports.$Enums.IntegrationMode = {
+  HCX: 'HCX',
+  NHCX: 'NHCX',
+  DIRECT_API: 'DIRECT_API',
+  SFTP_BATCH: 'SFTP_BATCH',
+  PORTAL_ASSISTED: 'PORTAL_ASSISTED',
+  MANUAL: 'MANUAL'
+};
+
+exports.PaymentMode = exports.$Enums.PaymentMode = {
+  NEFT: 'NEFT',
+  RTGS: 'RTGS',
+  CHEQUE: 'CHEQUE',
+  UPI: 'UPI',
+  CASH_PAYMENT: 'CASH_PAYMENT',
+  OTHER_MODE: 'OTHER_MODE'
+};
+
+exports.PaymentAdviceStatus = exports.$Enums.PaymentAdviceStatus = {
+  PA_RECEIVED: 'PA_RECEIVED',
+  PA_RECONCILED: 'PA_RECONCILED',
+  PA_DISPUTED: 'PA_DISPUTED',
+  PA_PARTIAL: 'PA_PARTIAL'
+};
+
+exports.GatewayTxType = exports.$Enums.GatewayTxType = {
+  PREAUTH_SUBMIT: 'PREAUTH_SUBMIT',
+  PREAUTH_STATUS: 'PREAUTH_STATUS',
+  CLAIM_SUBMIT: 'CLAIM_SUBMIT',
+  CLAIM_STATUS: 'CLAIM_STATUS',
+  COVERAGE_CHECK: 'COVERAGE_CHECK',
+  PAYMENT_NOTICE: 'PAYMENT_NOTICE',
+  WEBHOOK_INBOUND: 'WEBHOOK_INBOUND'
+};
+
+exports.GatewayTxStatus = exports.$Enums.GatewayTxStatus = {
+  GATEWAY_QUEUED: 'GATEWAY_QUEUED',
+  GATEWAY_SENT: 'GATEWAY_SENT',
+  GATEWAY_ACK_RECEIVED: 'GATEWAY_ACK_RECEIVED',
+  GATEWAY_RESPONSE_RECEIVED: 'GATEWAY_RESPONSE_RECEIVED',
+  GATEWAY_FAILED: 'GATEWAY_FAILED',
+  GATEWAY_TIMED_OUT: 'GATEWAY_TIMED_OUT'
+};
+
+exports.DocChecklistScope = exports.$Enums.DocChecklistScope = {
+  ALL_CASES: 'ALL_CASES',
+  CASHLESS_ONLY: 'CASHLESS_ONLY',
+  REIMBURSEMENT_ONLY: 'REIMBURSEMENT_ONLY',
+  PACKAGE_ONLY: 'PACKAGE_ONLY'
+};
+
 exports.Prisma.ModelName = {
   Organization: 'Organization',
   Branch: 'Branch',
@@ -3554,6 +4249,11 @@ exports.Prisma.ModelName = {
   ExternalDirectorySource: 'ExternalDirectorySource',
   ExternalDirectoryEntry: 'ExternalDirectoryEntry',
   ExternalDirectoryMapping: 'ExternalDirectoryMapping',
+  ServicePriceHistory: 'ServicePriceHistory',
+  ContractServiceRate: 'ContractServiceRate',
+  GovernmentSchemeConfig: 'GovernmentSchemeConfig',
+  PatientPricingTier: 'PatientPricingTier',
+  PatientPricingTierRate: 'PatientPricingTierRate',
   FixItTask: 'FixItTask',
   BulkImportJob: 'BulkImportJob',
   ProcedureBooking: 'ProcedureBooking',
@@ -3603,7 +4303,22 @@ exports.Prisma.ModelName = {
   StoreIndentMapping: 'StoreIndentMapping',
   NarcoticsRegister: 'NarcoticsRegister',
   DrugLicenseHistory: 'DrugLicenseHistory',
-  DrugCategoryNode: 'DrugCategoryNode'
+  DrugCategoryNode: 'DrugCategoryNode',
+  PatientInsurancePolicy: 'PatientInsurancePolicy',
+  InsuranceCase: 'InsuranceCase',
+  PreauthRequest: 'PreauthRequest',
+  PreauthQuery: 'PreauthQuery',
+  Claim: 'Claim',
+  ClaimLineItem: 'ClaimLineItem',
+  ClaimDeduction: 'ClaimDeduction',
+  ClaimVersion: 'ClaimVersion',
+  InsuranceDocument: 'InsuranceDocument',
+  InsuranceDocumentLink: 'InsuranceDocumentLink',
+  PayerIntegrationConfig: 'PayerIntegrationConfig',
+  PaymentAdvice: 'PaymentAdvice',
+  GatewayTransaction: 'GatewayTransaction',
+  PayerDocumentTemplate: 'PayerDocumentTemplate',
+  PayerDocumentRule: 'PayerDocumentRule'
 };
 
 /**

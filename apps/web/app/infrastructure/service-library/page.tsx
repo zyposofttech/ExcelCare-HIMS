@@ -39,6 +39,8 @@ import { cn } from "@/lib/cn";
 
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import { useActiveBranchStore } from "@/lib/branch/active-branch";
+import { usePageInsights } from "@/lib/copilot/usePageInsights";
+import { PageInsightBanner } from "@/components/copilot/PageInsightBanner";
 import {
   AlertTriangle,
   BookMarked,
@@ -214,6 +216,12 @@ export default function SuperAdminServiceLibraryPage() {
 
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
   const [branchId, setBranchId] = React.useState<string>("");
+
+  // AI Copilot
+  const { insights, loading: insightsLoading, dismiss: dismissInsight } = usePageInsights({
+    module: "service-library",
+    enabled: !!branchId,
+  });
 
   // Code sets
   const [codeSets, setCodeSets] = React.useState<StandardCodeSetRow[]>([]);
@@ -459,6 +467,8 @@ setErr(null);
             </CardHeader>
           </Card>
         ) : null}
+
+        <PageInsightBanner insights={insights} loading={insightsLoading} onDismiss={dismissInsight} />
 
         {/* Overview */}
         <Card className="overflow-hidden">
@@ -1578,12 +1588,14 @@ function EntryDialog({
   const { toast } = useToast();
   const [saving, setSaving] = React.useState(false);
 
-  const [form, setForm] = React.useState<{ code: string; display: string; description: string; status: string; metaJson: string }>({
+  const [form, setForm] = React.useState<{ code: string; display: string; description: string; status: string; metaSource: string; metaNote: string; metaRef: string }>({
     code: "",
     display: "",
     description: "",
     status: "",
-    metaJson: "",
+    metaSource: "",
+    metaNote: "",
+    metaRef: "",
   });
 
   React.useEffect(() => {
@@ -1594,7 +1606,9 @@ function EntryDialog({
       display: editing?.display || "",
       description: (attrs?.description as any) || "",
       status: (attrs?.status as any) || "",
-      metaJson: attrs && Object.keys(attrs || {}).length ? JSON.stringify(attrs, null, 2) : "",
+      metaSource: attrs?.source || "",
+      metaNote: attrs?.note || "",
+      metaRef: attrs?.ref || attrs?.reference || "",
     });
   }, [open, editing]);
 
@@ -1616,16 +1630,17 @@ function EntryDialog({
     }
 
     // Optional helpers: description/status/meta
-    const meta = safeParseJson(form.metaJson);
-    if (meta === "__INVALID__") {
-      toast({ title: "Invalid JSON", description: "Meta JSON is not valid. Fix it or clear the box." });
-      return;
-    }
+    const hasMeta = form.metaSource || form.metaNote || form.metaRef;
+    const meta = hasMeta ? {
+      ...(form.metaSource ? { source: form.metaSource.trim() } : {}),
+      ...(form.metaNote ? { note: form.metaNote.trim() } : {}),
+      ...(form.metaRef ? { ref: form.metaRef.trim() } : {}),
+    } : null;
 
     // If user filled specific fields, send them too
     if (String(form.description || "").trim()) payload.description = String(form.description).trim();
     if (String(form.status || "").trim()) payload.status = String(form.status).trim();
-    if (meta && meta !== "__INVALID__") payload.meta = meta;
+    if (meta) payload.meta = meta;
 
     setSaving(true);
     try {
@@ -1688,10 +1703,34 @@ function EntryDialog({
             <Input value={form.status} onChange={(e) => patch({ status: e.target.value })} placeholder="e.g., active, retired, draft" />
           </div>
 
-          <div className="md:col-span-2 grid gap-2">
-            <Label>Meta JSON (optional)</Label>
-            <Textarea value={form.metaJson} onChange={(e) => patch({ metaJson: e.target.value })} placeholder='{"source":"loinc","note":"..." }' className="min-h-[140px] font-mono text-xs" />
-            <div className="text-xs text-zc-muted">If provided, must be valid JSON.</div>
+          <div className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50/30 p-4 space-y-3">
+            <div className="text-sm font-semibold text-gray-600">Metadata (optional)</div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid gap-2">
+                <Label>Source</Label>
+                <Input
+                  value={form.metaSource}
+                  onChange={(e) => patch({ metaSource: e.target.value })}
+                  placeholder="e.g., loinc, snomed"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Reference</Label>
+                <Input
+                  value={form.metaRef}
+                  onChange={(e) => patch({ metaRef: e.target.value })}
+                  placeholder="e.g., LOINC:12345"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Note</Label>
+                <Input
+                  value={form.metaNote}
+                  onChange={(e) => patch({ metaNote: e.target.value })}
+                  placeholder="Additional notes"
+                />
+              </div>
+            </div>
           </div>
         </div>
 

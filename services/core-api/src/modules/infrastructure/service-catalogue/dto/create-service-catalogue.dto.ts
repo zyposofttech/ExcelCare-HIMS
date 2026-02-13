@@ -35,4 +35,12 @@ export class CreateServiceCatalogueDto {
   @IsOptional()
   @IsString()
   payerGroup?: string | null;
+
+  @IsOptional()
+  filterRules?: any;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  visibility?: string | null;
 }

@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
+
 import {
   Dialog,
   DialogContent,
@@ -861,7 +861,11 @@ function ChargeMasterEditModal({
     taxCodeId: "",
     isTaxInclusive: false,
     hsnSac: "",
-    billingPolicyText: "",
+    bpRounding: "",
+    bpCapAmount: "",
+    bpDiscountType: "",
+    bpDiscountValue: "",
+    bpNotes: "",
   });
 
   React.useEffect(() => {
@@ -880,7 +884,11 @@ function ChargeMasterEditModal({
         taxCodeId: editing.taxCodeId || "",
         isTaxInclusive: Boolean(editing.isTaxInclusive),
         hsnSac: editing.hsnSac || "",
-        billingPolicyText: editing.billingPolicy != null ? JSON.stringify(editing.billingPolicy, null, 2) : "",
+        bpRounding: editing.billingPolicy?.rounding || "",
+        bpCapAmount: editing.billingPolicy?.capAmount != null ? String(editing.billingPolicy.capAmount) : "",
+        bpDiscountType: editing.billingPolicy?.discountRules?.[0]?.type || "",
+        bpDiscountValue: editing.billingPolicy?.discountRules?.[0]?.value != null ? String(editing.billingPolicy.discountRules[0].value) : "",
+        bpNotes: editing.billingPolicy?.notes || "",
       });
     } else {
       setForm({
@@ -894,7 +902,11 @@ function ChargeMasterEditModal({
         taxCodeId: "",
         isTaxInclusive: false,
         hsnSac: "",
-        billingPolicyText: "",
+        bpRounding: "",
+        bpCapAmount: "",
+        bpDiscountType: "",
+        bpDiscountValue: "",
+        bpNotes: "",
       });
     }
   }, [open, mode, editing]);
@@ -917,14 +929,15 @@ function ChargeMasterEditModal({
     }
 
     let billingPolicy: any = null;
-    const bpText = String(form.billingPolicyText || "").trim();
-    if (bpText) {
-      try {
-        billingPolicy = JSON.parse(bpText);
-      } catch {
-        toast({ title: "Invalid JSON", description: "Billing policy must be valid JSON (or leave blank)." });
-        return;
+    const hasAnyBP = form.bpRounding || form.bpCapAmount || form.bpDiscountType || form.bpDiscountValue || form.bpNotes;
+    if (hasAnyBP) {
+      billingPolicy = {};
+      if (form.bpRounding) billingPolicy.rounding = form.bpRounding;
+      if (form.bpCapAmount) billingPolicy.capAmount = Number(form.bpCapAmount) || 0;
+      if (form.bpDiscountType && form.bpDiscountValue) {
+        billingPolicy.discountRules = [{ type: form.bpDiscountType, value: Number(form.bpDiscountValue) || 0 }];
       }
+      if (form.bpNotes) billingPolicy.notes = form.bpNotes.trim();
     }
 
     // UI-level enforcement: tax code must be active if selected
@@ -1180,16 +1193,66 @@ function ChargeMasterEditModal({
           ) : null}
 
           {tab === "policy" ? (
-            <div className="grid gap-2">
-              <Label>Billing Policy JSON (optional)</Label>
-              <Textarea
-                value={form.billingPolicyText || ""}
-                onChange={(e) => patch({ billingPolicyText: e.target.value })}
-                placeholder={`{\n  "rounding": "NEAREST_1",\n  "capAmount": 25000,\n  "discountRules": [{ "type": "PERCENT", "value": 10 }]\n}`}
-                className="min-h-[220px]"
-              />
-              <div className="text-xs text-zc-muted">
-                Use this for advanced rules (caps, discounts, inclusions). Backend must store billingPolicy as JSON.
+            <div className="space-y-4">
+              <div className="rounded-xl border border-blue-200 bg-blue-50/30 p-4 space-y-4">
+                <div className="text-sm font-semibold text-blue-700">Billing Policy (optional)</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label>Rounding Strategy</Label>
+                    <Select value={form.bpRounding || "_none"} onValueChange={(v) => patch({ bpRounding: v === "_none" ? "" : v })}>
+                      <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_none">None</SelectItem>
+                        <SelectItem value="NEAREST_1">Nearest &#8377;1</SelectItem>
+                        <SelectItem value="NEAREST_5">Nearest &#8377;5</SelectItem>
+                        <SelectItem value="NEAREST_10">Nearest &#8377;10</SelectItem>
+                        <SelectItem value="ROUND_UP">Round Up</SelectItem>
+                        <SelectItem value="ROUND_DOWN">Round Down</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Cap Amount (max bill)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={form.bpCapAmount || ""}
+                      onChange={(e) => patch({ bpCapAmount: e.target.value })}
+                      placeholder="e.g., 25000"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label>Discount Type</Label>
+                    <Select value={form.bpDiscountType || "_none"} onValueChange={(v) => patch({ bpDiscountType: v === "_none" ? "" : v })}>
+                      <SelectTrigger><SelectValue placeholder="No discount" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_none">No Discount</SelectItem>
+                        <SelectItem value="PERCENT">Percentage</SelectItem>
+                        <SelectItem value="FLAT">Flat Amount</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Discount Value</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={form.bpDiscountValue || ""}
+                      onChange={(e) => patch({ bpDiscountValue: e.target.value })}
+                      placeholder={form.bpDiscountType === "PERCENT" ? "e.g., 10 (%)" : "e.g., 500 (₹)"}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Policy Notes</Label>
+                  <Input
+                    value={form.bpNotes || ""}
+                    onChange={(e) => patch({ bpNotes: e.target.value })}
+                    placeholder="e.g., Applicable for OPD consultations only"
+                  />
+                </div>
               </div>
             </div>
           ) : null}

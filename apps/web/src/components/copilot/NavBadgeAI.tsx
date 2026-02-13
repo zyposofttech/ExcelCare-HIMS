@@ -15,6 +15,24 @@ const HREF_TO_AREA: Record<string, string> = {
   "/infrastructure/units": "units",
   "/infrastructure/rooms": "rooms",
   "/infrastructure/resources": "resources",
+  // Billing Setup
+  "/infrastructure/tax-codes": "tax-codes",
+  "/infrastructure/charge-master": "charge-master",
+  "/infrastructure/tariff-plans": "tariff-plans",
+  "/infrastructure/payers": "payers",
+  "/infrastructure/payer-contracts": "payer-contracts",
+  "/infrastructure/gov-schemes": "gov-schemes",
+  "/infrastructure/pricing-tiers": "pricing-tiers",
+  "/infrastructure/price-history": "price-history",
+  // Service Catalogue
+  "/infrastructure/service-items": "service-items",
+  "/infrastructure/service-library": "service-library",
+  "/infrastructure/service-mapping": "service-mapping",
+  "/infrastructure/service-catalogues": "service-catalogues",
+  "/infrastructure/service-packages": "service-packages",
+  "/infrastructure/order-sets": "order-sets",
+  "/infrastructure/service-availability": "service-availability",
+  "/infrastructure/service-bulk-import": "service-bulk-import",
   "/infrastructure": "infrastructure",
 };
 

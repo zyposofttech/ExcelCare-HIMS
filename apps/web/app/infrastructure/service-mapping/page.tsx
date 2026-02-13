@@ -26,6 +26,8 @@ import { cn } from "@/lib/cn";
 
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import { useActiveBranchStore } from "@/lib/branch/active-branch";
+import { usePageInsights } from "@/lib/copilot/usePageInsights";
+import { PageInsightBanner } from "@/components/copilot/PageInsightBanner";
 import {
   AlertTriangle,
   ExternalLink,
@@ -203,6 +205,12 @@ export default function SuperAdminServiceMappingPage() {
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
   const [branchId, setBranchId] = React.useState<string>("");
 
+  // AI Copilot
+  const { insights, loading: insightsLoading, dismiss: dismissInsight } = usePageInsights({
+    module: "service-mapping",
+    enabled: !!branchId,
+  });
+
   const [allServices, setAllServices] = React.useState<ServiceItemRow[]>([]);
   const [selectedId, setSelectedId] = React.useState<string>("");
 
@@ -235,7 +243,7 @@ export default function SuperAdminServiceMappingPage() {
     const params = new URLSearchParams(sp?.toString() || "");
     if (id) params.set("serviceItemId", id);
     else params.delete("serviceItemId");
-    router.replace(`/infrastructure/service-mapping?${params.toString( as any)}`);
+    router.replace(`/infrastructure/service-mapping?${params.toString()}`);
   }
 
   function currentMappingForId(serviceItemId: string) {
@@ -651,6 +659,8 @@ setQ("");
             </CardHeader>
           </Card>
         ) : null}
+
+        <PageInsightBanner insights={insights} loading={insightsLoading} onDismiss={dismissInsight} />
 
         {/* Overview */}
         <Card className="overflow-hidden">

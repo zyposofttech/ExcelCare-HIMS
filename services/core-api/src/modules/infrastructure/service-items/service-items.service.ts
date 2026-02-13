@@ -112,15 +112,29 @@ export class ServiceItemsService {
       if (!dep) throw new BadRequestException("Invalid departmentId for branch");
     }
 
+    if (dto.specialtyId) {
+      const spec = await this.ctx.prisma.specialty.findFirst({
+        where: { id: dto.specialtyId },
+        select: { id: true },
+      });
+      if (!spec) throw new BadRequestException("Invalid specialtyId");
+    }
+
     const created = await this.ctx.prisma.serviceItem.create({
       data: {
         branchId,
         code,
         name: dto.name.trim(),
+        shortName: dto.shortName?.trim() ?? null,
+        displayName: dto.displayName?.trim() ?? null,
+        description: dto.description ?? null,
+        searchAliases: dto.searchAliases ?? [],
         category: dto.category.trim(),
+        subCategory: dto.subCategory?.trim() ?? null,
         unit: dto.unit ?? null,
 
         type: (dto.type as any) ?? undefined,
+        specialtyId: dto.specialtyId ?? null,
         departmentId: dto.departmentId ?? null,
         externalId: dto.externalId ?? null,
 
@@ -134,6 +148,21 @@ export class ServiceItemsService {
         // maker-checker
         createdByUserId: principal.userId ?? null,
         updatedByUserId: principal.userId ?? null,
+
+        // Scheduling & Availability
+        requiresScheduling: dto.requiresScheduling ?? false,
+        statAvailable: dto.statAvailable ?? false,
+        defaultTatHours: dto.defaultTatHours ?? null,
+
+        // Pricing
+        basePrice: dto.basePrice ?? null,
+        costPrice: dto.costPrice ?? null,
+        allowDiscount: dto.allowDiscount ?? true,
+        maxDiscountPercent: dto.maxDiscountPercent ?? null,
+
+        // Effective dates (effectiveFrom has @default(now()), pass undefined to use it)
+        effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : undefined,
+        effectiveTill: dto.effectiveTill ? new Date(dto.effectiveTill) : null,
 
         consentRequired: dto.consentRequired ?? false,
         preparationText: dto.preparationText ?? null,
@@ -382,21 +411,47 @@ export class ServiceItemsService {
       if (!dep) throw new BadRequestException("Invalid departmentId for branch");
     }
 
+    if (dto.specialtyId) {
+      const spec = await this.ctx.prisma.specialty.findFirst({
+        where: { id: dto.specialtyId },
+        select: { id: true },
+      });
+      if (!spec) throw new BadRequestException("Invalid specialtyId");
+    }
+
     const updated = await this.ctx.prisma.serviceItem.update({
       where: { id: svc.id },
       data: {
         code: dto.code ? canonicalizeCode(dto.code) : undefined,
         name: dto.name?.trim(),
+        shortName: dto.shortName === undefined ? undefined : (dto.shortName?.trim() ?? null),
+        displayName: dto.displayName === undefined ? undefined : (dto.displayName?.trim() ?? null),
+        description: dto.description === undefined ? undefined : (dto.description ?? null),
+        searchAliases: dto.searchAliases ?? undefined,
         category: dto.category?.trim(),
+        subCategory: dto.subCategory === undefined ? undefined : (dto.subCategory?.trim() ?? null),
         unit: dto.unit ?? undefined,
 
         type: dto.type !== undefined ? (dto.type as any) : undefined,
+        specialtyId: dto.specialtyId === undefined ? undefined : (dto.specialtyId ?? null),
         departmentId: dto.departmentId ?? undefined,
         externalId: dto.externalId ?? undefined,
 
         isOrderable: dto.isOrderable ?? undefined,
         isActive: dto.isActive ?? undefined,
         isBillable: dto.isBillable ?? undefined,
+
+        requiresScheduling: dto.requiresScheduling ?? undefined,
+        statAvailable: dto.statAvailable ?? undefined,
+        defaultTatHours: dto.defaultTatHours === undefined ? undefined : (dto.defaultTatHours ?? null),
+
+        basePrice: dto.basePrice === undefined ? undefined : (dto.basePrice ?? null),
+        costPrice: dto.costPrice === undefined ? undefined : (dto.costPrice ?? null),
+        allowDiscount: dto.allowDiscount ?? undefined,
+        maxDiscountPercent: dto.maxDiscountPercent === undefined ? undefined : (dto.maxDiscountPercent ?? null),
+
+        effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : undefined,
+        effectiveTill: dto.effectiveTill === undefined ? undefined : dto.effectiveTill ? new Date(dto.effectiveTill) : null,
 
         consentRequired: dto.consentRequired ?? undefined,
         preparationText: dto.preparationText ?? undefined,

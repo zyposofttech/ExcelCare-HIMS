@@ -2,7 +2,10 @@
 
 import * as React from "react";
 import {
+  CheckCircle,
   ClipboardList,
+  Eye,
+  History,
   Link as LinkIcon,
   Loader2,
   MoreHorizontal,
@@ -10,9 +13,12 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Send,
+  Star,
   ToggleLeft,
   ToggleRight,
   Wrench,
+  XCircle,
 } from "lucide-react";
 
 import { AppShell } from "@/components/AppShell";
@@ -42,12 +48,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 
 import { ApiError, apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import { useActiveBranchStore } from "@/lib/branch/active-branch";
+import { usePageInsights } from "@/lib/copilot/usePageInsights";
+import { PageInsightBanner } from "@/components/copilot/PageInsightBanner";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Types                                    */
@@ -75,16 +84,47 @@ type ServiceChargeMappingRow = {
   chargeMasterItem?: ChargeMasterItemRow | null;
 };
 
+type SpecialtyRow = { id: string; name: string; code: string };
+
 type ServiceItemRow = {
   id: string;
   branchId: string;
   code: string;
   name: string;
+  shortName?: string | null;
+  displayName?: string | null;
+  description?: string | null;
+  searchAliases?: string[];
   category: string;
+  subCategory?: string | null;
   unit?: string | null;
+  specialtyId?: string | null;
+  specialty?: { id: string; name: string } | null;
+  requiresScheduling?: boolean;
+  statAvailable?: boolean;
+  defaultTatHours?: number | null;
+  basePrice?: number | null;
+  costPrice?: number | null;
+  allowDiscount?: boolean;
+  maxDiscountPercent?: number | null;
+  effectiveFrom?: string | null;
+  effectiveTill?: string | null;
   isOrderable: boolean;
   isActive: boolean;
   mappings?: ServiceChargeMappingRow[];
+};
+
+type ServiceItemVersionRow = {
+  id: string;
+  serviceItemId: string;
+  version: number;
+  status: string;
+  snapshot: any;
+  createdByUserId?: string | null;
+  createdByUser?: { id: string; name?: string } | null;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  createdAt: string;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -177,12 +217,17 @@ export default function ServiceItemsPage() {
   const isGlobalScope = branchCtx.scope === "GLOBAL";
   const effectiveBranchId = branchCtx.branchId ?? activeBranchId ?? "";
 
-
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
 
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
   const [branchId, setBranchId] = React.useState<string | undefined>(undefined);
+
+  // AI Copilot
+  const { insights, loading: insightsLoading, dismiss: dismissInsight } = usePageInsights({
+    module: "service-items",
+    enabled: !!branchId,
+  });
 
   const [qText, setQText] = React.useState("");
   const [includeInactive, setIncludeInactive] = React.useState(false);
@@ -196,9 +241,88 @@ export default function ServiceItemsPage() {
   const [fName, setFName] = React.useState("");
   const [fCategory, setFCategory] = React.useState("");
   const [fUnit, setFUnit] = React.useState("");
+  const [fShortName, setFShortName] = React.useState("");
+  const [fDisplayName, setFDisplayName] = React.useState("");
+  const [fDescription, setFDescription] = React.useState("");
+  const [fSearchAliases, setFSearchAliases] = React.useState("");
+  const [fSubCategory, setFSubCategory] = React.useState("");
+  const [fSpecialtyId, setFSpecialtyId] = React.useState("");
+  const [fRequiresScheduling, setFRequiresScheduling] = React.useState(false);
+  const [fStatAvailable, setFStatAvailable] = React.useState(false);
+  const [fDefaultTatHours, setFDefaultTatHours] = React.useState("");
+  const [fBasePrice, setFBasePrice] = React.useState("");
+  const [fCostPrice, setFCostPrice] = React.useState("");
+  const [fAllowDiscount, setFAllowDiscount] = React.useState(true);
+  const [fMaxDiscountPercent, setFMaxDiscountPercent] = React.useState("");
+  const [fEffectiveTill, setFEffectiveTill] = React.useState("");
   const [fOrderable, setFOrderable] = React.useState(true);
   const [fActive, setFActive] = React.useState(true);
   const [fChargeMasterCode, setFChargeMasterCode] = React.useState(""); // create-only
+  const [fType, setFType] = React.useState("OTHER");
+  const [fIsBillable, setFIsBillable] = React.useState(true);
+  const [fConsentRequired, setFConsentRequired] = React.useState(false);
+  const [fGenderRestriction, setFGenderRestriction] = React.useState("");
+  const [fMinAgeYears, setFMinAgeYears] = React.useState("");
+  const [fMaxAgeYears, setFMaxAgeYears] = React.useState("");
+  const [specialties, setSpecialties] = React.useState<SpecialtyRow[]>([]);
+
+  // Favorites (localStorage)
+  const [favorites, setFavorites] = React.useState<Set<string>>(new Set());
+  const [showFavoritesOnly, setShowFavoritesOnly] = React.useState(false);
+  React.useEffect(() => {
+    try {
+      const stored = localStorage.getItem("zc:service-favorites");
+      if (stored) setFavorites(new Set(JSON.parse(stored)));
+    } catch {}
+  }, []);
+  function toggleFavorite(id: string) {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      try { localStorage.setItem("zc:service-favorites", JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }
+
+  // Version history
+  const [versionsOpen, setVersionsOpen] = React.useState(false);
+  const [versionsItem, setVersionsItem] = React.useState<any>(null);
+  const [versions, setVersions] = React.useState<ServiceItemVersionRow[]>([]);
+  const [versionsLoading, setVersionsLoading] = React.useState(false);
+
+  async function loadVersions(serviceItemId: string) {
+    setVersionsLoading(true);
+    try {
+      const res = await apiFetch<any>(
+        `/api/infrastructure/service-items/${serviceItemId}/versions`,
+      );
+      setVersions(Array.isArray(res) ? res : res?.rows || []);
+    } catch {
+      setVersions([]);
+    } finally {
+      setVersionsLoading(false);
+    }
+  }
+
+  function openVersions(item: any) {
+    setVersionsItem(item);
+    setVersionsOpen(true);
+    void loadVersions(item.id);
+  }
+
+  // Workflow actions
+  async function updateLifecycleStatus(itemId: string, newStatus: string) {
+    try {
+      await apiFetch(
+        `/api/infrastructure/services/${itemId}`,
+        { method: "PATCH", body: JSON.stringify({ lifecycleStatus: newStatus }) },
+      );
+      toast({ title: "Status updated", description: `Service item status changed to ${newStatus}.` });
+      await loadServices();
+    } catch (e: any) {
+      toast({ title: "Update failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    }
+  }
 
   // Mapping dialog state
   const [mapOpen, setMapOpen] = React.useState(false);
@@ -220,6 +344,13 @@ export default function ServiceItemsPage() {
 
     setBranchId(next);
     if (next && isGlobalScope) setActiveBranchId(next);
+  }
+
+  async function loadSpecialties() {
+    try {
+      const list = await apiFetch<SpecialtyRow[]>("/api/specialties");
+      setSpecialties(list || []);
+    } catch { setSpecialties([]); }
   }
 
   async function loadServices(bid?: string) {
@@ -257,7 +388,7 @@ export default function ServiceItemsPage() {
     (async () => {
       setLoading(true);
       try {
-        await loadBranches();
+        await Promise.all([loadBranches(), loadSpecialties()]);
       } catch (e: any) {
         toast({ variant: "destructive", title: "Branches failed", description: e?.message || "Unknown error" });
       } finally {
@@ -297,11 +428,31 @@ export default function ServiceItemsPage() {
     setEditing(null);
     setFCode("");
     setFName("");
+    setFShortName("");
+    setFDisplayName("");
+    setFDescription("");
+    setFSearchAliases("");
     setFCategory("");
+    setFSubCategory("");
     setFUnit("");
+    setFSpecialtyId("");
+    setFRequiresScheduling(false);
+    setFStatAvailable(false);
+    setFDefaultTatHours("");
+    setFBasePrice("");
+    setFCostPrice("");
+    setFAllowDiscount(true);
+    setFMaxDiscountPercent("");
+    setFEffectiveTill("");
     setFOrderable(true);
     setFActive(true);
     setFChargeMasterCode("");
+    setFType("OTHER");
+    setFIsBillable(true);
+    setFConsentRequired(false);
+    setFGenderRestriction("");
+    setFMinAgeYears("");
+    setFMaxAgeYears("");
     setEditorOpen(true);
   }
 
@@ -309,11 +460,31 @@ export default function ServiceItemsPage() {
     setEditing(r);
     setFCode(r.code || "");
     setFName(r.name || "");
+    setFShortName(r.shortName || "");
+    setFDisplayName(r.displayName || "");
+    setFDescription(r.description || "");
+    setFSearchAliases((r.searchAliases || []).join(", "));
     setFCategory(r.category || "");
+    setFSubCategory(r.subCategory || "");
     setFUnit(r.unit || "");
+    setFSpecialtyId(r.specialtyId || "");
+    setFRequiresScheduling(!!r.requiresScheduling);
+    setFStatAvailable(!!r.statAvailable);
+    setFDefaultTatHours(r.defaultTatHours != null ? String(r.defaultTatHours) : "");
+    setFBasePrice(r.basePrice != null ? String(r.basePrice) : "");
+    setFCostPrice(r.costPrice != null ? String(r.costPrice) : "");
+    setFAllowDiscount(r.allowDiscount !== false);
+    setFMaxDiscountPercent(r.maxDiscountPercent != null ? String(r.maxDiscountPercent) : "");
+    setFEffectiveTill(r.effectiveTill ? r.effectiveTill.slice(0, 10) : "");
     setFOrderable(!!r.isOrderable);
     setFActive(!!r.isActive);
     setFChargeMasterCode(""); // backend supports chargeMasterCode only on create
+    setFType((r as any).type || "OTHER");
+    setFIsBillable((r as any).isBillable !== false);
+    setFConsentRequired(!!(r as any).consentRequired);
+    setFGenderRestriction((r as any).genderRestriction || "");
+    setFMinAgeYears((r as any).minAgeYears != null ? String((r as any).minAgeYears) : "");
+    setFMaxAgeYears((r as any).maxAgeYears != null ? String((r as any).maxAgeYears) : "");
     setEditorOpen(true);
   }
 
@@ -328,13 +499,34 @@ export default function ServiceItemsPage() {
       return;
     }
 
+    const aliases = fSearchAliases.split(",").map((s) => s.trim()).filter(Boolean);
     const payload: any = {
       code: fCode.trim(),
       name: fName.trim(),
+      shortName: fShortName.trim() || null,
+      displayName: fDisplayName.trim() || null,
+      description: fDescription.trim() || null,
+      searchAliases: aliases.length > 0 ? aliases : [],
       category: fCategory.trim(),
+      subCategory: fSubCategory.trim() || null,
       unit: fUnit.trim() ? fUnit.trim() : null,
+      specialtyId: fSpecialtyId || null,
+      requiresScheduling: !!fRequiresScheduling,
+      statAvailable: !!fStatAvailable,
+      defaultTatHours: fDefaultTatHours ? Number(fDefaultTatHours) : null,
+      basePrice: fBasePrice ? Number(fBasePrice) : null,
+      costPrice: fCostPrice ? Number(fCostPrice) : null,
+      allowDiscount: !!fAllowDiscount,
+      maxDiscountPercent: fMaxDiscountPercent ? Number(fMaxDiscountPercent) : null,
+      effectiveTill: fEffectiveTill || null,
       isOrderable: !!fOrderable,
       isActive: !!fActive,
+      type: fType || "OTHER",
+      isBillable: !!fIsBillable,
+      consentRequired: !!fConsentRequired,
+      genderRestriction: fGenderRestriction || null,
+      minAgeYears: fMinAgeYears ? Number(fMinAgeYears) : null,
+      maxAgeYears: fMaxAgeYears ? Number(fMaxAgeYears) : null,
     };
 
     if (!editing && fChargeMasterCode.trim()) payload.chargeMasterCode = fChargeMasterCode.trim();
@@ -482,6 +674,12 @@ export default function ServiceItemsPage() {
     return { total, active, orderable, missingMapping };
   }, [rows]);
 
+  const filteredRows = React.useMemo(() => {
+    let list = rows;
+    if (showFavoritesOnly) list = list.filter((item) => favorites.has(item.id));
+    return list;
+  }, [rows, showFavoritesOnly, favorites]);
+
   return (
     <AppShell title="Infrastructure - Service Items">
       <RequirePerm perm="INFRA_SERVICE_READ">
@@ -537,6 +735,8 @@ export default function ServiceItemsPage() {
               </Select>
             </div>
 
+            <PageInsightBanner insights={insights} loading={insightsLoading} onDismiss={dismissInsight} />
+
             <div className="grid gap-3 md:grid-cols-4">
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900/50 dark:bg-blue-900/10">
                 <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Total</div>
@@ -570,8 +770,17 @@ export default function ServiceItemsPage() {
 
               <div className="flex flex-wrap items-center gap-3">
                 <div className="text-xs text-zc-muted">
-                  Showing <span className="font-semibold tabular-nums text-zc-text">{rows.length}</span>
+                  Showing <span className="font-semibold tabular-nums text-zc-text">{filteredRows.length}</span>{showFavoritesOnly ? ` of ${rows.length}` : ""}
                 </div>
+                <Button
+                  variant={showFavoritesOnly ? "primary" : "outline"}
+                  size="sm"
+                  className="gap-1"
+                  onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+                >
+                  <Star className={cn("h-3.5 w-3.5", showFavoritesOnly && "fill-white")} />
+                  Favorites
+                </Button>
                 <div className="flex items-center gap-2 rounded-xl border border-zc-border bg-zc-card px-3 py-2">
                   <Switch checked={includeInactive} onCheckedChange={(v) => setIncludeInactive(!!v)} disabled={!branchId} />
                   <span className="text-sm text-zc-muted">Include inactive</span>
@@ -595,6 +804,7 @@ export default function ServiceItemsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[40px]">{"\u2605"}</TableHead>
                     <TableHead className="w-[160px]">Code</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead className="w-[160px]">Category</TableHead>
@@ -607,22 +817,30 @@ export default function ServiceItemsPage() {
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-8 text-center text-sm text-zc-muted">
+                      <TableCell colSpan={7} className="py-8 text-center text-sm text-zc-muted">
                         Loading...
                       </TableCell>
                     </TableRow>
-                  ) : rows.length === 0 ? (
+                  ) : filteredRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-sm text-zc-muted">
+                      <TableCell colSpan={7} className="py-10 text-center text-sm text-zc-muted">
                         No service items found.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    rows.map((r) => {
+                    filteredRows.map((r) => {
                       const m = activeMapping(r.mappings);
                       const mappedOk = !!m && !m.effectiveTo;
                       return (
                         <TableRow key={r.id}>
+                          <TableCell className="w-[40px]" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => toggleFavorite(r.id)}
+                              className={cn("h-6 w-6 flex items-center justify-center rounded", favorites.has(r.id) ? "text-amber-500" : "text-zc-muted/40 hover:text-amber-400")}
+                            >
+                              <Star className={cn("h-4 w-4", favorites.has(r.id) && "fill-amber-500")} />
+                            </button>
+                          </TableCell>
                           <TableCell className="font-mono text-xs">{r.code}</TableCell>
                           <TableCell>
                             <div className="font-medium">{r.name}</div>
@@ -644,6 +862,11 @@ export default function ServiceItemsPage() {
                               ) : (
                                 <Badge variant="secondary" className="w-fit">
                                   Not orderable
+                                </Badge>
+                              )}
+                              {(r as any).lifecycleStatus && (r as any).lifecycleStatus !== "PUBLISHED" && (
+                                <Badge variant={(r as any).lifecycleStatus === "DRAFT" ? "secondary" : (r as any).lifecycleStatus === "IN_REVIEW" ? "warning" : (r as any).lifecycleStatus === "APPROVED" ? "ok" : (r as any).lifecycleStatus === "DEPRECATED" ? "destructive" : "secondary"} className="text-[10px] w-fit">
+                                  {(r as any).lifecycleStatus}
                                 </Badge>
                               )}
                             </div>
@@ -695,6 +918,36 @@ export default function ServiceItemsPage() {
                                 <DropdownMenuItem onClick={() => void toggleActive(r)}>
                                   {r.isActive ? "Deactivate" : "Activate"}
                                 </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuLabel>Workflow</DropdownMenuLabel>
+                                {(r as any).lifecycleStatus === "DRAFT" && (
+                                  <DropdownMenuItem onClick={() => updateLifecycleStatus(r.id, "IN_REVIEW")}>
+                                    <Send className="mr-2 h-4 w-4" /> Submit for Review
+                                  </DropdownMenuItem>
+                                )}
+                                {(r as any).lifecycleStatus === "IN_REVIEW" && (
+                                  <>
+                                    <DropdownMenuItem onClick={() => updateLifecycleStatus(r.id, "APPROVED")}>
+                                      <CheckCircle className="mr-2 h-4 w-4 text-emerald-600" /> Approve
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => updateLifecycleStatus(r.id, "DRAFT")}>
+                                      <XCircle className="mr-2 h-4 w-4 text-red-600" /> Reject (Back to Draft)
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                                {(r as any).lifecycleStatus === "APPROVED" && (
+                                  <DropdownMenuItem onClick={() => updateLifecycleStatus(r.id, "PUBLISHED")}>
+                                    <CheckCircle className="mr-2 h-4 w-4 text-blue-600" /> Publish
+                                  </DropdownMenuItem>
+                                )}
+                                {(r as any).lifecycleStatus === "PUBLISHED" && (
+                                  <DropdownMenuItem onClick={() => updateLifecycleStatus(r.id, "DEPRECATED")}>
+                                    <XCircle className="mr-2 h-4 w-4 text-amber-600" /> Deprecate
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem onClick={() => openVersions(r)}>
+                                  <History className="mr-2 h-4 w-4" /> Version History
+                                </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </TableCell>
@@ -719,63 +972,196 @@ export default function ServiceItemsPage() {
               icon={<Wrench className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />}
             />
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <Label>Code</Label>
-                <Input className="mt-1 font-mono" value={fCode} onChange={(e) => setFCode(e.target.value)} placeholder="LAB-CBC" />
-              </div>
-              <div>
-                <Label>Name</Label>
-                <Input className="mt-1" value={fName} onChange={(e) => setFName(e.target.value)} placeholder="Complete Blood Count" />
-              </div>
-              <div>
-                <Label>Category</Label>
-                <Input
-                  className="mt-1"
-                  value={fCategory}
-                  onChange={(e) => setFCategory(e.target.value)}
-                  placeholder="LAB / RADIOLOGY / PROCEDURE"
-                />
-              </div>
-              <div>
-                <Label>Unit (optional)</Label>
-                <Input className="mt-1" value={fUnit} onChange={(e) => setFUnit(e.target.value)} placeholder="Per test / Per study" />
-              </div>
-
-              <div className="rounded-xl border border-zc-border bg-zc-card p-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium">Orderable</div>
-                    <div className="text-xs text-zc-muted">Visible in ordering UIs</div>
-                  </div>
-                  <Switch checked={fOrderable} onCheckedChange={(v) => setFOrderable(!!v)} />
+            <div className="max-h-[60vh] overflow-y-auto pr-1">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <Label>Code</Label>
+                  <Input className="mt-1 font-mono" value={fCode} onChange={(e) => setFCode(e.target.value)} placeholder="LAB-CBC" />
                 </div>
-              </div>
-
-              <div className="rounded-xl border border-zc-border bg-zc-card p-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium">Active</div>
-                    <div className="text-xs text-zc-muted">Hidden when inactive</div>
-                  </div>
-                  <Switch checked={fActive} onCheckedChange={(v) => setFActive(!!v)} />
+                <div>
+                  <Label>Name</Label>
+                  <Input className="mt-1" value={fName} onChange={(e) => setFName(e.target.value)} placeholder="Complete Blood Count" />
                 </div>
-              </div>
-
-              {!editing ? (
+                <div>
+                  <Label>Short Name</Label>
+                  <Input className="mt-1" value={fShortName} onChange={(e) => setFShortName(e.target.value)} placeholder="CBC" />
+                </div>
+                <div>
+                  <Label>Display Name</Label>
+                  <Input className="mt-1" value={fDisplayName} onChange={(e) => setFDisplayName(e.target.value)} placeholder="CBC - Complete Blood Count" />
+                </div>
                 <div className="md:col-span-2">
-                  <Label>Charge Master Code (optional at create)</Label>
+                  <Label>Description</Label>
+                  <Textarea className="mt-1" rows={2} value={fDescription} onChange={(e) => setFDescription(e.target.value)} placeholder="Detailed description..." />
+                </div>
+                <div>
+                  <Label>Category</Label>
                   <Input
-                    className="mt-1 font-mono"
-                    value={fChargeMasterCode}
-                    onChange={(e) => setFChargeMasterCode(e.target.value)}
-                    placeholder="CM-LAB-CBC"
+                    className="mt-1"
+                    value={fCategory}
+                    onChange={(e) => setFCategory(e.target.value)}
+                    placeholder="LAB / RADIOLOGY / PROCEDURE"
                   />
-                  <div className="mt-1 text-xs text-zc-muted">
-                    If skipped, backend creates a Fix-It task: <span className="font-mono">SERVICE_CHARGE_MAPPING_MISSING</span>.
+                </div>
+                <div>
+                  <Label>Sub-Category</Label>
+                  <Input className="mt-1" value={fSubCategory} onChange={(e) => setFSubCategory(e.target.value)} placeholder="e.g. Haematology" />
+                </div>
+                <div>
+                  <Label>Service Type</Label>
+                  <Select value={fType || "OTHER"} onValueChange={setFType}>
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {["DIAGNOSTIC", "PROCEDURE", "CONSULTATION", "NURSING", "ROOM_RENT", "CONSUMABLE", "PACKAGE", "LAB", "RADIOLOGY", "PHARMACY", "OTHER"].map((t) => (
+                        <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Unit (optional)</Label>
+                  <Input className="mt-1" value={fUnit} onChange={(e) => setFUnit(e.target.value)} placeholder="Per test / Per study" />
+                </div>
+                <div>
+                  <Label>Specialty</Label>
+                  <Select value={fSpecialtyId || "_none"} onValueChange={(v) => setFSpecialtyId(v === "_none" ? "" : v)}>
+                    <SelectTrigger className="mt-1"><SelectValue placeholder="None" /></SelectTrigger>
+                    <SelectContent className="max-h-[280px] overflow-y-auto">
+                      <SelectItem value="_none">None</SelectItem>
+                      {specialties.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="md:col-span-2">
+                  <Label>Search Aliases (comma-separated)</Label>
+                  <Input className="mt-1" value={fSearchAliases} onChange={(e) => setFSearchAliases(e.target.value)} placeholder="blood count, CBC, hemogram" />
+                </div>
+
+                {/* Pricing */}
+                <div>
+                  <Label>Base Price</Label>
+                  <Input className="mt-1" type="number" min="0" step="0.01" value={fBasePrice} onChange={(e) => setFBasePrice(e.target.value)} placeholder="0.00" />
+                </div>
+                <div>
+                  <Label>Cost Price</Label>
+                  <Input className="mt-1" type="number" min="0" step="0.01" value={fCostPrice} onChange={(e) => setFCostPrice(e.target.value)} placeholder="0.00" />
+                </div>
+                <div>
+                  <Label>Max Discount %</Label>
+                  <Input className="mt-1" type="number" min="0" max="100" step="0.01" value={fMaxDiscountPercent} onChange={(e) => setFMaxDiscountPercent(e.target.value)} placeholder="e.g. 10" />
+                </div>
+                <div>
+                  <Label>Default TAT (hours)</Label>
+                  <Input className="mt-1" type="number" min="0" value={fDefaultTatHours} onChange={(e) => setFDefaultTatHours(e.target.value)} placeholder="e.g. 24" />
+                </div>
+                <div>
+                  <Label>Effective Till</Label>
+                  <Input className="mt-1" type="date" value={fEffectiveTill} onChange={(e) => setFEffectiveTill(e.target.value)} />
+                </div>
+
+                {/* Restrictions */}
+                <div>
+                  <Label>Gender Restriction</Label>
+                  <Select value={fGenderRestriction || "_none"} onValueChange={(v) => setFGenderRestriction(v === "_none" ? "" : v)}>
+                    <SelectTrigger className="mt-1"><SelectValue placeholder="All genders" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">All Genders</SelectItem>
+                      <SelectItem value="MALE">Male Only</SelectItem>
+                      <SelectItem value="FEMALE">Female Only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Min Age (years)</Label>
+                  <Input className="mt-1" type="number" min={0} value={fMinAgeYears} onChange={(e) => setFMinAgeYears(e.target.value)} placeholder="e.g., 0" />
+                </div>
+                <div>
+                  <Label>Max Age (years)</Label>
+                  <Input className="mt-1" type="number" min={0} value={fMaxAgeYears} onChange={(e) => setFMaxAgeYears(e.target.value)} placeholder="e.g., 120" />
+                </div>
+
+                {/* Toggles */}
+                <div className="rounded-xl border border-zc-border bg-zc-card p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">Billable</div>
+                      <div className="text-xs text-zc-muted">Chargeable to patient</div>
+                    </div>
+                    <Switch checked={fIsBillable} onCheckedChange={(v) => setFIsBillable(!!v)} />
                   </div>
                 </div>
-              ) : null}
+                <div className="rounded-xl border border-zc-border bg-zc-card p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">Consent Required</div>
+                      <div className="text-xs text-zc-muted">Patient must give consent</div>
+                    </div>
+                    <Switch checked={fConsentRequired} onCheckedChange={(v) => setFConsentRequired(!!v)} />
+                  </div>
+                </div>
+                <div className="rounded-xl border border-zc-border bg-zc-card p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">Allow Discount</div>
+                      <div className="text-xs text-zc-muted">Discounts can be applied</div>
+                    </div>
+                    <Switch checked={fAllowDiscount} onCheckedChange={(v) => setFAllowDiscount(!!v)} />
+                  </div>
+                </div>
+                <div className="rounded-xl border border-zc-border bg-zc-card p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">Requires Scheduling</div>
+                      <div className="text-xs text-zc-muted">Needs appointment slot</div>
+                    </div>
+                    <Switch checked={fRequiresScheduling} onCheckedChange={(v) => setFRequiresScheduling(!!v)} />
+                  </div>
+                </div>
+                <div className="rounded-xl border border-zc-border bg-zc-card p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">STAT Available</div>
+                      <div className="text-xs text-zc-muted">Available as urgent/stat</div>
+                    </div>
+                    <Switch checked={fStatAvailable} onCheckedChange={(v) => setFStatAvailable(!!v)} />
+                  </div>
+                </div>
+                <div className="rounded-xl border border-zc-border bg-zc-card p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">Orderable</div>
+                      <div className="text-xs text-zc-muted">Visible in ordering UIs</div>
+                    </div>
+                    <Switch checked={fOrderable} onCheckedChange={(v) => setFOrderable(!!v)} />
+                  </div>
+                </div>
+                <div className="rounded-xl border border-zc-border bg-zc-card p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">Active</div>
+                      <div className="text-xs text-zc-muted">Hidden when inactive</div>
+                    </div>
+                    <Switch checked={fActive} onCheckedChange={(v) => setFActive(!!v)} />
+                  </div>
+                </div>
+
+                {!editing ? (
+                  <div className="md:col-span-2">
+                    <Label>Charge Master Code (optional at create)</Label>
+                    <Input
+                      className="mt-1 font-mono"
+                      value={fChargeMasterCode}
+                      onChange={(e) => setFChargeMasterCode(e.target.value)}
+                      placeholder="CM-LAB-CBC"
+                    />
+                    <div className="mt-1 text-xs text-zc-muted">
+                      If skipped, backend creates a Fix-It task: <span className="font-mono">SERVICE_CHARGE_MAPPING_MISSING</span>.
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             <DialogFooter className="mt-4">
@@ -944,8 +1330,142 @@ export default function ServiceItemsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* ----------------------------- Version History ----------------------------- */}
+        <VersionHistoryDialog
+          open={versionsOpen}
+          onOpenChange={setVersionsOpen}
+          item={versionsItem}
+          versions={versions}
+          loading={versionsLoading}
+        />
       </div>
           </RequirePerm>
 </AppShell>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            VersionHistoryDialog                            */
+/* -------------------------------------------------------------------------- */
+
+function VersionHistoryDialog({
+  open,
+  onOpenChange,
+  item,
+  versions,
+  loading: versionsLoading,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  item: any;
+  versions: ServiceItemVersionRow[];
+  loading: boolean;
+}) {
+  const [selectedVersion, setSelectedVersion] = React.useState<ServiceItemVersionRow | null>(null);
+
+  if (!item) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[900px] max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-3">
+            <History className="h-5 w-5 text-zc-accent" />
+            Version History
+          </DialogTitle>
+          <DialogDescription>
+            {item?.code} — {item?.name}
+          </DialogDescription>
+        </DialogHeader>
+
+        <Separator className="my-2" />
+
+        <div className="flex-1 overflow-y-auto grid gap-4">
+          {versionsLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="animate-pulse rounded-xl bg-zc-panel/30 h-16" />
+              ))}
+            </div>
+          ) : versions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-10 text-sm text-zc-muted">
+              <History className="h-6 w-6" />
+              <p>No version history available yet.</p>
+              <p className="text-xs">Versions are created when service items are modified through the approval workflow.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {versions
+                .sort((a, b) => b.version - a.version)
+                .map((v) => (
+                  <div
+                    key={v.id}
+                    className={cn(
+                      "rounded-xl border p-4 cursor-pointer transition-colors",
+                      selectedVersion?.id === v.id
+                        ? "border-indigo-400 bg-indigo-50/50 dark:border-indigo-600 dark:bg-indigo-900/20"
+                        : "border-zc-border hover:bg-zc-panel/20",
+                    )}
+                    onClick={() => setSelectedVersion(selectedVersion?.id === v.id ? null : v)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zc-panel/40 font-mono text-sm font-bold">
+                          v{v.version}
+                        </span>
+                        <div>
+                          <div className="text-sm font-semibold">Version {v.version}</div>
+                          <div className="text-xs text-zc-muted">
+                            {new Date(v.createdAt).toLocaleString()}
+                            {v.createdByUser?.name && ` by ${v.createdByUser.name}`}
+                          </div>
+                        </div>
+                      </div>
+                      <Badge
+                        variant={
+                          v.status === "PUBLISHED" ? "ok" :
+                          v.status === "APPROVED" ? "info" :
+                          v.status === "IN_REVIEW" ? "warning" :
+                          v.status === "DEPRECATED" ? "destructive" :
+                          "secondary"
+                        }
+                      >
+                        {v.status}
+                      </Badge>
+                    </div>
+
+                    {/* Snapshot details (expanded) */}
+                    {selectedVersion?.id === v.id && v.snapshot && (
+                      <div className="mt-3 pt-3 border-t border-zc-border">
+                        <div className="text-xs font-semibold text-zc-muted mb-2">Snapshot Details</div>
+                        <div className="grid gap-2 md:grid-cols-2 text-sm">
+                          {typeof v.snapshot === "object" && Object.entries(v.snapshot as Record<string, any>).slice(0, 20).map(([key, val]) => (
+                            <div key={key} className="flex items-start gap-2">
+                              <span className="text-xs text-zc-muted min-w-[120px] font-mono">{key}:</span>
+                              <span className="text-xs font-semibold break-all">
+                                {val === null ? "null" : typeof val === "object" ? JSON.stringify(val) : String(val)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        {typeof v.snapshot === "object" && Object.keys(v.snapshot as Record<string, any>).length > 20 && (
+                          <div className="mt-2 text-xs text-zc-muted">... and {Object.keys(v.snapshot as Record<string, any>).length - 20} more fields</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+
+        <Separator className="my-2" />
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

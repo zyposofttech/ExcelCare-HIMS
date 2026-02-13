@@ -82,6 +82,17 @@ import { TherapeuticSubstitutionService } from "./pharmacy/therapeutic-substitut
 import { DrugCategoryController } from "./pharmacy/drug-category.controller";
 import { DrugCategoryService } from "./pharmacy/drug-category.service";
 
+import { PayerController } from "./payers/payer.controller";
+import { PayerService } from "./payers/payer.service";
+import { PayerContractController } from "./payer-contracts/payer-contract.controller";
+import { PayerContractService } from "./payer-contracts/payer-contract.service";
+import { GovSchemeController } from "./gov-schemes/gov-scheme.controller";
+import { GovSchemeService } from "./gov-schemes/gov-scheme.service";
+import { PricingTierController } from "./pricing-tiers/pricing-tier.controller";
+import { PricingTierService } from "./pricing-tiers/pricing-tier.service";
+import { PriceHistoryController } from "./price-history/price-history.controller";
+import { PriceHistoryService } from "./price-history/price-history.service";
+
 @Module({
   imports: [
     AuthModule,
@@ -120,6 +131,11 @@ import { DrugCategoryService } from "./pharmacy/drug-category.service";
     DrugInteractionController,
     TherapeuticSubstitutionController,
     DrugCategoryController,
+    PayerController,
+    PayerContractController,
+    GovSchemeController,
+    PricingTierController,
+    PriceHistoryController,
   ],
   providers: [
     LocationService,
@@ -150,6 +166,11 @@ import { DrugCategoryService } from "./pharmacy/drug-category.service";
     DrugInteractionService,
     TherapeuticSubstitutionService,
     DrugCategoryService,
+    PayerService,
+    PayerContractService,
+    GovSchemeService,
+    PricingTierService,
+    PriceHistoryService,
   ],
 })
 export class InfrastructureModule {}

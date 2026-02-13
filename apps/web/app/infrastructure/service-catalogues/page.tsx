@@ -39,6 +39,8 @@ import { cn } from "@/lib/cn";
 
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import { useActiveBranchStore } from "@/lib/branch/active-branch";
+import { usePageInsights } from "@/lib/copilot/usePageInsights";
+import { PageInsightBanner } from "@/components/copilot/PageInsightBanner";
 import {
   AlertTriangle,
   ClipboardList,
@@ -226,7 +228,6 @@ export default function SuperAdminServiceCataloguesPage() {
   const isGlobalScope = branchCtx.scope === "GLOBAL";
   const effectiveBranchId = branchCtx.branchId ?? activeBranchId ?? "";
 
-
   const [activeTab, setActiveTab] = React.useState<"catalogues" | "guide">("catalogues");
   const [showFilters, setShowFilters] = React.useState(false);
 
@@ -236,6 +237,12 @@ export default function SuperAdminServiceCataloguesPage() {
 
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
   const [branchId, setBranchId] = React.useState<string>("");
+
+  // AI Copilot
+  const { insights, loading: insightsLoading, dismiss: dismissInsight } = usePageInsights({
+    module: "service-catalogues",
+    enabled: !!branchId,
+  });
 
   const [departments, setDepartments] = React.useState<DepartmentRow[]>([]);
   const [rows, setRows] = React.useState<ServiceCatalogueRow[]>([]);
@@ -518,6 +525,8 @@ setQ("");
             </CardHeader>
           </Card>
         ) : null}
+
+        <PageInsightBanner insights={insights} loading={insightsLoading} onDismiss={dismissInsight} />
 
         {/* Overview */}
         <Card className="overflow-hidden">
@@ -1235,6 +1244,10 @@ function CatalogueEditModal({
     departmentId: "",
     context: "",
     payerGroup: "",
+    filterCategory: "",
+    filterMinPrice: "",
+    filterMaxPrice: "",
+    visibility: "",
   });
 
   React.useEffect(() => {
@@ -1249,6 +1262,10 @@ function CatalogueEditModal({
         departmentId: editing.departmentId || "",
         context: editing.context || "",
         payerGroup: editing.payerGroup || "",
+        filterCategory: Array.isArray(editing.filterRules?.category) ? editing.filterRules.category.join(", ") : (editing.filterRules?.category || ""),
+        filterMinPrice: editing.filterRules?.minPrice != null ? String(editing.filterRules.minPrice) : "",
+        filterMaxPrice: editing.filterRules?.maxPrice != null ? String(editing.filterRules.maxPrice) : "",
+        visibility: (editing as any).visibility || "",
       });
     } else {
       setForm({
@@ -1260,6 +1277,10 @@ function CatalogueEditModal({
         departmentId: "",
         context: "",
         payerGroup: "",
+        filterCategory: "",
+        filterMinPrice: "",
+        filterMaxPrice: "",
+        visibility: "",
       });
     }
   }, [open, mode, editing]);
@@ -1280,6 +1301,18 @@ function CatalogueEditModal({
       departmentId: form.departmentId ? form.departmentId : null,
       context: form.context ? form.context : null,
       payerGroup: form.payerGroup?.trim() ? String(form.payerGroup).trim() : null,
+      filterRules: (() => {
+        const cats = (form.filterCategory || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+        const minP = form.filterMinPrice ? Number(form.filterMinPrice) : undefined;
+        const maxP = form.filterMaxPrice ? Number(form.filterMaxPrice) : undefined;
+        if (!cats.length && minP === undefined && maxP === undefined) return undefined;
+        return {
+          ...(cats.length ? { category: cats } : {}),
+          ...(minP !== undefined ? { minPrice: minP } : {}),
+          ...(maxP !== undefined ? { maxPrice: maxP } : {}),
+        };
+      })(),
+      visibility: form.visibility?.trim() || null,
     };
 
     if (!payload.code || !payload.name) {
@@ -1405,6 +1438,54 @@ function CatalogueEditModal({
               <Label>Description (optional)</Label>
               <Textarea value={form.description || ""} onChange={(e) => patch({ description: e.target.value })} placeholder="Explain where this catalogue is used…" />
             </div>
+
+            <div className="grid gap-2">
+              <Label>Visibility</Label>
+              <Select value={form.visibility || "_none"} onValueChange={(v) => patch({ visibility: v === "_none" ? "" : v })}>
+                <SelectTrigger><SelectValue placeholder="Default" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Default</SelectItem>
+                  <SelectItem value="PUBLIC">Public</SelectItem>
+                  <SelectItem value="INTERNAL">Internal</SelectItem>
+                  <SelectItem value="RESTRICTED">Restricted</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50/30 p-4 space-y-3">
+              <div className="text-sm font-semibold text-amber-700">Filter Rules (optional)</div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid gap-2">
+                  <Label>Category Filter</Label>
+                  <Input
+                    value={form.filterCategory || ""}
+                    onChange={(e) => patch({ filterCategory: e.target.value })}
+                    placeholder="e.g., LAB, RADIOLOGY"
+                  />
+                  <div className="text-xs text-zc-muted">Comma-separated categories</div>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Min Price</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={form.filterMinPrice || ""}
+                    onChange={(e) => patch({ filterMinPrice: e.target.value })}
+                    placeholder="e.g., 100"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Max Price</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={form.filterMaxPrice || ""}
+                    onChange={(e) => patch({ filterMaxPrice: e.target.value })}
+                    placeholder="e.g., 5000"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           <DialogFooter>
@@ -1452,7 +1533,9 @@ function CatalogueItemsDrawer({
 
   const [sortOrder, setSortOrder] = React.useState<string>("0");
   const [isVisible, setIsVisible] = React.useState<boolean>(true);
-  const [overridesText, setOverridesText] = React.useState<string>("");
+  const [overrideTatHours, setOverrideTatHours] = React.useState("");
+  const [overrideNotes, setOverrideNotes] = React.useState("");
+  const [overrideFasting, setOverrideFasting] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
@@ -1462,7 +1545,9 @@ function CatalogueItemsDrawer({
     setPickedSvc(null);
     setSortOrder("0");
     setIsVisible(true);
-    setOverridesText("");
+    setOverrideTatHours("");
+    setOverrideNotes("");
+    setOverrideFasting(false);
     void loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, catalogue?.id]);
@@ -1520,25 +1605,18 @@ function CatalogueItemsDrawer({
   }, [svcQ, open]);
 
   function parseOverrides(): any {
-    const t = (overridesText || "").trim();
-    if (!t) return undefined;
-    try {
-      return JSON.parse(t);
-    } catch {
-      throw new Error("Overrides must be valid JSON.");
-    }
+    const hasAny = overrideTatHours || overrideNotes || overrideFasting;
+    if (!hasAny) return undefined;
+    return {
+      ...(overrideTatHours ? { tatHours: Number(overrideTatHours) || 0 } : {}),
+      ...(overrideNotes ? { notes: overrideNotes.trim() } : {}),
+      ...(overrideFasting ? { fasting: true } : {}),
+    };
   }
 
   async function upsertItem() {
     if (!catalogue?.id || !pickedSvc?.id) return;
-    let overrides: any = undefined;
-
-    try {
-      overrides = parseOverrides();
-    } catch (e: any) {
-      toast({ title: "Invalid overrides JSON", description: e?.message || "Fix the JSON and try again." });
-      return;
-    }
+    const overrides = parseOverrides();
 
     const payload: any = {
       serviceItemId: pickedSvc.id,
@@ -1559,7 +1637,9 @@ function CatalogueItemsDrawer({
       setPickedSvc(null);
       setSortOrder("0");
       setIsVisible(true);
-      setOverridesText("");
+      setOverrideTatHours("");
+      setOverrideNotes("");
+      setOverrideFasting(false);
 
       await loadDetail();
       onSaved();
@@ -1730,7 +1810,7 @@ function CatalogueItemsDrawer({
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-4">
               <div className="grid gap-2">
                 <Label>Sort Order</Label>
                 <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} placeholder="0" />
@@ -1745,13 +1825,22 @@ function CatalogueItemsDrawer({
                   </div>
                 </div>
               </div>
-              <div className="grid gap-2 md:col-span-1">
-                <Label>Overrides (JSON, optional)</Label>
-                <Textarea
-                  value={overridesText}
-                  onChange={(e) => setOverridesText(e.target.value)}
-                  placeholder='e.g., {"tatHours": 24, "notes": "Fasting required"}'
-                  className="min-h-[42px]"
+              <div className="grid gap-2">
+                <Label>TAT (hours)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={overrideTatHours}
+                  onChange={(e) => setOverrideTatHours(e.target.value)}
+                  placeholder="e.g., 24"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Notes</Label>
+                <Input
+                  value={overrideNotes}
+                  onChange={(e) => setOverrideNotes(e.target.value)}
+                  placeholder="e.g., Fasting required"
                 />
               </div>
             </div>

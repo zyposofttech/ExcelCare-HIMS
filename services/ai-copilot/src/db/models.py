@@ -489,3 +489,150 @@ class DrugInteraction(Base):
     severity: Mapped[str] = mapped_column(String, default="MODERATE")
     createdAt: Mapped[datetime] = mapped_column(DateTime)
     updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Service Catalog & Financial Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class ServiceItem(Base):
+    __tablename__ = "ServiceItem"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    code: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String)
+    shortName: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    category: Mapped[str] = mapped_column(String)
+    subCategory: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    unit: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    specialtyId: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    basePrice: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    costPrice: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    allowDiscount: Mapped[bool] = mapped_column(Boolean, default=True)
+    isOrderable: Mapped[bool] = mapped_column(Boolean, default=True)
+    isActive: Mapped[bool] = mapped_column(Boolean, default=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class ChargeMasterItem(Base):
+    __tablename__ = "ChargeMasterItem"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    code: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String)
+    category: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    baseRate: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    isActive: Mapped[bool] = mapped_column(Boolean, default=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class Payer(Base):
+    __tablename__ = "Payer"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    code: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String)
+    kind: Mapped[str] = mapped_column(String, default="INSURANCE")
+    status: Mapped[str] = mapped_column(String, default="ACTIVE")
+    creditDays: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    creditLimit: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    requiresPreauth: Mapped[bool] = mapped_column(Boolean, default=False)
+    networkType: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    isActive: Mapped[bool] = mapped_column(Boolean, default=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class PayerContract(Base):
+    __tablename__ = "PayerContract"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    payerId: Mapped[str] = mapped_column(String, ForeignKey("Payer.id"))
+    code: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="DRAFT")
+    pricingStrategy: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    globalDiscountPercent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    startAt: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    endAt: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    autoRenewal: Mapped[bool] = mapped_column(Boolean, default=False)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class GovernmentSchemeConfig(Base):
+    __tablename__ = "GovernmentSchemeConfig"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    schemeType: Mapped[str] = mapped_column(String)
+    schemeName: Mapped[str] = mapped_column(String)
+    schemeCode: Mapped[str] = mapped_column(String)
+    preauthRequired: Mapped[bool] = mapped_column(Boolean, default=True)
+    isActive: Mapped[bool] = mapped_column(Boolean, default=True)
+    validTill: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class PatientPricingTier(Base):
+    __tablename__ = "PatientPricingTier"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    kind: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String)
+    code: Mapped[str] = mapped_column(String)
+    defaultDiscountPercent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    defaultMarkupPercent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    isActive: Mapped[bool] = mapped_column(Boolean, default=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class ServicePriceHistory(Base):
+    __tablename__ = "ServicePriceHistory"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    serviceItemId: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    chargeMasterItemId: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    oldPrice: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    newPrice: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    changePercent: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=0)
+    changeReason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    effectiveFrom: Mapped[datetime] = mapped_column(DateTime)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class TariffPlan(Base):
+    __tablename__ = "TariffPlan"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    code: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String)
+    isActive: Mapped[bool] = mapped_column(Boolean, default=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)
+
+
+class TaxCode(Base):
+    __tablename__ = "TaxCode"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
+    code: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String)
+    rate: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    isActive: Mapped[bool] = mapped_column(Boolean, default=True)
+    createdAt: Mapped[datetime] = mapped_column(DateTime)
+    updatedAt: Mapped[datetime] = mapped_column(DateTime)

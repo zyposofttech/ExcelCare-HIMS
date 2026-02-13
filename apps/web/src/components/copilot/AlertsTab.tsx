@@ -14,6 +14,26 @@ const AREA_ROUTES: Record<string, string> = {
   units: "/infrastructure/units",
   rooms: "/infrastructure/rooms",
   resources: "/infrastructure/resources",
+  // Billing Setup
+  "tax-codes": "/infrastructure/tax-codes",
+  "charge-master": "/infrastructure/charge-master",
+  "tariff-plans": "/infrastructure/tariff-plans",
+  payers: "/infrastructure/payers",
+  "payer-contracts": "/infrastructure/payer-contracts",
+  "gov-schemes": "/infrastructure/gov-schemes",
+  "pricing-tiers": "/infrastructure/pricing-tiers",
+  "price-history": "/infrastructure/price-history",
+  // Service Catalogue
+  "service-items": "/infrastructure/service-items",
+  "service-library": "/infrastructure/service-library",
+  "service-mapping": "/infrastructure/service-mapping",
+  "service-catalogues": "/infrastructure/service-catalogues",
+  "service-packages": "/infrastructure/service-packages",
+  "order-sets": "/infrastructure/order-sets",
+  "service-availability": "/infrastructure/service-availability",
+  "service-bulk-import": "/infrastructure/service-bulk-import",
+  // Pharmacy
+  pharmacy: "/infrastructure/pharmacy",
   infrastructure: "/infrastructure",
 };
 
@@ -60,10 +80,12 @@ function IssueRow({ issue }: { issue: HealthIssue }) {
             "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-bold",
             issue.severity === "BLOCKER"
               ? "bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400"
-              : "bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
+              : issue.severity === "INFO"
+                ? "bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
+                : "bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
           )}
         >
-          {issue.severity === "BLOCKER" ? "!" : "~"}
+          {issue.severity === "BLOCKER" ? "!" : issue.severity === "INFO" ? "i" : "~"}
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200 line-clamp-2">
@@ -103,6 +125,7 @@ export function AlertsTab() {
 
   const blockers = health.topIssues.filter((i) => i.severity === "BLOCKER");
   const warnings = health.topIssues.filter((i) => i.severity === "WARNING");
+  const infos = health.topIssues.filter((i) => i.severity === "INFO");
 
   return (
     <div className="h-full overflow-y-auto px-4 py-3 space-y-4">
@@ -172,7 +195,18 @@ export function AlertsTab() {
         </div>
       )}
 
-      {blockers.length === 0 && warnings.length === 0 && (
+      {infos.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">
+            Setup Required ({infos.length})
+          </h3>
+          {infos.map((issue) => (
+            <IssueRow key={issue.id} issue={issue} />
+          ))}
+        </div>
+      )}
+
+      {blockers.length === 0 && warnings.length === 0 && infos.length === 0 && (
         <div className="text-center py-6">
           <p className="text-sm text-green-600 dark:text-green-400 font-medium">
             No issues found

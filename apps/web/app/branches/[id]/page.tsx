@@ -1362,7 +1362,7 @@ function ToggleActiveConfirmDialog({
             Cancel
           </Button>
           <Button
-            variant={nextActive ? "success" : "secondary"}
+            variant={nextActive ? "success" : "warning"}
             onClick={onConfirm}
             disabled={busy || !canUpdate}
             title={!canUpdate ? deniedMessage : undefined}
@@ -1575,24 +1575,24 @@ export default function BranchDetailPage() {
               Refresh
             </Button>
 
-            {canFacilitySetup ? (
+            {/* {canFacilitySetup ? (
               <Button asChild className="gap-2">
                 <Link href={facilitySetupHref as any}>
                   <Wand2 className="h-4 w-4" />
                   Facility Setup
                 </Link>
               </Button>
-            ) : null}
+            ) : null} */}
 
             {canUpdate && !loading && row ? (
               <>
-                <Button variant="secondary" className="gap-2" onClick={() => setEditOpen(true)}>
+                <Button variant="info" className="gap-2" onClick={() => setEditOpen(true)}>
                   <Pencil className="h-4 w-4" />
                   Edit
                 </Button>
 
                 <Button
-                  variant={row.isActive !== false ? "secondary" : "success"}
+                  variant={row.isActive !== false ? "warning" : "success"}
                   className="gap-2"
                   onClick={() => {
                     setToggleAction(row.isActive !== false ? "deactivate" : "reactivate");

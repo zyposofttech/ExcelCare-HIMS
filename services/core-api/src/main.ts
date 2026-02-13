@@ -7,7 +7,9 @@ import { PrismaClient } from "@zypocare/db";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    rawBody: true, // Capture raw body bytes for webhook HMAC signature verification
+  });
   
   app.setGlobalPrefix(process.env.API_GLOBAL_PREFIX || "api");
   app.enableCors({

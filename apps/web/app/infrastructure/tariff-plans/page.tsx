@@ -39,6 +39,8 @@ import { cn } from "@/lib/cn";
 
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import { useActiveBranchStore } from "@/lib/branch/active-branch";
+import { usePageInsights } from "@/lib/copilot/usePageInsights";
+import { PageInsightBanner } from "@/components/copilot/PageInsightBanner";
 import {
   AlertTriangle,
   ExternalLink,
@@ -102,6 +104,46 @@ type TariffPlanStatus = "DRAFT" | "ACTIVE" | "RETIRED";
 
 type TariffPlanKind = "PRICE_LIST" | "PAYER_CONTRACT";
 
+type PricingStrategy = "GLOBAL_DISCOUNT" | "CATEGORY_WISE" | "SERVICE_SPECIFIC";
+
+type PayerRow = {
+  id: string;
+  code: string;
+  name: string;
+  shortName?: string | null;
+  kind: string;
+  status: string;
+  isActive: boolean;
+};
+
+type PayerContractRow = {
+  id: string;
+  branchId: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  status: string;
+  priority: number;
+  startAt?: string | null;
+  endAt?: string | null;
+  pricingStrategy?: PricingStrategy | null;
+  globalDiscountPercent?: number | string | null;
+  emergencyLoadingPercent?: number | string | null;
+  afterHoursLoadingPercent?: number | string | null;
+  weekendLoadingPercent?: number | string | null;
+  statLoadingPercent?: number | string | null;
+  copaymentRules?: any | null;
+  excludedServiceIds?: string[];
+  excludedCategories?: string[];
+  approvalStatus?: string | null;
+  gracePeriodDays?: number | null;
+  autoRenewal: boolean;
+  payerId: string;
+  payer?: { id: string; name: string; code: string; kind: string } | null;
+  tariffPlans?: { id: string; name: string }[];
+  _count?: { contractRates?: number };
+};
+
 type TariffPlanRow = {
   id: string;
   branchId: string;
@@ -115,8 +157,8 @@ type TariffPlanRow = {
 
   payerId?: string | null;
   contractId?: string | null;
-  payer?: any | null;
-  contract?: any | null;
+  payer?: PayerRow | null;
+  contract?: PayerContractRow | null;
 
   // optional fields (if present in DB)
   description?: string | null;
@@ -238,6 +280,40 @@ function planStatusBadge(status?: TariffPlanStatus | string | null) {
   return <Badge variant="secondary">{s || "—"}</Badge>;
 }
 
+function pricingStrategyLabel(s?: PricingStrategy | string | null): string {
+  switch (s) {
+    case "GLOBAL_DISCOUNT": return "Global Discount";
+    case "CATEGORY_WISE": return "Category-wise";
+    case "SERVICE_SPECIFIC": return "Service-specific";
+    default: return s || "—";
+  }
+}
+
+function pricingStrategyBadge(s?: PricingStrategy | string | null) {
+  if (!s) return null;
+  const variant = s === "GLOBAL_DISCOUNT" ? "ok" : s === "CATEGORY_WISE" ? "secondary" : "warning";
+  return <Badge variant={variant as any}>{pricingStrategyLabel(s)}</Badge>;
+}
+
+function approvalStatusBadge(status?: string | null) {
+  switch (status?.toUpperCase()) {
+    case "APPROVED": return <Badge variant="ok">APPROVED</Badge>;
+    case "PENDING": return <Badge variant="secondary" className="border-amber-500/30 bg-amber-500/15 text-amber-700 dark:text-amber-200">PENDING</Badge>;
+    case "REJECTED": return <Badge variant="destructive" as any>REJECTED</Badge>;
+    default: return null;
+  }
+}
+
+function kindBadge(kind?: TariffPlanKind | string | null) {
+  if (kind === "PAYER_CONTRACT") return <Badge variant="secondary" className="border-blue-500/30 bg-blue-500/15 text-blue-700 dark:text-blue-300">Payer Contract</Badge>;
+  return <Badge variant="secondary">Price List</Badge>;
+}
+
+function fmtPercent(v?: number | string | null): string {
+  if (v === null || v === undefined) return "—";
+  return `${Number(v)}%`;
+}
+
 function unitLabel(u?: ServiceChargeUnit | null) {
   const x = u || "PER_UNIT";
   switch (x) {
@@ -346,6 +422,12 @@ export default function SuperAdminTariffPlansPage() {
   const [branches, setBranches] = React.useState<BranchRow[]>([]);
   const [branchId, setBranchId] = React.useState<string>("");
 
+  // AI Copilot
+  const { insights, loading: insightsLoading, dismiss: dismissInsight } = usePageInsights({
+    module: "tariff-plans",
+    enabled: !!branchId,
+  });
+
   const [plans, setPlans] = React.useState<TariffPlanRow[]>([]);
   const [selectedPlanId, setSelectedPlanId] = React.useState<string>("");
   const [selectedPlan, setSelectedPlan] = React.useState<TariffPlanRow | null>(null);
@@ -359,6 +441,11 @@ export default function SuperAdminTariffPlansPage() {
   // reference lists for rate editor
   const [chargeMaster, setChargeMaster] = React.useState<ChargeMasterRow[]>([]);
   const [taxCodes, setTaxCodes] = React.useState<TaxCodeRow[]>([]);
+
+  // Payer / contract reference data
+  const [payers, setPayers] = React.useState<PayerRow[]>([]);
+  const [selectedContract, setSelectedContract] = React.useState<PayerContractRow | null>(null);
+  const [contractLoading, setContractLoading] = React.useState(false);
 
   // filters
   const [q, setQ] = React.useState("");
@@ -413,6 +500,32 @@ setBranchId(next || "");
     }
   }
 
+  async function loadPayersForBranch(bid: string) {
+    try {
+      const qs = buildQS({ branchId: bid });
+      const res = await apiTry<any>(`/api/infrastructure/payers?${qs}`, `/api/infra/payers?${qs}`);
+      const list: PayerRow[] = Array.isArray(res) ? res : (res?.rows || []);
+      setPayers(list);
+    } catch {
+      setPayers([]);
+    }
+  }
+
+  async function loadContractDetail(contractId: string) {
+    setContractLoading(true);
+    try {
+      const res = await apiTry<PayerContractRow>(
+        `/api/infrastructure/payer-contracts/${encodeURIComponent(contractId)}`,
+        `/api/infra/payer-contracts/${encodeURIComponent(contractId)}`
+      );
+      setSelectedContract(res);
+    } catch {
+      setSelectedContract(null);
+    } finally {
+      setContractLoading(false);
+    }
+  }
+
   async function loadPlans(showToast = false) {
     if (!branchId) return;
     setErr(null);
@@ -422,6 +535,7 @@ setBranchId(next || "");
         branchId,
         q: q.trim() || undefined,
         includeInactive: includeInactive ? "true" : undefined,
+        includeRefs: "true",
       });
 
       // billing module primary, infra fallback
@@ -490,7 +604,7 @@ setBranchId(next || "");
         setLoading(false);
         return;
       }
-      await Promise.all([loadTaxCodesForBranch(bid), loadChargeMasterForBranch(bid)]);
+      await Promise.all([loadTaxCodesForBranch(bid), loadChargeMasterForBranch(bid), loadPayersForBranch(bid)]);
       await loadPlans(false);
 
       if (showToast) toast({ title: "Ready", description: "Tariff plans and rates are up to date." });
@@ -517,6 +631,7 @@ setBranchId(next || "");
 
     void loadTaxCodesForBranch(branchId);
     void loadChargeMasterForBranch(branchId);
+    void loadPayersForBranch(branchId);
     void loadPlans(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId, includeInactive]);
@@ -537,6 +652,11 @@ setBranchId(next || "");
     const p = plans.find((x) => x.id === selectedPlanId) || null;
     setSelectedPlan(p);
     if (p) void loadRatesForPlan(p.id, false);
+    if (p?.contractId) {
+      void loadContractDetail(p.contractId);
+    } else {
+      setSelectedContract(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPlanId]);
 
@@ -554,7 +674,7 @@ setQ("");
 
     setLoading(true);
     try {
-      await Promise.all([loadTaxCodesForBranch(nextId), loadChargeMasterForBranch(nextId)]);
+      await Promise.all([loadTaxCodesForBranch(nextId), loadChargeMasterForBranch(nextId), loadPayersForBranch(nextId)]);
       await loadPlans(false);
       toast({ title: "Branch scope changed", description: "Loaded tariff plans for selected branch." });
     } catch (e: any) {
@@ -579,7 +699,10 @@ setQ("");
     const covered = activeCM.filter((c) => rateItemIds.has(c.id)).length;
     const coveragePct = activeCM.length ? Math.round((covered / activeCM.length) * 100) : 0;
 
-    return { total, active, inactive, defaults, rateCount, activeRates, covered, activeCM: activeCM.length, coveragePct };
+    const withPayer = plans.filter((p) => p.payerId).length;
+    const withContract = plans.filter((p) => p.contractId).length;
+
+    return { total, active, inactive, defaults, rateCount, activeRates, covered, activeCM: activeCM.length, coveragePct, withPayer, withContract };
   }, [plans, rates, chargeMaster]);
 
   const filteredRates = React.useMemo(() => {
@@ -864,6 +987,8 @@ setQ("");
           </Card>
         ) : null}
 
+        <PageInsightBanner insights={insights} loading={insightsLoading} onDismiss={dismissInsight} />
+
         {/* Overview */}
         <Card className="overflow-hidden">
           <CardHeader className="pb-4">
@@ -891,7 +1016,7 @@ setQ("");
               </Select>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-6">
+            <div className="grid gap-3 md:grid-cols-4 lg:grid-cols-8">
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-900/50 dark:bg-blue-900/10">
                 <div className="text-xs font-medium text-blue-600 dark:text-blue-400">Plans</div>
                 <div className="mt-1 text-lg font-bold text-blue-700 dark:text-blue-300">{stats.total}</div>
@@ -920,6 +1045,14 @@ setQ("");
                     ({stats.covered}/{stats.activeCM})
                   </span>
                 </div>
+              </div>
+              <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3 dark:border-violet-900/50 dark:bg-violet-900/10">
+                <div className="text-xs font-medium text-violet-600 dark:text-violet-400">With Payer</div>
+                <div className="mt-1 text-lg font-bold text-violet-700 dark:text-violet-300">{stats.withPayer}</div>
+              </div>
+              <div className="rounded-xl border border-cyan-200 bg-cyan-50/50 p-3 dark:border-cyan-900/50 dark:bg-cyan-900/10">
+                <div className="text-xs font-medium text-cyan-600 dark:text-cyan-400">With Contract</div>
+                <div className="mt-1 text-lg font-bold text-cyan-700 dark:text-cyan-300">{stats.withContract}</div>
               </div>
             </div>
 
@@ -1022,9 +1155,10 @@ setQ("");
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead className="w-[180px]">Code</TableHead>
-                            <TableHead>Name</TableHead>
-                            <TableHead className="w-[130px]">Status</TableHead>
+                            <TableHead className="w-[150px]">Code</TableHead>
+                            <TableHead>Name / Payer</TableHead>
+                            <TableHead className="w-[100px]">Kind</TableHead>
+                            <TableHead className="w-[100px]">Status</TableHead>
                             <TableHead className="w-[56px]" />
                           </TableRow>
                         </TableHeader>
@@ -1032,14 +1166,14 @@ setQ("");
                           {loading ? (
                             Array.from({ length: 10 }).map((_, i) => (
                               <TableRow key={i}>
-                                <TableCell colSpan={4}>
+                                <TableCell colSpan={5}>
                                   <Skeleton className="h-6 w-full" />
                                 </TableCell>
                               </TableRow>
                             ))
                           ) : plans.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={4}>
+                              <TableCell colSpan={5}>
                                 <div className="flex items-center justify-center gap-3 py-10 text-sm text-zc-muted">
                                   <Layers className="h-4 w-4" />
                                   No plans found. Create one to begin.
@@ -1061,25 +1195,27 @@ setQ("");
                                     <div className="flex flex-col gap-1">
                                       <span className="font-semibold text-zc-text">{p.code}</span>
                                       <span className="text-[11px] text-zc-muted">
-                                        {p.isDefault ? "Default plan" : "—"}
+                                        {p.isDefault ? "Default plan" : rateCount != null ? `${rateCount} rates` : "—"}
                                       </span>
                                     </div>
                                   </TableCell>
                                   <TableCell>
                                     <div className="flex flex-col gap-1">
                                       <span className="font-semibold text-zc-text">{p.name}</span>
-                                      <span className="text-xs text-zc-muted">
-                                        {rateCount != null ? (
-                                          <>
-                                            Rates: <span className="font-semibold text-zc-text">{rateCount}</span>
-                                            <span className="mx-2">•</span>
-                                          </>
-                                        ) : null}
-                                        From: <span className="font-semibold text-zc-text">{fmtDate(p.effectiveFrom || null)}</span>
-                                        <span className="mx-2">•</span>
-                                        To: <span className="font-semibold text-zc-text">{fmtDate(p.effectiveTo || null)}</span>
-                                      </span>
+                                      {p.payer ? (
+                                        <span className="text-xs text-zc-muted">
+                                          Payer: <span className="font-semibold text-blue-600 dark:text-blue-400">{p.payer.name}</span>
+                                        </span>
+                                      ) : (
+                                        <span className="text-xs text-zc-muted">Self-pay / No payer</span>
+                                      )}
+                                      {p.contract?.pricingStrategy ? (
+                                        <div className="mt-0.5">{pricingStrategyBadge(p.contract.pricingStrategy)}</div>
+                                      ) : null}
                                     </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    {kindBadge(p.kind)}
                                   </TableCell>
                                   <TableCell>
                                     <div className="flex flex-col gap-1">
@@ -1157,6 +1293,8 @@ setQ("");
                     ) : (
                       <PlanDetail
                         plan={selectedPlan}
+                        contract={selectedContract}
+                        contractLoading={contractLoading}
                         busy={busy}
                         ratesLoading={ratesLoading}
                         ratesErr={ratesErr}
@@ -1234,6 +1372,7 @@ setQ("");
         mode={planEditMode}
         branchId={branchId}
         editing={planEditing}
+        payers={payers}
         onSaved={async () => {
           toast({ title: "Saved", description: "Tariff plan saved successfully." });
           await loadPlans(false);
@@ -1262,14 +1401,18 @@ setQ("");
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Eye className="h-4 w-4 text-zc-accent" />
-              Plan Policy JSON (optional)
+              {selectedContract ? "Linked Contract Details" : "Plan Policy"}
             </DialogTitle>
-            <DialogDescription>Optional JSON for plan-level rules (payer contracts, caps, discounts). Wire later if needed.</DialogDescription>
+            <DialogDescription>
+              {selectedContract
+                ? `Contract: ${selectedContract.code} — ${selectedContract.name}`
+                : "No contract linked to this plan. Showing raw plan data."}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="mt-3 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
             <pre className="max-h-[60vh] overflow-auto text-xs leading-relaxed text-zc-text">
-              {JSON.stringify(policyPayload ?? {}, null, 2)}
+              {JSON.stringify(selectedContract ?? policyPayload ?? {}, null, 2)}
             </pre>
           </div>
 
@@ -1291,6 +1434,8 @@ setQ("");
 
 function PlanDetail(props: {
   plan: TariffPlanRow;
+  contract: PayerContractRow | null;
+  contractLoading: boolean;
   busy: boolean;
 
   ratesLoading: boolean;
@@ -1312,6 +1457,8 @@ function PlanDetail(props: {
 }) {
   const {
     plan,
+    contract,
+    contractLoading,
     busy,
     ratesLoading,
     ratesErr,
@@ -1337,17 +1484,34 @@ function PlanDetail(props: {
               <CardTitle className="text-base">
                 <span className="font-mono">{plan.code}</span> • {plan.name}
               </CardTitle>
-              <CardDescription className="mt-1">
+              <CardDescription className="mt-1 flex flex-wrap items-center gap-1">
                 {planStatusBadge(plan.status)}{" "}
+                {kindBadge(plan.kind)}
                 {plan.isDefault ? (
                   <>
-                    <span className="mx-2 text-zc-muted">•</span>
+                    <span className="mx-1 text-zc-muted">•</span>
                     <Badge variant="secondary">DEFAULT</Badge>
                   </>
                 ) : null}
-                <span className="mx-2 text-zc-muted">•</span>
+                {plan.payer ? (
+                  <>
+                    <span className="mx-1 text-zc-muted">|</span>
+                    <Badge variant="secondary" className="border-blue-500/30 bg-blue-500/15 text-blue-700 dark:text-blue-400">
+                      {plan.payer.name}
+                    </Badge>
+                  </>
+                ) : null}
+                {plan.contract ? (
+                  <>
+                    <span className="mx-1 text-zc-muted">|</span>
+                    <span className="text-xs text-zc-muted">
+                      Contract: <span className="font-semibold text-zc-text">{plan.contract.name}</span>
+                    </span>
+                  </>
+                ) : null}
+                <span className="mx-1 text-zc-muted">•</span>
                 From: <span className="font-semibold text-zc-text">{fmtDate(plan.effectiveFrom || null)}</span>
-                <span className="mx-2 text-zc-muted">•</span>
+                <span className="mx-1 text-zc-muted">•</span>
                 To: <span className="font-semibold text-zc-text">{fmtDate(plan.effectiveTo || null)}</span>
               </CardDescription>
             </div>
@@ -1398,6 +1562,107 @@ function PlanDetail(props: {
               </div>
             </div>
           </div>
+
+          {/* ---- Contract Details (when linked) ---- */}
+          {contract ? (
+            <div className="grid gap-3">
+              {/* Pricing Strategy + Approval + Priority */}
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                  <div className="text-xs font-semibold text-zc-muted">Pricing Strategy</div>
+                  <div className="mt-2">{pricingStrategyBadge(contract.pricingStrategy)}</div>
+                  {contract.pricingStrategy === "GLOBAL_DISCOUNT" && contract.globalDiscountPercent != null ? (
+                    <div className="mt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                      {fmtPercent(contract.globalDiscountPercent)} discount
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                  <div className="text-xs font-semibold text-zc-muted">Approval</div>
+                  <div className="mt-2">{approvalStatusBadge(contract.approvalStatus) || <span className="text-sm text-zc-muted">Not set</span>}</div>
+                </div>
+
+                <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                  <div className="text-xs font-semibold text-zc-muted">Priority</div>
+                  <div className="mt-2 text-lg font-bold text-zc-text">{contract.priority}</div>
+                  <div className="text-xs text-zc-muted">Lower = higher priority</div>
+                </div>
+              </div>
+
+              {/* Special Conditions */}
+              <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                <div className="text-xs font-semibold text-zc-muted mb-3">Special Conditions (Loading %)</div>
+                <div className="grid gap-2 md:grid-cols-4">
+                  <div>
+                    <div className="text-xs text-zc-muted">Emergency</div>
+                    <div className="text-sm font-semibold text-zc-text">{fmtPercent(contract.emergencyLoadingPercent)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-zc-muted">After Hours</div>
+                    <div className="text-sm font-semibold text-zc-text">{fmtPercent(contract.afterHoursLoadingPercent)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-zc-muted">Weekend</div>
+                    <div className="text-sm font-semibold text-zc-text">{fmtPercent(contract.weekendLoadingPercent)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-zc-muted">STAT</div>
+                    <div className="text-sm font-semibold text-zc-text">{fmtPercent(contract.statLoadingPercent)}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Exclusions */}
+              {(contract.excludedCategories?.length || contract.excludedServiceIds?.length) ? (
+                <div className="rounded-xl border border-amber-200/50 bg-amber-50/30 dark:border-amber-900/50 dark:bg-amber-900/10 p-4">
+                  <div className="text-xs font-semibold text-amber-700 dark:text-amber-300 mb-2">Exclusions</div>
+                  {contract.excludedCategories?.length ? (
+                    <div className="flex flex-wrap gap-1 mb-1">
+                      {contract.excludedCategories.map((cat, i) => (
+                        <Badge key={i} variant="secondary">{cat}</Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                  {contract.excludedServiceIds?.length ? (
+                    <div className="text-xs text-zc-muted">
+                      {contract.excludedServiceIds.length} service(s) excluded
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Co-payment Rules */}
+              {contract.copaymentRules ? (
+                <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                  <div className="text-xs font-semibold text-zc-muted mb-2">Co-payment Rules</div>
+                  <pre className="max-h-[200px] overflow-auto text-xs leading-relaxed text-zc-text bg-zc-panel/20 rounded-lg p-3">
+                    {JSON.stringify(contract.copaymentRules, null, 2)}
+                  </pre>
+                </div>
+              ) : null}
+
+              {/* Grace Period + Auto-renewal */}
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                  <div className="text-xs font-semibold text-zc-muted">Grace Period</div>
+                  <div className="mt-1 text-sm font-semibold text-zc-text">
+                    {contract.gracePeriodDays != null ? `${contract.gracePeriodDays} days` : "—"}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                  <div className="text-xs font-semibold text-zc-muted">Auto-renewal</div>
+                  <div className="mt-1 text-sm font-semibold text-zc-text">
+                    {contract.autoRenewal ? "Yes" : "No"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : contractLoading ? (
+            <div className="flex items-center gap-2 text-sm text-zc-muted py-2">
+              <RefreshCw className="h-4 w-4 animate-spin" /> Loading contract details…
+            </div>
+          ) : null}
 
           <Separator />
 
@@ -1579,6 +1844,7 @@ function TariffPlanEditModal({
   mode,
   branchId,
   editing,
+  payers,
   onSaved,
 }: {
   open: boolean;
@@ -1586,19 +1852,50 @@ function TariffPlanEditModal({
   mode: "create" | "edit";
   branchId: string;
   editing: TariffPlanRow | null;
+  payers: PayerRow[];
   onSaved: () => void;
 }) {
   const { toast } = useToast();
   const [saving, setSaving] = React.useState(false);
 
+  // Contracts for selected payer (cascading dropdown)
+  const [contracts, setContracts] = React.useState<PayerContractRow[]>([]);
+  const [contractsLoading, setContractsLoading] = React.useState(false);
+
   const [form, setForm] = React.useState<any>({
     code: "",
     name: "",
     description: "",
+    kind: "PRICE_LIST" as TariffPlanKind,
+    payerId: "",
+    contractId: "",
+    currency: "INR",
+    isTaxInclusive: false,
     isActive: true,
     isDefault: false,
     effectiveFrom: "",
   });
+
+  async function loadContractsForPayer(payerId: string) {
+    if (!payerId || !branchId) {
+      setContracts([]);
+      return;
+    }
+    setContractsLoading(true);
+    try {
+      const qs = buildQS({ branchId, payerId });
+      const res = await apiTry<any>(
+        `/api/infrastructure/payer-contracts?${qs}`,
+        `/api/infra/payer-contracts?${qs}`
+      );
+      const list: PayerContractRow[] = Array.isArray(res) ? res : (res?.rows || []);
+      setContracts(list);
+    } catch {
+      setContracts([]);
+    } finally {
+      setContractsLoading(false);
+    }
+  }
 
   React.useEffect(() => {
     if (!open) return;
@@ -1607,129 +1904,179 @@ function TariffPlanEditModal({
         code: editing.code || "",
         name: editing.name || "",
         description: editing.description || "",
+        kind: editing.kind || "PRICE_LIST",
+        payerId: editing.payerId || "",
+        contractId: editing.contractId || "",
+        currency: editing.currency || "INR",
+        isTaxInclusive: Boolean(editing.isTaxInclusive),
         isActive: Boolean(editing.isActive),
         isDefault: Boolean(editing.isDefault),
         effectiveFrom: editing.effectiveFrom ? new Date(editing.effectiveFrom).toISOString().slice(0, 10) : "",
       });
+      if (editing.payerId) {
+        void loadContractsForPayer(editing.payerId);
+      } else {
+        setContracts([]);
+      }
     } else {
       setForm({
         code: "",
         name: "",
         description: "",
+        kind: "PRICE_LIST",
+        payerId: "",
+        contractId: "",
+        currency: "INR",
+        isTaxInclusive: false,
         isActive: true,
         isDefault: false,
         effectiveFrom: new Date().toISOString().slice(0, 10),
       });
+      setContracts([]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode, editing]);
 
   function patch(p: Partial<any>) {
     setForm((prev: any) => ({ ...prev, ...p }));
   }
 
-  async function save() {
-  if (!branchId) return;
-
-  const code = String(form.code || "").trim();
-  const name = String(form.name || "").trim();
-  if (!code || !name) {
-    toast({ title: "Missing fields", description: "Code and Name are required." });
-    return;
+  function onPayerChange(nextPayerId: string) {
+    patch({ payerId: nextPayerId, contractId: "" });
+    if (nextPayerId) {
+      void loadContractsForPayer(nextPayerId);
+    } else {
+      setContracts([]);
+    }
   }
 
-  // Use Effective From only for activation; plan itself is created as DRAFT
-  const effectiveFromIso = form.effectiveFrom
-    ? new Date(String(form.effectiveFrom) + "T00:00:00.000Z").toISOString()
-    : new Date().toISOString();
+  const selectedContractObj = React.useMemo(() => {
+    const cId = String(form.contractId || "").trim();
+    return cId ? contracts.find((c) => c.id === cId) || null : null;
+  }, [form.contractId, contracts]);
 
-  setSaving(true);
-  try {
-    const setDefault = async (planId: string, isDefault: boolean) => {
-      await apiTry(
-        `/api/billing/tariff-plans/${encodeURIComponent(planId)}/default`,
-        `/api/infrastructure/tariff-plans/${encodeURIComponent(planId)}/default`,
-        {
-          method: "POST",
-          body: JSON.stringify({ isDefault }),
-        },
-      );
-    };
+  async function save() {
+    if (!branchId) return;
 
-    if (mode === "create") {
-      const created = await apiTry<any>(`/api/billing/tariff-plans`, `/api/infrastructure/tariff-plans`, {
-        method: "POST",
-        body: JSON.stringify({
-          branchId,
-          code,
-          name,
-          kind: "PRICE_LIST",
-          currency: "INR",
-          isTaxInclusive: false,
-        }),
-      });
+    const code = String(form.code || "").trim();
+    const name = String(form.name || "").trim();
+    if (!code || !name) {
+      toast({ title: "Missing fields", description: "Code and Name are required." });
+      return;
+    }
 
-      const newId: string | undefined = created?.id;
-
-      if (Boolean(form.isActive) && newId) {
-        await apiTry(
-          `/api/billing/tariff-plans/${encodeURIComponent(newId)}/activate`,
-          `/api/infrastructure/tariff-plans/${encodeURIComponent(newId)}/activate`,
-          {
-            method: "POST",
-            body: JSON.stringify({ effectiveFrom: effectiveFromIso }),
-          },
-        );
+    // Validate payer contract plan
+    if (form.kind === "PAYER_CONTRACT") {
+      if (!form.payerId) {
+        toast({ title: "Missing payer", description: "Payer is required for Payer Contract plans.", variant: "destructive" as any });
+        return;
       }
-
-      // ✅ Wire isDefault end-to-end
-      if (Boolean(form.isDefault) && newId) {
-        await setDefault(newId, true);
-      }
-    } else {
-      if (!editing?.id) throw new Error("Invalid editing row");
-
-      // Backend allows updating only while DRAFT
-      await apiTry(
-        `/api/billing/tariff-plans/${encodeURIComponent(editing.id)}`,
-        `/api/infrastructure/tariff-plans/${encodeURIComponent(editing.id)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            name,
-            currency: "INR",
-            isTaxInclusive: false,
-          }),
-        },
-      );
-
-      // Optional activation after edit
-      if (Boolean(form.isActive) && editing.status !== "ACTIVE") {
-        await apiTry(
-          `/api/billing/tariff-plans/${encodeURIComponent(editing.id)}/activate`,
-          `/api/infrastructure/tariff-plans/${encodeURIComponent(editing.id)}/activate`,
-          {
-            method: "POST",
-            body: JSON.stringify({ effectiveFrom: effectiveFromIso }),
-          },
-        );
-      }
-
-      // ✅ Wire isDefault end-to-end (supports both setting and clearing)
-      const nextDefault = Boolean(form.isDefault);
-      const prevDefault = Boolean(editing.isDefault);
-      if (nextDefault !== prevDefault) {
-        await setDefault(editing.id, nextDefault);
+      if (!form.contractId) {
+        toast({ title: "Missing contract", description: "Contract is required for Payer Contract plans.", variant: "destructive" as any });
+        return;
       }
     }
 
-    onOpenChange(false);
-    onSaved();
-  } catch (e: any) {
-    toast({ title: "Save failed", description: e?.message || "Request failed", variant: "destructive" as any });
-  } finally {
-    setSaving(false);
+    // Use Effective From only for activation; plan itself is created as DRAFT
+    const effectiveFromIso = form.effectiveFrom
+      ? new Date(String(form.effectiveFrom) + "T00:00:00.000Z").toISOString()
+      : new Date().toISOString();
+
+    setSaving(true);
+    try {
+      const setDefault = async (planId: string, isDefault: boolean) => {
+        await apiTry(
+          `/api/billing/tariff-plans/${encodeURIComponent(planId)}/default`,
+          `/api/infrastructure/tariff-plans/${encodeURIComponent(planId)}/default`,
+          {
+            method: "POST",
+            body: JSON.stringify({ isDefault }),
+          },
+        );
+      };
+
+      if (mode === "create") {
+        const created = await apiTry<any>(`/api/billing/tariff-plans`, `/api/infrastructure/tariff-plans`, {
+          method: "POST",
+          body: JSON.stringify({
+            branchId,
+            code,
+            name,
+            description: form.description || null,
+            kind: form.kind || "PRICE_LIST",
+            payerId: form.payerId || null,
+            contractId: form.contractId || null,
+            currency: form.currency || "INR",
+            isTaxInclusive: Boolean(form.isTaxInclusive),
+          }),
+        });
+
+        const newId: string | undefined = created?.id;
+
+        if (Boolean(form.isActive) && newId) {
+          await apiTry(
+            `/api/billing/tariff-plans/${encodeURIComponent(newId)}/activate`,
+            `/api/infrastructure/tariff-plans/${encodeURIComponent(newId)}/activate`,
+            {
+              method: "POST",
+              body: JSON.stringify({ effectiveFrom: effectiveFromIso }),
+            },
+          );
+        }
+
+        // ✅ Wire isDefault end-to-end
+        if (Boolean(form.isDefault) && newId) {
+          await setDefault(newId, true);
+        }
+      } else {
+        if (!editing?.id) throw new Error("Invalid editing row");
+
+        // Use infrastructure endpoint first (accepts more fields)
+        await apiTry(
+          `/api/infrastructure/tariff-plans/${encodeURIComponent(editing.id)}`,
+          `/api/billing/tariff-plans/${encodeURIComponent(editing.id)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              name,
+              description: form.description || null,
+              kind: form.kind || undefined,
+              payerId: form.payerId || null,
+              contractId: form.contractId || null,
+              currency: form.currency || "INR",
+              isTaxInclusive: Boolean(form.isTaxInclusive),
+            }),
+          },
+        );
+
+        // Optional activation after edit
+        if (Boolean(form.isActive) && editing.status !== "ACTIVE") {
+          await apiTry(
+            `/api/billing/tariff-plans/${encodeURIComponent(editing.id)}/activate`,
+            `/api/infrastructure/tariff-plans/${encodeURIComponent(editing.id)}/activate`,
+            {
+              method: "POST",
+              body: JSON.stringify({ effectiveFrom: effectiveFromIso }),
+            },
+          );
+        }
+
+        // ✅ Wire isDefault end-to-end (supports both setting and clearing)
+        const nextDefault = Boolean(form.isDefault);
+        const prevDefault = Boolean(editing.isDefault);
+        if (nextDefault !== prevDefault) {
+          await setDefault(editing.id, nextDefault);
+        }
+      }
+
+      onOpenChange(false);
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e?.message || "Request failed", variant: "destructive" as any });
+    } finally {
+      setSaving(false);
+    }
   }
-}
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1747,55 +2094,166 @@ function TariffPlanEditModal({
         <Separator className="my-4" />
 
         <div className="px-6 pb-6 grid gap-4">
+          {/* Row 1: Code + Name */}
           <div className="grid gap-4 md:grid-cols-2">
             <div className="grid gap-2">
               <Label>Code</Label>
-              <Input value={form.code || ""} onChange={(e) => patch({ code: e.target.value })} placeholder="e.g., SELF" disabled={mode === "edit"} />
+              <Input value={form.code || ""} onChange={(e) => patch({ code: e.target.value })} placeholder="e.g., TRF-ICICI-STD-2024" disabled={mode === "edit"} />
             </div>
-
             <div className="grid gap-2">
               <Label>Name</Label>
-              <Input value={form.name || ""} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g., Self Pay" />
+              <Input value={form.name || ""} onChange={(e) => patch({ name: e.target.value })} placeholder="e.g., ICICI Lombard - Standard Plan" />
             </div>
+          </div>
 
-            <div className="grid gap-2 md:col-span-2">
-              <Label>Description (optional)</Label>
-              <Textarea
-                value={form.description || ""}
-                onChange={(e) => patch({ description: e.target.value })}
-                placeholder="Who this plan is for, what it covers, any policy notes…"
-                className="min-h-[110px]"
-              />
+          {/* Row 2: Plan Type */}
+          <div className="grid gap-2">
+            <Label>Plan Type</Label>
+            <Select value={form.kind || "PRICE_LIST"} onValueChange={(v) => {
+              patch({ kind: v });
+              if (v === "PRICE_LIST") {
+                patch({ payerId: "", contractId: "" });
+                setContracts([]);
+              }
+            }}>
+              <SelectTrigger className="h-11">
+                <SelectValue placeholder="Select plan type…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="PRICE_LIST">Price List (self-pay / standard)</SelectItem>
+                <SelectItem value="PAYER_CONTRACT">Payer Contract (insurer / TPA / corporate)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Row 3: Payer + Contract (conditional on PAYER_CONTRACT) */}
+          {form.kind === "PAYER_CONTRACT" ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-2">
+                <Label>Payer <span className="text-red-500">*</span></Label>
+                <Select value={form.payerId || ""} onValueChange={onPayerChange}>
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder="Select payer…" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[320px] overflow-y-auto">
+                    {payers.filter(p => p.isActive).map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.code} — {p.name} ({p.kind})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Contract <span className="text-red-500">*</span></Label>
+                <Select
+                  value={form.contractId || ""}
+                  onValueChange={(v) => patch({ contractId: v })}
+                  disabled={!form.payerId || contractsLoading}
+                >
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder={contractsLoading ? "Loading contracts…" : "Select contract…"} />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[320px] overflow-y-auto">
+                    {contracts.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.code} — {c.name} ({c.status})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!form.payerId ? (
+                  <div className="text-xs text-zc-muted">Select a payer first to see available contracts</div>
+                ) : contracts.length === 0 && !contractsLoading && form.payerId ? (
+                  <div className="text-xs text-amber-600 dark:text-amber-400">No contracts found for this payer. Create one first.</div>
+                ) : null}
+              </div>
             </div>
+          ) : null}
 
+          {/* Contract summary (read-only, when contract selected) */}
+          {selectedContractObj ? (
+            <div className="rounded-xl border border-blue-200/50 bg-blue-50/30 dark:border-blue-900/50 dark:bg-blue-900/10 p-4">
+              <div className="text-xs font-semibold text-blue-700 dark:text-blue-300 mb-2">Contract Details (read-only)</div>
+              <div className="grid gap-2 md:grid-cols-3 text-sm">
+                <div>
+                  <span className="text-zc-muted">Strategy:</span>{" "}
+                  <span className="font-semibold">{pricingStrategyLabel(selectedContractObj.pricingStrategy)}</span>
+                </div>
+                <div>
+                  <span className="text-zc-muted">Priority:</span>{" "}
+                  <span className="font-semibold">{selectedContractObj.priority}</span>
+                </div>
+                <div>
+                  <span className="text-zc-muted">Grace:</span>{" "}
+                  <span className="font-semibold">{selectedContractObj.gracePeriodDays ?? "—"} days</span>
+                </div>
+                {selectedContractObj.globalDiscountPercent != null ? (
+                  <div>
+                    <span className="text-zc-muted">Global Discount:</span>{" "}
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtPercent(selectedContractObj.globalDiscountPercent)}</span>
+                  </div>
+                ) : null}
+                <div>
+                  <span className="text-zc-muted">Auto-renewal:</span>{" "}
+                  <span className="font-semibold">{selectedContractObj.autoRenewal ? "Yes" : "No"}</span>
+                </div>
+                <div>
+                  <span className="text-zc-muted">Status:</span>{" "}
+                  <span className="font-semibold">{selectedContractObj.status}</span>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {/* Row 4: Description */}
+          <div className="grid gap-2">
+            <Label>Description (optional)</Label>
+            <Textarea
+              value={form.description || ""}
+              onChange={(e) => patch({ description: e.target.value })}
+              placeholder="Who this plan is for, what it covers, any policy notes…"
+              className="min-h-[90px]"
+            />
+          </div>
+
+          {/* Row 5: Currency + Effective From + Tax Inclusive */}
+          <div className="grid gap-4 md:grid-cols-3">
             <div className="grid gap-2">
-              <Label>Effective From (optional)</Label>
+              <Label>Currency</Label>
+              <Input value={form.currency || "INR"} onChange={(e) => patch({ currency: e.target.value })} />
+            </div>
+            <div className="grid gap-2">
+              <Label>Effective From</Label>
               <Input
                 type="date"
                 value={form.effectiveFrom || ""}
                 onChange={(e) => patch({ effectiveFrom: e.target.value })}
               />
-              <div className="text-xs text-zc-muted">For compliance/history. Backend may enforce in GoLive.</div>
             </div>
-
             <div className="grid gap-2">
-              <Label>Flags</Label>
-              <div className="grid gap-2">
-                <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
-                  <Switch checked={Boolean(form.isDefault)} onCheckedChange={(v) => patch({ isDefault: v })} />
-                  <div className="text-sm">
-                    <div className="font-semibold text-zc-text">Default plan</div>
-                    <div className="text-xs text-zc-muted">Only one should be default per branch</div>
-                  </div>
-                </div>
+              <Label>Tax Inclusive</Label>
+              <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
+                <Switch checked={Boolean(form.isTaxInclusive)} onCheckedChange={(v) => patch({ isTaxInclusive: v })} />
+                <span className="text-sm font-semibold text-zc-text">{form.isTaxInclusive ? "Inclusive" : "Exclusive"}</span>
+              </div>
+            </div>
+          </div>
 
-                <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
-                  <Switch checked={Boolean(form.isActive)} onCheckedChange={(v) => patch({ isActive: v })} />
-                  <div className="text-sm">
-                    <div className="font-semibold text-zc-text">{form.isActive ? "Active" : "Inactive"}</div>
-                    <div className="text-xs text-zc-muted">Inactive plans shouldn’t be used for new billing</div>
-                  </div>
-                </div>
+          {/* Row 6: Flags */}
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
+              <Switch checked={Boolean(form.isDefault)} onCheckedChange={(v) => patch({ isDefault: v })} />
+              <div className="text-sm">
+                <div className="font-semibold text-zc-text">Default plan</div>
+                <div className="text-xs text-zc-muted">Only one should be default per branch</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/20 px-3 py-2">
+              <Switch checked={Boolean(form.isActive)} onCheckedChange={(v) => patch({ isActive: v })} />
+              <div className="text-sm">
+                <div className="font-semibold text-zc-text">{form.isActive ? "Active on save" : "Save as Draft"}</div>
+                <div className="text-xs text-zc-muted">{form.isActive ? "Activates after save" : "Inactive plans won't be used for billing"}</div>
               </div>
             </div>
           </div>

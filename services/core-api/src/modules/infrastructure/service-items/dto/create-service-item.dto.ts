@@ -83,10 +83,34 @@ export class CreateServiceItemDto {
   @MaxLength(160)
   name!: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  shortName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  displayName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  description?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  searchAliases?: string[];
+
   // Keep legacy category for UI grouping
   @IsString()
   @MaxLength(80)
   category!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  subCategory?: string | null;
 
   @IsOptional()
   @IsString()
@@ -96,6 +120,10 @@ export class CreateServiceItemDto {
   @IsOptional()
   @IsString()
   type?: string; // ServiceItemType enum string
+
+  @IsOptional()
+  @IsString()
+  specialtyId?: string | null;
 
   @IsOptional()
   @IsString()
@@ -189,6 +217,42 @@ export class CreateServiceItemDto {
 
   @IsOptional()
   billingPolicy?: any;
+
+  // Scheduling & Availability
+  @IsOptional()
+  @IsBoolean()
+  requiresScheduling?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  statAvailable?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  defaultTatHours?: number | null;
+
+  // Pricing
+  @IsOptional()
+  basePrice?: number | null;
+
+  @IsOptional()
+  costPrice?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  allowDiscount?: boolean;
+
+  @IsOptional()
+  maxDiscountPercent?: number | null;
+
+  // Effective dates
+  @IsOptional()
+  @IsString()
+  effectiveFrom?: string | null;
+
+  @IsOptional()
+  @IsString()
+  effectiveTill?: string | null;
 
   // Optional mapping at create-time (convenience)
   @IsOptional()

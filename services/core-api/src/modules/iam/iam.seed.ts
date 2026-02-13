@@ -35,6 +35,7 @@ export class IamSeedService implements OnModuleInit {
     // Convenience: group permission codes by prefix (keeps role definitions readable)
     const INFRA_ALL = Object.values(PERM).filter((c) => c.startsWith("INFRA_"));
     const OT_ALL = Object.values(PERM).filter((c) => c.startsWith("ot."));
+    const BILLING_ALL = Object.values(PERM).filter((c) => c.startsWith("BILLING_"));
 
     // Staff ops pack (enterprise onboarding + governance)
     const STAFF_OPS = [
@@ -308,6 +309,7 @@ export class IamSeedService implements OnModuleInit {
 
           ...INFRA_ALL,
           ...OT_ALL,
+          ...BILLING_ALL,
         ].map(normalizePermCode);
       } else if (r.code === ROLE.BRANCH_ADMIN) {
         permCodes = [
@@ -390,6 +392,9 @@ export class IamSeedService implements OnModuleInit {
           PERM.INFRA_PHARMACY_INVENTORY_UPDATE,
           PERM.INFRA_PHARMACY_NARCOTICS_READ,
           PERM.INFRA_PHARMACY_NARCOTICS_UPDATE,
+
+          // Insurance Claims & Billing
+          ...BILLING_ALL,
         ].map(normalizePermCode);
       } else if (r.code === ROLE.HR_ADMIN) {
         permCodes = [

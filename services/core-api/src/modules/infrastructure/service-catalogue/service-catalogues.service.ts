@@ -47,6 +47,8 @@ export class ServiceCataloguesService {
         departmentId: dto.departmentId ?? null,
         context: (dto.context as any) ?? undefined,
         payerGroup: (dto.payerGroup as any) ?? undefined,
+        filterRules: dto.filterRules ?? undefined,
+        visibility: dto.visibility ?? null,
       },
     });
 
@@ -122,6 +124,8 @@ export class ServiceCataloguesService {
         departmentId: dto.departmentId ?? undefined,
         context: dto.context !== undefined ? (dto.context as any) : undefined,
         payerGroup: dto.payerGroup !== undefined ? (dto.payerGroup as any) : undefined,
+        filterRules: dto.filterRules === undefined ? undefined : (dto.filterRules ?? undefined),
+        visibility: dto.visibility === undefined ? undefined : (dto.visibility ?? null),
         status: dto.status !== undefined ? (dto.status as any) : undefined,
       },
     });

@@ -173,7 +173,7 @@ function validateRoomCode(code: string): string | null {
   const v = normalizeCode(code);
   if (!v) return "Room code is required";
   if (!/^[A-Z0-9][A-Z0-9_-]{1,31}$/.test(v)) {
-    return "Code must be 2Ã¢â‚¬â€œ32 chars, letters/numbers/underscore/hyphen (example: OT-1, TH01, LAB_1)";
+    return "Code must be 2–32 chars, letters/numbers/underscore/hyphen (example: OT-1, TH01, LAB_1)";
   }
   return null;
 }
@@ -186,14 +186,14 @@ function validateRoomNumber(roomNumber: string): string | null {
   const v = normalizeRoomNumber(roomNumber);
   if (!v) return "Room number is required";
   if (v.length > 32) return "Room number must be <= 32 characters";
-  if (!/^[A-Z0-9][A-Z0-9_-]*$/.test(v)) return "Room number allowed: AÃ¢â‚¬â€œZ, 0Ã¢â‚¬â€œ9, underscore (_) and hyphen (-)";
+  if (!/^[A-Z0-9][A-Z0-9_-]*$/.test(v)) return "Room number allowed: A–Z, 0–9, underscore (_) and hyphen (-)";
   return null;
 }
 
 function fmtDateTime(value?: string | null) {
-  if (!value) return "Ã¢â‚¬â€";
+  if (!value) return "—";
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "Ã¢â‚¬â€";
+  if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString();
 }
 
@@ -299,7 +299,7 @@ export default function RoomsPage() {
 
   const selectedUnit = React.useMemo(() => units.find((u) => u.id === unitId) || null, [units, unitId]);
 
-  // AI field copilot Ã¢â‚¬â€ code field validation
+  // AI field copilot — code field validation
   const codeFieldCopilot = useFieldCopilot({
     module: "room",
     field: "code",
@@ -638,7 +638,7 @@ export default function RoomsPage() {
         if (Array.isArray(res?.warnings) && res.warnings.length) {
           toast({
             title: "Warnings",
-            description: res.warnings.join(" Ã¢â‚¬Â¢ "),
+            description: res.warnings.join(" • "),
           });
         }
 
@@ -702,7 +702,7 @@ export default function RoomsPage() {
           if (Array.isArray(res?.warnings) && res.warnings.length) {
             toast({
               title: "Warnings",
-              description: res.warnings.join(" Ã¢â‚¬Â¢ "),
+              description: res.warnings.join(" • "),
             });
           }
         }
@@ -854,7 +854,7 @@ export default function RoomsPage() {
                 <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3 dark:border-violet-900/50 dark:bg-violet-900/10">
                   <div className="text-xs font-medium text-violet-600 dark:text-violet-400">Selected Unit</div>
                   <div className="mt-1 text-lg font-bold text-violet-700 dark:text-violet-300">
-                    {selectedUnit ? selectedUnit.code : "Ã¢â‚¬â€"}
+                    {selectedUnit ? selectedUnit.code : "—"}
                   </div>
                   <div className="mt-1 text-[11px] text-violet-700/80 dark:text-violet-300/80">
                     {selectedUnit ? selectedUnit.name : "Pick a unit to view rooms."}
@@ -902,15 +902,15 @@ export default function RoomsPage() {
                     disabled={!branchId}
                   >
                     <SelectTrigger className="h-10 rounded-xl border-zc-border bg-zc-card">
-                      <SelectValue placeholder="Select unitÃ¢â‚¬Â¦" />
+                      <SelectValue placeholder="Select unit…" />
                     </SelectTrigger>
                     <SelectContent className="max-h-[340px] overflow-y-auto">
-                      <SelectItem value="NONE">Select unitÃ¢â‚¬Â¦</SelectItem>
+                      <SelectItem value="NONE">Select unit…</SelectItem>
                       {units.map((u) => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name}{" "}
                           <span className="font-mono text-xs text-zc-muted">
-                            ({u.code}) {u.usesRooms ? "" : "Ã¢â‚¬Â¢ open-bay"}
+                            ({u.code}) {u.usesRooms ? "" : "• open-bay"}
                           </span>
                         </SelectItem>
                       ))}
@@ -1015,7 +1015,7 @@ export default function RoomsPage() {
                     <tr>
                       <td colSpan={6} className="px-4 py-10">
                         <div className="flex items-center gap-3 text-sm text-zc-muted">
-                          <Loader2 className="h-4 w-4 animate-spin" /> Loading roomsÃ¢â‚¬Â¦
+                          <Loader2 className="h-4 w-4 animate-spin" /> Loading rooms…
                         </div>
                       </td>
                     </tr>
@@ -1059,7 +1059,7 @@ export default function RoomsPage() {
                             </div>
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-zc-muted">
                               <span className="rounded-full border border-zc-border bg-zc-panel/10 px-2 py-0.5">
-                                Type: <span className="font-semibold text-zc-text">{String(r.roomType ?? "Ã¢â‚¬â€")}</span>
+                                Type: <span className="font-semibold text-zc-text">{String(r.roomType ?? "—")}</span>
                               </span>
                               <span className="rounded-full border border-zc-border bg-zc-panel/10 px-2 py-0.5">
                                 Occ: <span className="font-semibold text-zc-text tabular-nums">{occ}</span> /{" "}
@@ -1269,15 +1269,15 @@ export default function RoomsPage() {
                         disabled={!!editing}
                       >
                         <SelectTrigger className="h-11 rounded-xl border-zc-border bg-zc-card">
-                          <SelectValue placeholder="Select unitÃ¢â‚¬Â¦" />
+                          <SelectValue placeholder="Select unit…" />
                         </SelectTrigger>
                         <SelectContent className="max-h-[340px] overflow-y-auto">
-                          <SelectItem value="NONE">Select unitÃ¢â‚¬Â¦</SelectItem>
+                          <SelectItem value="NONE">Select unit…</SelectItem>
                           {units.map((u) => (
                             <SelectItem key={u.id} value={u.id}>
                               {u.name}{" "}
                               <span className="font-mono text-xs text-zc-muted">
-                                ({u.code}) {u.usesRooms ? "" : "Ã¢â‚¬Â¢ open-bay"}
+                                ({u.code}) {u.usesRooms ? "" : "• open-bay"}
                               </span>
                             </SelectItem>
                           ))}
@@ -1330,7 +1330,7 @@ export default function RoomsPage() {
                         <Label>Room Type</Label>
                         <Select value={formRoomType} onValueChange={(v) => setFormRoomType(v as RoomType)}>
                           <SelectTrigger className="h-11 rounded-xl border-zc-border bg-zc-card">
-                            <SelectValue placeholder="Select typeÃ¢â‚¬Â¦" />
+                            <SelectValue placeholder="Select type…" />
                           </SelectTrigger>
                           <SelectContent className="max-h-[340px] overflow-y-auto">
                             {ROOM_TYPES.map((t) => (
@@ -1378,7 +1378,7 @@ export default function RoomsPage() {
                         <Label>Pricing Tier</Label>
                         <Select value={formPricingTier || "NONE"} onValueChange={(v) => setFormPricingTier(v === "NONE" ? "" : (v as PricingTier))}>
                           <SelectTrigger className="h-11 rounded-xl border-zc-border bg-zc-card">
-                            <SelectValue placeholder="Select tierÃ¢â‚¬Â¦" />
+                            <SelectValue placeholder="Select tier…" />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="NONE">None</SelectItem>
@@ -1492,7 +1492,7 @@ export default function RoomsPage() {
                             onValueChange={(v) => setFormIsolationType(v === "NONE" ? "" : (v as IsolationType))}
                           >
                             <SelectTrigger className="h-11 rounded-xl border-zc-border bg-zc-card">
-                              <SelectValue placeholder="Select isolation typeÃ¢â‚¬Â¦" />
+                              <SelectValue placeholder="Select isolation type…" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="NONE">None</SelectItem>
@@ -1531,7 +1531,7 @@ export default function RoomsPage() {
                           <Label>Maintenance Status</Label>
                           <Select value={formMaintenanceStatus} onValueChange={(v) => setFormMaintenanceStatus(v as MaintenanceStatus)}>
                             <SelectTrigger className="h-11 rounded-xl border-zc-border bg-zc-card">
-                              <SelectValue placeholder="Select statusÃ¢â‚¬Â¦" />
+                              <SelectValue placeholder="Select status…" />
                             </SelectTrigger>
                             <SelectContent className="max-h-[340px] overflow-y-auto">
                               {MAINTENANCE_STATUSES.map((s) => (
@@ -1602,7 +1602,7 @@ export default function RoomsPage() {
                 <Button variant="primary" onClick={() => void save()} disabled={busy || !branchId}>
                   {busy ? (
                     <span className="inline-flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" /> SavingÃ¢â‚¬Â¦
+                      <Loader2 className="h-4 w-4 animate-spin" /> Saving…
                     </span>
                   ) : (
                     "Save"
@@ -1616,3 +1616,4 @@ export default function RoomsPage() {
     </AppShell>
   );
 }
+
