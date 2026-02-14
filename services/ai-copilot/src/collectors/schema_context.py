@@ -18,20 +18,20 @@ from src.db.models import (
     Claim,
     Department,
     DepartmentSpecialty,
-    DocumentChecklist,
     DrugInteraction,
     DrugMaster,
     Formulary,
     FormularyItem,
     GovernmentSchemeConfig,
     InsuranceCase,
-    InsurancePolicy,
     InventoryConfig,
     LocationNode,
     LocationNodeRevision,
+    PatientInsurancePolicy,
     PatientPricingTier,
     Payer,
     PayerContract,
+    PayerDocumentTemplate,
     PayerIntegrationConfig,
     PharmacyStore,
     PharmSupplier,
@@ -785,9 +785,9 @@ async def _collect_billing(session: AsyncSession, branch_id: str) -> BillingSumm
     try:
         # Insurance policies
         policy_rows = (await session.execute(
-            select(InsurancePolicy.status, func.count()).where(
-                InsurancePolicy.branchId == branch_id
-            ).group_by(InsurancePolicy.status)
+            select(PatientInsurancePolicy.status, func.count()).where(
+                PatientInsurancePolicy.branchId == branch_id
+            ).group_by(PatientInsurancePolicy.status)
         )).all()
         total_policies = sum(r[1] for r in policy_rows)
         active_policies = sum(r[1] for r in policy_rows if r[0] == "ACTIVE")
@@ -826,9 +826,11 @@ async def _collect_billing(session: AsyncSession, branch_id: str) -> BillingSumm
         settled_claims = claim_by_status.get("CLAIM_SETTLED", 0) + claim_by_status.get("CLAIM_PAID", 0)
         rejected_claims = claim_by_status.get("CLAIM_REJECTED", 0) + claim_by_status.get("CLAIM_DENIED", 0)
 
-        # Document checklists
+        # Document checklists (PayerDocumentTemplate)
         checklist_count = (await session.execute(
-            select(func.count()).where(DocumentChecklist.branchId == branch_id)
+            select(func.count()).select_from(PayerDocumentTemplate).where(
+                PayerDocumentTemplate.branchId == branch_id
+            )
         )).scalar_one_or_none() or 0
 
         # Payer integrations

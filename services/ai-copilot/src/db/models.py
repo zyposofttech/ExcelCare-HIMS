@@ -641,8 +641,8 @@ class TaxCode(Base):
 # ── Billing / Claims ──────────────────────────────────────────────────────
 
 
-class InsurancePolicy(Base):
-    __tablename__ = "InsurancePolicy"
+class PatientInsurancePolicy(Base):
+    __tablename__ = "PatientInsurancePolicy"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
@@ -684,12 +684,14 @@ class Claim(Base):
     createdAt: Mapped[datetime] = mapped_column(DateTime)
 
 
-class DocumentChecklist(Base):
-    __tablename__ = "DocumentChecklist"
+class PayerDocumentTemplate(Base):
+    __tablename__ = "PayerDocumentTemplate"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     branchId: Mapped[str] = mapped_column(String, ForeignKey("Branch.id"))
-    payerId: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    payerId: Mapped[str] = mapped_column(String, ForeignKey("Payer.id"))
+    name: Mapped[str] = mapped_column(String)
+    isActive: Mapped[bool] = mapped_column(Boolean, default=True)
     createdAt: Mapped[datetime] = mapped_column(DateTime)
 
 
