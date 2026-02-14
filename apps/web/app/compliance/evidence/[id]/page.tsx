@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { AppLink as Link } from "@/components/app-link";
 import { useParams, useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -14,7 +13,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -25,7 +23,6 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 import { apiFetch } from "@/lib/api";
-import { cn } from "@/lib/cn";
 import { RequirePerm } from "@/components/RequirePerm";
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import {
@@ -48,15 +45,20 @@ type Evidence = {
   id: string;
   workspaceId: string;
   fileName: string;
-  filePath: string;
+  fileKey: string;
   mimeType: string;
-  fileSizeBytes: number;
+  sizeBytes: number;
   title: string;
-  description: string | null;
-  status: "ACTIVE" | "EXPIRED" | "ARCHIVED";
+  // Backend supports ACTIVE/ARCHIVED; EXPIRED is derived from expiresAt.
+  status: "ACTIVE" | "ARCHIVED";
   expiresAt: string | null;
   uploadedByStaffId: string;
-  uploadedByStaff?: { id: string; firstName: string; lastName: string };
+  uploadedByStaff?: {
+    id: string;
+    name?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+  };
   tags: string[];
   links: Array<{
     id: string;
@@ -67,6 +69,13 @@ type Evidence = {
   createdAt: string;
   updatedAt: string;
 };
+
+function isExpired(e: Evidence | null | undefined) {
+  if (!e) return false;
+  if (e.status !== "ACTIVE") return false;
+  if (!e.expiresAt) return false;
+  return new Date(e.expiresAt).getTime() < Date.now();
+}
 
 /* ----------------------------- Helpers ----------------------------- */
 
@@ -133,10 +142,11 @@ export default function EvidenceDetailPage() {
   const [saving, setSaving] = React.useState(false);
 
   const [editTitle, setEditTitle] = React.useState("");
-  const [editDescription, setEditDescription] = React.useState("");
   const [editStatus, setEditStatus] = React.useState("");
   const [editExpiresAt, setEditExpiresAt] = React.useState("");
   const [editTags, setEditTags] = React.useState("");
+  const [fileUrl, setFileUrl] = React.useState<string | null>(null);
+  const [fileLoading, setFileLoading] = React.useState(false);
 
   const evidenceId = params.id as string;
 
@@ -152,7 +162,6 @@ export default function EvidenceDetailPage() {
       );
       setEvidence(res);
       setEditTitle(res.title);
-      setEditDescription(res.description ?? "");
       setEditStatus(res.status);
       setEditExpiresAt(res.expiresAt ? res.expiresAt.split("T")[0] : "");
       setEditTags((res.tags ?? []).join(", "));
@@ -172,6 +181,72 @@ export default function EvidenceDetailPage() {
     load();
   }, [load]);
 
+  // Cleanup object URL
+  React.useEffect(() => {
+    return () => {
+      if (fileUrl) URL.revokeObjectURL(fileUrl);
+    };
+  }, [fileUrl]);
+
+  function getAccessToken() {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+  }
+
+  async function fetchEvidenceBlob(eid: string) {
+    const token = getAccessToken();
+    const res = await fetch(`/api/compliance/evidence/${eid}/file`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      const msg = `Failed to fetch file (${res.status})`;
+      throw new Error(msg);
+    }
+    return await res.blob();
+  }
+
+  // Auto-load preview (images + pdf) with Authorization
+  React.useEffect(() => {
+    if (!evidence) return;
+    const previewable = evidence.mimeType?.startsWith("image/") || evidence.mimeType === "application/pdf";
+    if (!previewable) return;
+
+    let cancelled = false;
+    (async () => {
+      setFileLoading(true);
+      try {
+        const blob = await fetchEvidenceBlob(evidence.id);
+        const url = URL.createObjectURL(blob);
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        setFileUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return url;
+        });
+      } catch (e: any) {
+        toast({
+          title: "Preview failed",
+          description: e?.message ?? "Unable to load preview",
+          variant: "destructive",
+        });
+        setFileUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return null;
+        });
+      } finally {
+        if (!cancelled) setFileLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [evidence?.id, evidence?.mimeType]);
+
   /* ---- Save ---- */
 
   const handleSave = async () => {
@@ -182,7 +257,6 @@ export default function EvidenceDetailPage() {
         method: "PATCH",
         body: {
           title: editTitle,
-          description: editDescription || null,
           status: editStatus,
           expiresAt: editExpiresAt || null,
           tags: editTags
@@ -221,6 +295,30 @@ export default function EvidenceDetailPage() {
         description: e.message,
         variant: "destructive",
       });
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!evidence) return;
+    setFileLoading(true);
+    try {
+      const blob = await fetchEvidenceBlob(evidence.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = evidence.fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch (e: any) {
+      toast({
+        title: "Download failed",
+        description: e?.message ?? "Unable to download file",
+        variant: "destructive",
+      });
+    } finally {
+      setFileLoading(false);
     }
   };
 
@@ -301,7 +399,7 @@ export default function EvidenceDetailPage() {
                 <div className="text-3xl font-semibold tracking-tight">
                   {evidence.title}
                 </div>
-                {statusBadge(evidence.status)}
+                {statusBadge(isExpired(evidence) ? "EXPIRED" : evidence.status)}
               </div>
               <div className="mt-1 text-sm text-zc-muted">
                 {evidence.fileName}
@@ -350,14 +448,6 @@ export default function EvidenceDetailPage() {
                         onChange={(e) => setEditTitle(e.target.value)}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label>Description</Label>
-                      <Textarea
-                        value={editDescription}
-                        onChange={(e) => setEditDescription(e.target.value)}
-                        rows={3}
-                      />
-                    </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>Status</Label>
@@ -370,7 +460,6 @@ export default function EvidenceDetailPage() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="ACTIVE">Active</SelectItem>
-                            <SelectItem value="EXPIRED">Expired</SelectItem>
                             <SelectItem value="ARCHIVED">Archived</SelectItem>
                           </SelectContent>
                         </Select>
@@ -411,11 +500,6 @@ export default function EvidenceDetailPage() {
                   </div>
                 ) : (
                   <div className="grid gap-4">
-                    {evidence.description && (
-                      <div className="text-sm text-zc-muted">
-                        {evidence.description}
-                      </div>
-                    )}
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <div className="text-xs font-medium text-zc-muted">
@@ -430,7 +514,7 @@ export default function EvidenceDetailPage() {
                           Size
                         </div>
                         <div className="mt-0.5 text-sm">
-                          {formatBytes(evidence.fileSizeBytes)}
+                          {formatBytes(evidence.sizeBytes)}
                         </div>
                       </div>
                       <div>
@@ -438,9 +522,12 @@ export default function EvidenceDetailPage() {
                           Uploaded by
                         </div>
                         <div className="mt-0.5 text-sm">
-                          {evidence.uploadedByStaff
-                            ? `${evidence.uploadedByStaff.firstName} ${evidence.uploadedByStaff.lastName}`
-                            : evidence.uploadedByStaffId}
+                          {(() => {
+                            const s = evidence.uploadedByStaff;
+                            if (!s) return evidence.uploadedByStaffId;
+                            const full = [s.firstName, s.lastName].filter(Boolean).join(" ").trim();
+                            return (s.name || full || evidence.uploadedByStaffId) as string;
+                          })()}
                         </div>
                       </div>
                       <div>
@@ -540,27 +627,56 @@ export default function EvidenceDetailPage() {
               </CardHeader>
               <Separator />
               <CardContent className="flex flex-col items-center gap-4 pt-4">
-                {evidence.mimeType.startsWith("image/") ? (
-                  <img
-                    src={`/api/compliance/evidence/${evidence.id}/file`}
-                    alt={evidence.title}
-                    className="max-w-full rounded-xl border border-zc-border"
-                  />
+                {fileLoading ? (
+                  <div className="flex flex-col items-center gap-2 py-10">
+                    <Loader2 className="h-6 w-6 animate-spin text-zc-muted" />
+                    <p className="text-sm text-zc-muted">Loading preview…</p>
+                  </div>
+                ) : evidence.mimeType === "application/pdf" ? (
+                  fileUrl ? (
+                    <iframe
+                      src={fileUrl}
+                      title={evidence.title}
+                      className="h-[420px] w-full rounded-xl border border-zc-border bg-white"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 py-8">
+                      <FileText className="h-12 w-12 text-zc-muted" />
+                      <p className="text-sm text-zc-muted">Preview not available</p>
+                    </div>
+                  )
+                ) : evidence.mimeType.startsWith("image/") ? (
+                  fileUrl ? (
+                    <img
+                      src={fileUrl}
+                      alt={evidence.title}
+                      className="max-w-full rounded-xl border border-zc-border"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 py-8">
+                      <FileText className="h-12 w-12 text-zc-muted" />
+                      <p className="text-sm text-zc-muted">Preview not available</p>
+                    </div>
+                  )
                 ) : (
                   <div className="flex flex-col items-center gap-2 py-8">
                     <FileText className="h-12 w-12 text-zc-muted" />
-                    <p className="text-sm text-zc-muted">
-                      Preview not available
-                    </p>
+                    <p className="text-sm text-zc-muted">Preview not available</p>
                   </div>
                 )}
-                <Button variant="outline" size="sm" asChild>
-                  <a
-                    href={`/api/compliance/evidence/${evidence.id}/file`}
-                    download={evidence.fileName}
-                  >
-                    <Download className="mr-1 h-4 w-4" /> Download
-                  </a>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownload}
+                  disabled={fileLoading}
+                >
+                  {fileLoading ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-1 h-4 w-4" />
+                  )}
+                  Download
                 </Button>
               </CardContent>
             </Card>

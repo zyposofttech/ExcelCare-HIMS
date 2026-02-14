@@ -7,6 +7,38 @@ import type { CreateRequestDto, RegisterSampleDto, RecordCrossMatchDto, Electron
 export class CrossMatchService {
   constructor(private readonly ctx: BBContextService) {}
 
+  async listCrossMatches(
+    principal: Principal,
+    opts: { branchId?: string | null; result?: string; method?: string },
+  ) {
+    const bid = this.ctx.resolveBranchId(principal, opts.branchId);
+    const where: any = { request: { branchId: bid } };
+    if (opts.result) where.result = opts.result;
+    if (opts.method) where.method = opts.method;
+
+    return this.ctx.prisma.crossMatchTest.findMany({
+      where,
+      include: {
+        request: {
+          select: {
+            id: true,
+            requestNumber: true,
+            requestedComponent: true,
+            patient: { select: { id: true, name: true } },
+          },
+        },
+        bloodUnit: {
+          select: {
+            id: true,
+            unitNumber: true,
+            bloodGroup: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
   async listRequests(principal: Principal, opts: { branchId?: string | null; status?: string; urgency?: string }) {
     const bid = this.ctx.resolveBranchId(principal, opts.branchId);
     const where: any = { branchId: bid };

@@ -197,10 +197,11 @@ export default function AuditDetailPage() {
   const fetchNabhItems = React.useCallback(async () => {
     if (!activeBranchId) return;
     try {
-      const data = await apiFetch<NabhItemOption[]>(
+      const data = await apiFetch<any>(
         `/api/compliance/nabh/items?branchId=${activeBranchId}&limit=500`,
       );
-      setNabhItems(Array.isArray(data) ? data : []);
+      const items = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+      setNabhItems(items);
     } catch {
       // Non-critical
     }

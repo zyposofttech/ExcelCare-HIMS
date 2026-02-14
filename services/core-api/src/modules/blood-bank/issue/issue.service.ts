@@ -11,6 +11,167 @@ import type {
 export class IssueService {
   constructor(private readonly ctx: BBContextService) {}
 
+  async listIssues(
+    principal: Principal,
+    opts: {
+      branchId?: string | null;
+      transfusing?: boolean;
+      transfusedToday?: boolean;
+    },
+  ) {
+    const bid = this.ctx.resolveBranchId(principal, opts.branchId);
+
+    const issues = await this.ctx.prisma.bloodIssue.findMany({
+      where: { branchId: bid },
+      include: {
+        bloodUnit: {
+          select: {
+            id: true,
+            unitNumber: true,
+            bloodGroup: true,
+            componentType: true,
+            status: true,
+          },
+        },
+        request: {
+          select: {
+            id: true,
+            patient: {
+              select: {
+                name: true,
+                uhid: true,
+              },
+            },
+          },
+        },
+        crossMatch: {
+          select: {
+            id: true,
+            certificateNumber: true,
+          },
+        },
+        transfusionRecord: {
+          select: {
+            startedAt: true,
+            endedAt: true,
+            hasReaction: true,
+          },
+        },
+      },
+      orderBy: { issuedAt: "desc" },
+    });
+
+    let rows = issues.map((issue) => {
+      const patientName = (issue.request?.patient?.name ?? "").trim();
+      const [firstName, ...rest] = patientName ? patientName.split(/\s+/) : [];
+      const lastName = rest.join(" ");
+      const startedAt = issue.transfusionRecord?.startedAt ?? null;
+      const endedAt = issue.transfusionRecord?.endedAt ?? null;
+      const status = this.deriveIssueStatus(issue);
+
+      return {
+        id: issue.id,
+        issueNumber: issue.issueNumber,
+        unitNumber: issue.bloodUnit?.unitNumber ?? null,
+        patient: {
+          firstName: firstName || undefined,
+          lastName: lastName || undefined,
+          uhid: issue.request?.patient?.uhid ?? undefined,
+        },
+        patientName: patientName || null,
+        crossMatchRef: issue.crossMatch?.certificateNumber ?? issue.crossMatch?.id ?? null,
+        crossMatchId: issue.crossMatchId ?? null,
+        issuedToPerson: issue.issuedToPerson ?? null,
+        issuedToWard: issue.issuedToWard ?? null,
+        transportBoxTemp: this.normalizeDecimal(issue.transportBoxTemp),
+        status,
+        issuedAt: issue.issuedAt,
+        createdAt: issue.createdAt,
+        notes: issue.inspectionNotes ?? issue.returnReason ?? null,
+        startedAt,
+        endedAt,
+        component: issue.bloodUnit?.componentType ?? null,
+        bloodGroup: issue.bloodUnit?.bloodGroup ?? null,
+        reactionFlagged: issue.transfusionRecord?.hasReaction ?? false,
+      };
+    });
+
+    if (opts.transfusing) {
+      rows = rows.filter((r) => r.status === "ACTIVE" || r.status === "IN_PROGRESS");
+    }
+
+    if (opts.transfusedToday) {
+      const today = new Date().toISOString().slice(0, 10);
+      rows = rows.filter((r) => {
+        if (r.status !== "COMPLETED") return false;
+        if (!r.endedAt) return false;
+        return new Date(r.endedAt).toISOString().slice(0, 10) === today;
+      });
+    }
+
+    return rows;
+  }
+
+  async listMtpSessions(principal: Principal, branchId?: string | null) {
+    const bid = this.ctx.resolveBranchId(principal, branchId);
+
+    const sessions = await this.ctx.prisma.mTPSession.findMany({
+      where: { branchId: bid },
+      include: {
+        patient: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        bloodIssues: {
+          select: {
+            id: true,
+            bloodUnit: {
+              select: {
+                componentType: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { activatedAt: "desc" },
+    });
+
+    return sessions.map((session) => {
+      let prbcCount = 0;
+      let ffpCount = 0;
+      let pltCount = 0;
+
+      for (const issue of session.bloodIssues) {
+        const component = String(issue.bloodUnit?.componentType ?? "");
+        if (component === "PRBC") prbcCount += 1;
+        else if (component === "FFP") ffpCount += 1;
+        else if (component === "PLATELET_RDP" || component === "PLATELET_SDP") pltCount += 1;
+      }
+
+      const summary = session.summary && typeof session.summary === "object" ? (session.summary as any) : null;
+      const indication = summary?.clinicalIndication ?? summary?.indication ?? null;
+
+      return {
+        id: session.id,
+        mtpId: session.id,
+        patientId: session.patient?.id ?? session.patientId,
+        patientName: session.patient?.name ?? null,
+        patient: session.patient?.name ?? null,
+        indication,
+        activatedAt: session.activatedAt,
+        deactivatedAt: session.deactivatedAt,
+        completedAt: session.deactivatedAt,
+        status: session.status === "DEACTIVATED" ? "COMPLETED" : session.status,
+        unitsIssued: session.bloodIssues.length,
+        prbcCount,
+        ffpCount,
+        pltCount,
+      };
+    });
+  }
+
   async issueBlood(principal: Principal, dto: IssueBloodDto) {
     const crossMatch = await this.ctx.prisma.crossMatchTest.findUnique({
       where: { id: dto.crossMatchId },
@@ -235,11 +396,20 @@ export class IssueService {
 
   async activateMTP(principal: Principal, dto: ActivateMTPDto) {
     const bid = this.ctx.resolveBranchId(principal, dto.branchId);
+    const notes = (dto as any)?.notes ?? null;
+    const clinicalIndication = dto.clinicalIndication ?? null;
     const result = await this.ctx.prisma.mTPSession.create({
       data: {
         branchId: bid,
         patientId: dto.patientId!,
         encounterId: dto.encounterId,
+        summary:
+          clinicalIndication || notes
+            ? {
+                clinicalIndication,
+                notes,
+              }
+            : undefined,
         activatedByStaffId: principal.userId,
         activatedAt: new Date(),
         status: "ACTIVE",
@@ -249,7 +419,7 @@ export class IssueService {
     await this.ctx.audit.log({
       branchId: bid, actorUserId: principal.userId,
       action: "BB_MTP_ACTIVATED", entity: "MTPSession", entityId: result.id,
-      meta: { patientId: dto.patientId },
+      meta: { patientId: dto.patientId, clinicalIndication, notes },
     });
     return result;
   }
@@ -286,5 +456,27 @@ export class IssueService {
     });
 
     return { ...mtp, issues };
+  }
+
+  private deriveIssueStatus(issue: {
+    isReturned: boolean;
+    returnedAt: Date | null;
+    transfusionRecord: { startedAt: Date | null; endedAt: Date | null } | null;
+    bloodUnit: { status: string } | null;
+  }): string {
+    if (issue.isReturned || issue.returnedAt || issue.bloodUnit?.status === "RETURNED") return "RETURNED";
+    if (issue.transfusionRecord?.endedAt || issue.bloodUnit?.status === "TRANSFUSED") return "COMPLETED";
+    if (issue.transfusionRecord?.startedAt) return "ACTIVE";
+    if (issue.bloodUnit?.status === "DISCARDED") return "DISCARDED";
+    if (issue.bloodUnit?.status) return issue.bloodUnit.status;
+    return "ISSUED";
+  }
+
+  private normalizeDecimal(value: unknown): number | string | null {
+    if (value == null) return null;
+    if (typeof value === "number" || typeof value === "string") return value;
+    const numeric = Number(value as any);
+    if (Number.isFinite(numeric)) return numeric;
+    return String(value);
   }
 }

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
@@ -398,23 +399,38 @@ export default function QualityControlPage() {
             </div>
 
             {/* Tabs */}
-            <div className="flex items-center gap-1">
-              {(["iqc", "eqas", "calibration"] as TabKey[]).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setTab(t)}
+            <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
+              <TabsList
+                className={cn(
+                  "h-10 rounded-2xl border border-zc-border bg-zc-panel/20 p-1",
+                )}
+              >
+                <TabsTrigger
+                  value="iqc"
                   className={cn(
-                    "rounded-lg px-4 py-2 text-sm font-medium",
-                    tab === t
-                      ? "bg-zc-accent text-zc-text"
-                      : "text-zc-muted hover:bg-zc-panel/50",
+                    "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
                   )}
                 >
-                  {t === "iqc" ? `IQC (${iqcRecords.length})` : t === "eqas" ? `EQAS (${eqasRecords.length})` : `Calibration (${calibrationRecords.length})`}
-                </button>
-              ))}
-            </div>
+                  IQC ({iqcRecords.length})
+                </TabsTrigger>
+                <TabsTrigger
+                  value="eqas"
+                  className={cn(
+                    "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
+                  )}
+                >
+                  EQAS ({eqasRecords.length})
+                </TabsTrigger>
+                <TabsTrigger
+                  value="calibration"
+                  className={cn(
+                    "rounded-xl px-3 data-[state=active]:bg-zc-accent data-[state=active]:text-white data-[state=active]:shadow-sm",
+                  )}
+                >
+                  Calibration ({calibrationRecords.length})
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
 
             {/* Search */}
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

@@ -12,6 +12,21 @@ export class CrossMatchController {
 
   private principal(req: any) { return req.principal; }
 
+  @Get("cross-match")
+  @Permissions(PERM.BB_CROSSMATCH_READ)
+  listCrossMatches(
+    @Req() req: any,
+    @Query("branchId") branchId?: string,
+    @Query("result") result?: string,
+    @Query("method") method?: string,
+  ) {
+    return this.svc.listCrossMatches(this.principal(req), {
+      branchId: branchId ?? null,
+      result,
+      method,
+    });
+  }
+
   @Get("requests")
   @Permissions(PERM.BB_REQUEST_READ)
   listRequests(
