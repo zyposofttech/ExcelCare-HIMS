@@ -274,6 +274,11 @@ function StartTransfusionDialog({
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
+  const [scannedPatientId, setScannedPatientId] = React.useState("");
+  const [scannedUnitBarcode, setScannedUnitBarcode] = React.useState("");
+  const [verifier2, setVerifier2] = React.useState("");
+
+  // Optional note (kept for UX; backend uses authenticated principal as the administering staff)
   const [verifiedBy, setVerifiedBy] = React.useState("");
   const [startNotes, setStartNotes] = React.useState("");
 
@@ -281,6 +286,9 @@ function StartTransfusionDialog({
     if (open) {
       setErr(null);
       setBusy(false);
+      setScannedPatientId("");
+      setScannedUnitBarcode("");
+      setVerifier2("");
       setVerifiedBy("");
       setStartNotes("");
     }
@@ -290,14 +298,27 @@ function StartTransfusionDialog({
     setErr(null);
     if (!canSubmit) return setErr(deniedMessage);
     if (!issue?.id) return setErr("No issue selected");
-    if (!verifiedBy.trim()) return setErr("Verified-by name is required");
+    if (!scannedPatientId.trim()) return setErr("Wristband scan (Patient ID / UHID) is required");
+    if (!scannedUnitBarcode.trim()) return setErr("Unit scan (barcode / unit number) is required");
+    if (!verifier2.trim()) return setErr("Second verifier is required");
 
     setBusy(true);
     try {
+      // Mandatory bedside verification BEFORE starting transfusion.
+      await apiFetch(`/api/blood-bank/issue/${issue.id}/bedside-verify`, {
+        method: "POST",
+        body: JSON.stringify({
+          scannedPatientId: scannedPatientId.trim(),
+          scannedUnitBarcode: scannedUnitBarcode.trim(),
+          verifier2StaffId: verifier2.trim(),
+        }),
+      });
+
       await apiFetch(`/api/blood-bank/issue/${issue.id}/transfusion/start`, {
         method: "POST",
         body: JSON.stringify({
-          verifiedBy: verifiedBy.trim(),
+          // Optional free-text note (kept for UX)
+          verifiedBy: verifiedBy.trim() || null,
           startNotes: startNotes.trim() || null,
         }),
       });
@@ -330,7 +351,7 @@ function StartTransfusionDialog({
             Start Transfusion
           </DialogTitle>
           <DialogDescription>
-            Begin blood transfusion for unit {issue.unitNumber ?? issue.id}. Ensure bedside identity verification is complete.
+            Begin blood transfusion for unit {issue.unitNumber ?? issue.id}. Bedside verification is mandatory and will be recorded.
           </DialogDescription>
         </DialogHeader>
 
@@ -345,13 +366,53 @@ function StartTransfusionDialog({
 
         <div className="grid gap-6">
           <div className="grid gap-3">
-            <div className="text-sm font-semibold text-zc-text">Verification</div>
+            <div className="text-sm font-semibold text-zc-text">Bedside Verification (Mandatory)</div>
 
             <div className="grid gap-2">
-              <Label>Verified By</Label>
-              <Input value={verifiedBy} onChange={(e) => setVerifiedBy(e.target.value)} placeholder="Name of verifying nurse / doctor" />
+              <Label>Wristband Scan (Patient ID / UHID)</Label>
+              <Input
+                value={scannedPatientId}
+                onChange={(e) => setScannedPatientId(e.target.value)}
+                placeholder="Scan / enter Patient ID or UHID"
+              />
               <p className="text-[11px] text-zc-muted">
-                Person who performed bedside identity verification before transfusion.
+                Accepts either internal Patient ID or UHID, depending on wristband encoding.
+              </p>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Unit Scan (Barcode / Unit Number)</Label>
+              <Input
+                value={scannedUnitBarcode}
+                onChange={(e) => setScannedUnitBarcode(e.target.value)}
+                placeholder="Scan / enter unit barcode or unit number"
+              />
+              <p className="text-[11px] text-zc-muted">
+                System blocks mismatches and records near-miss events.
+              </p>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Second Verifier</Label>
+              <Input
+                value={verifier2}
+                onChange={(e) => setVerifier2(e.target.value)}
+                placeholder="Enter staff ID / name of second verifier"
+              />
+              <p className="text-[11px] text-zc-muted">
+                Two-person verification is required for non-emergency transfusions.
+              </p>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Admin / Notes (Optional)</Label>
+              <Input
+                value={verifiedBy}
+                onChange={(e) => setVerifiedBy(e.target.value)}
+                placeholder="Optional note (e.g., verifying nurse/doctor name)"
+              />
+              <p className="text-[11px] text-zc-muted">
+                The system records authenticated staff automatically; this is an optional free-text note.
               </p>
             </div>
 
@@ -384,6 +445,7 @@ function StartTransfusionDialog({
     </Dialog>
   );
 }
+
 
 /* ------------------------------------------------------------------ */
 /*  End Transfusion Dialog                                            */

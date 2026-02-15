@@ -4403,6 +4403,105 @@ enum OtEquipmentCategory {
   OTHER
 }
 
+enum OtStaffRole {
+  OT_IN_CHARGE
+  OT_TECHNICIAN
+  SCRUB_NURSE
+  CIRCULATING_NURSE
+  RECOVERY_NURSE
+  OT_ATTENDANT
+  HOUSEKEEPING
+  ANESTHESIA_TECHNICIAN
+}
+
+enum OtSessionType {
+  ELECTIVE
+  EMERGENCY
+  BOTH
+}
+
+enum OtSurgeryCategory {
+  MINOR
+  MAJOR
+  COMPLEX
+  DAYCARE
+}
+
+enum OtChargeComponentType {
+  THEATRE_CHARGE
+  ANESTHESIA_CHARGE
+  SURGEON_FEE
+  ASSISTANT_SURGEON_FEE
+  MATERIAL_CHARGE
+  IMPLANT_CHARGE
+  MONITORING_CHARGE
+}
+
+enum OtChargeModel {
+  PER_HOUR
+  PER_SLAB
+  FLAT
+}
+
+enum OtComplianceConfigType {
+  WHO_CHECKLIST
+  INFECTION_ZONE
+  FUMIGATION
+  BIOMEDICAL_WASTE
+  FIRE_SAFETY
+  SSI_SURVEILLANCE
+}
+
+enum OtChecklistPhase {
+  SIGN_IN
+  TIME_OUT
+  SIGN_OUT
+  PRE_OP
+  SPECIALTY
+}
+
+enum OtZoneType {
+  UNRESTRICTED
+  SEMI_RESTRICTED
+  RESTRICTED
+}
+
+enum OtBookingApprovalMode {
+  DIRECT
+  APPROVAL_REQUIRED
+  AUTO_APPROVE_NOTIFY
+}
+
+enum OtReviewAction {
+  APPROVED
+  REJECTED
+  CONDITIONAL
+}
+
+enum OtDecommissionType {
+  TEMPORARY
+  PERMANENT
+}
+
+enum OtImplantCategory {
+  ORTHOPEDIC
+  CARDIAC
+  OPHTHALMIC
+  GENERAL
+}
+
+enum OtEmergencyCategory {
+  IMMEDIATE
+  URGENT
+  EXPEDITED
+}
+
+enum OtCancellationAuthority {
+  SURGEON
+  OT_IN_CHARGE
+  ADMIN
+}
+
 model OtSuite {
   id       String @id @default(cuid())
   branchId String
@@ -4419,12 +4518,44 @@ model OtSuite {
   // Suite-level config (turnaround time, cleaning time, min recovery bays, etc.)
   config Json?
 
+  // Review & activation fields
+  activatedAt         DateTime?
+  activatedByUserId   String?
+  reviewStatus        String? // IN_REVIEW, VALIDATED
+  lastValidationScore Int?
+  lastValidationAt    DateTime?
+
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   spaces    OtSpace[]
   equipment OtEquipment[]
+
+  // New relations for sub-modules
+  schedulingRules       OtSchedulingRule[]
+  staffAssignments      OtStaffAssignment[]
+  surgeonPrivileges     OtSurgeonPrivilege[]
+  anesthetistPrivileges OtAnesthetistPrivilege[]
+  minStaffingRules      OtMinStaffingRule[]
+  zoneAccessRules       OtZoneAccessRule[]
+  storeLinks            OtStoreLink[]
+  consumableTemplates   OtConsumableTemplate[]
+  implantTrackingRules  OtImplantTrackingRule[]
+  parLevels             OtParLevel[]
+  surgeryTypeDefaults   OtSurgeryTypeDefault[]
+  checklistTemplates    OtChecklistTemplate[]
+  cancellationPolicy    OtCancellationPolicy?
+  bookingApprovalConfig OtBookingApprovalConfig?
+  utilizationTargets    OtUtilizationTarget[]
+  recoveryProtocols     OtRecoveryProtocol[]
+  notificationRules     OtNotificationRule[]
+  serviceLinks          OtServiceLink[]
+  chargeComponents      OtChargeComponent[]
+  complianceConfigs     OtComplianceConfig[]
+  emergencyPolicy       OtEmergencyPolicy?
+  goLiveValidations     OtGoLiveValidation[]
+  reviewRecords         OtReviewRecord[]
 
   @@unique([branchId, code])
   @@index([branchId])
@@ -4455,6 +4586,12 @@ model OtSpace {
   recoveryBay OtRecoveryBay?
   equipment   OtEquipment[]
 
+  zoneAccessRule        OtZoneAccessRule?
+  schedulingRules       OtSchedulingRule[]
+  surgeonPrivileges     OtSurgeonPrivilege[]
+  anesthetistPrivileges OtAnesthetistPrivilege[]
+  minStaffingRules      OtMinStaffingRule[]
+
   @@unique([suiteId, code])
   @@index([suiteId, type])
   @@index([locationNodeId])
@@ -4476,6 +4613,39 @@ model OtTheatre {
   // If your DB is Postgres, String[] is fine. Otherwise switch to Json.
   specialtyCodes String[] @default([])
 
+  // Engineering specs (OTS-014)
+  area                Float?
+  ceilingHeight       Float?
+  gasO2               Boolean @default(false)
+  gasO2Outlets        Int     @default(0)
+  gasN2O              Boolean @default(false)
+  gasN2OOutlets       Int     @default(0)
+  gasAir              Boolean @default(false)
+  gasAirOutlets       Int     @default(0)
+  gasVacuum           Boolean @default(false)
+  gasVacuumOutlets    Int     @default(0)
+  upsOutlets          Int     @default(0)
+  isolatedPowerSupply Boolean @default(false)
+  tempMin             Float?
+  tempMax             Float?
+  humidityMin         Float?
+  humidityMax         Float?
+  luxLevel            Int?
+  emergencyLighting   Boolean @default(false)
+
+  // Scheduling params (OTS-016)
+  turnaroundTimeMin  Int @default(30)
+  cleaningTimeMin    Int @default(15)
+  maxCasesPerDay     Int @default(8)
+  defaultSlotMinor   Int @default(60)
+  defaultSlotMajor   Int @default(120)
+  defaultSlotComplex Int @default(180)
+  bufferEmergencyMin Int @default(15)
+
+  // Emergency (OTS-019)
+  isEmergencyEligible Boolean @default(false)
+  is24x7Emergency     Boolean @default(false)
+
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -4493,6 +4663,14 @@ model OtRecoveryBay {
   bedCount     Int @default(1)
   monitorCount Int @default(0)
   oxygenPoints Int @default(0)
+
+  // Extended recovery detail fields (OTS-007)
+  suctionPoints          Int     @default(0)
+  defaultRecoveryMinor   Int     @default(30)
+  defaultRecoveryMajor   Int     @default(60)
+  defaultRecoveryComplex Int     @default(90)
+  nurseToPatientRatio    String?
+  monitoringStationCount Int     @default(0)
 
   meta Json?
 
@@ -4555,6 +4733,460 @@ model OtEquipment {
 
   @@index([suiteId, category])
   @@index([spaceId])
+}
+
+// OT Scheduling Rules — operating hours & specialty-day allocation (OTS-017, OTS-018)
+model OtSchedulingRule {
+  id             String   @id @default(cuid())
+  suiteId        String
+  suite          OtSuite  @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  theatreSpaceId String?
+  theatreSpace   OtSpace? @relation(fields: [theatreSpaceId], references: [id], onDelete: SetNull)
+
+  dayOfWeek        Int // 0=Sun .. 6=Sat
+  startTime        String
+  endTime          String
+  sessionType      OtSessionType
+  lunchStart       String?
+  lunchEnd         String?
+  specialtyCode    String?
+  isEffectiveDated Boolean       @default(false)
+  effectiveFrom    DateTime?
+  effectiveTo      DateTime?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, theatreSpaceId, dayOfWeek, startTime, specialtyCode])
+  @@index([suiteId])
+}
+
+// OT Staff Assignment — default OT staff (OTS-027)
+model OtStaffAssignment {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  staffId      String
+  role         OtStaffRole
+  defaultShift String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, staffId, role])
+  @@index([suiteId])
+}
+
+// OT Surgeon Privilege — surgeon→theatre mapping (OTS-028)
+model OtSurgeonPrivilege {
+  id             String   @id @default(cuid())
+  suiteId        String
+  suite          OtSuite  @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  theatreSpaceId String?
+  theatreSpace   OtSpace? @relation(fields: [theatreSpaceId], references: [id], onDelete: SetNull)
+
+  staffId       String
+  specialtyCode String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, theatreSpaceId, staffId])
+  @@index([suiteId])
+}
+
+// OT Anesthetist Privilege — anesthetist→theatre mapping (OTS-029)
+model OtAnesthetistPrivilege {
+  id             String   @id @default(cuid())
+  suiteId        String
+  suite          OtSuite  @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  theatreSpaceId String?
+  theatreSpace   OtSpace? @relation(fields: [theatreSpaceId], references: [id], onDelete: SetNull)
+
+  staffId             String
+  concurrentCaseLimit Int       @default(1)
+  effectiveFrom       DateTime
+  effectiveTo         DateTime?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, theatreSpaceId, staffId])
+  @@index([suiteId])
+}
+
+// OT Min Staffing Rule — minimum staffing per surgery category (OTS-031)
+model OtMinStaffingRule {
+  id             String   @id @default(cuid())
+  suiteId        String
+  suite          OtSuite  @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  theatreSpaceId String?
+  theatreSpace   OtSpace? @relation(fields: [theatreSpaceId], references: [id], onDelete: SetNull)
+
+  surgeryCategory          OtSurgeryCategory
+  minSurgeons              Int               @default(1)
+  minAnesthetists          Int               @default(1)
+  minScrubNurses           Int               @default(1)
+  minCirculatingNurses     Int               @default(1)
+  minOtTechnicians         Int               @default(0)
+  minAnesthesiaTechnicians Int               @default(0)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, theatreSpaceId, surgeryCategory])
+  @@index([suiteId])
+}
+
+// OT Zone Access Rule — zone-based access control (OTS-030)
+model OtZoneAccessRule {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  spaceId String  @unique
+  space   OtSpace @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+
+  zone         OtZoneType
+  allowedRoles String[]
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, spaceId])
+  @@index([suiteId])
+}
+
+// OT Store Link — OT pharmacy store linkage (OTS-034, OTS-038)
+model OtStoreLink {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  pharmacyStoreId String
+  linkType        String // OT_STORE, ANESTHESIA_STORE, NARCOTICS_VAULT
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, linkType])
+  @@index([suiteId])
+}
+
+// OT Consumable Template — default consumable lists (OTS-035)
+model OtConsumableTemplate {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  name            String
+  surgeryCategory OtSurgeryCategory
+  specialtyCode   String?
+  items           Json // array of {name, qty, drugMasterId?}
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([suiteId])
+}
+
+// OT Implant Tracking Rule — implant tracking config (OTS-036)
+model OtImplantTrackingRule {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  category                OtImplantCategory
+  mandatoryBarcodeScan    Boolean           @default(true)
+  mandatoryBatchSerial    Boolean           @default(true)
+  mandatoryManufacturer   Boolean           @default(true)
+  mandatoryPatientConsent Boolean           @default(true)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, category])
+  @@index([suiteId])
+}
+
+// OT Par Level — par levels for OT items (OTS-037)
+model OtParLevel {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  itemName          String
+  drugMasterId      String?
+  minStock          Int
+  reorderLevel      Int
+  reorderQty        Int
+  maxStock          Int
+  isNeverOutOfStock Boolean @default(false)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([suiteId])
+}
+
+// OT Surgery Type Default — surgery categories & durations (OTS-039)
+model OtSurgeryTypeDefault {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  category                 OtSurgeryCategory
+  minDurationMin           Int
+  defaultDurationMin       Int
+  maxDurationMin           Int
+  requiresIcuBooking       Boolean           @default(false)
+  requiresBloodReservation Boolean           @default(false)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, category])
+  @@index([suiteId])
+}
+
+// OT Checklist Template — checklist templates (OTS-040, OTS-045, OTS-052)
+model OtChecklistTemplate {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  name         String
+  phase        OtChecklistPhase
+  templateType String // WHO, PRE_OP, CONSENT, SPECIALTY
+  items        Json // array of {label, type: YES_NO|TEXT|NUMERIC|SIGNATURE|PHOTO, required, responsibleRole}
+  version      Int              @default(1)
+  isSystem     Boolean          @default(false)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([suiteId])
+}
+
+// OT Cancellation Policy — cancellation rules (OTS-041)
+model OtCancellationPolicy {
+  id      String  @id @default(cuid())
+  suiteId String  @unique
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  minNoticeHours            Int                       @default(24)
+  cancellationAuthority     OtCancellationAuthority[]
+  mandatoryReasonRequired   Boolean                   @default(true)
+  reasons                   Json? // dropdown options array
+  maxReschedulesPerCase     Int                       @default(3)
+  priorityBoostOnReschedule Boolean                   @default(false)
+  autoNotifyPatient         Boolean                   @default(true)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// OT Booking Approval Config — booking workflow (OTS-042)
+model OtBookingApprovalConfig {
+  id      String  @id @default(cuid())
+  suiteId String  @unique
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  defaultMode          OtBookingApprovalMode @default(DIRECT)
+  minorMode            OtBookingApprovalMode @default(DIRECT)
+  majorMode            OtBookingApprovalMode @default(APPROVAL_REQUIRED)
+  complexMode          OtBookingApprovalMode @default(APPROVAL_REQUIRED)
+  emergencyMode        OtBookingApprovalMode @default(DIRECT)
+  approvalTimeoutHours Int                   @default(24)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// OT Utilization Target — utilization tracking (OTS-043)
+model OtUtilizationTarget {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  metricCode         String
+  targetValue        Float
+  alertThresholdLow  Float?
+  alertThresholdHigh Float?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, metricCode])
+  @@index([suiteId])
+}
+
+// OT Recovery Protocol — post-op recovery (OTS-044)
+model OtRecoveryProtocol {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  surgeryCategory         OtSurgeryCategory
+  monitoringFrequencyMin  Int               @default(15)
+  mandatoryVitals         Json // array of vital types
+  minRecoveryDurationMin  Int               @default(30)
+  dischargeScoreThreshold Int               @default(9) // Modified Aldrete Score
+  escalationRules         Json?
+  dischargeSignOffRole    String            @default("RECOVERY_NURSE")
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, surgeryCategory])
+  @@index([suiteId])
+}
+
+// OT Notification Rule — notification config (OTS-046)
+model OtNotificationRule {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  eventType      String
+  recipientRoles String[]
+  channels       String[]
+  timing         String
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, eventType])
+  @@index([suiteId])
+}
+
+// OT Service Link — surgical service linkage (OTS-047)
+model OtServiceLink {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  serviceItemId               String
+  specialtyCode               String
+  surgeryCategory             OtSurgeryCategory
+  defaultTheatreType          OtTheatreType?
+  requiredEquipmentCategories String[]          @default([])
+  snomedCode                  String?
+  icd10PcsCode                String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, serviceItemId])
+  @@index([suiteId])
+}
+
+// OT Charge Component — OT billing components (OTS-048)
+model OtChargeComponent {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  componentType OtChargeComponentType
+  chargeModel   OtChargeModel
+  serviceItemId String?
+  glCode        String?
+  gstApplicable Boolean               @default(false)
+  defaultRate   Float?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, componentType])
+  @@index([suiteId])
+}
+
+// OT Compliance Config — compliance settings (OTS-052 to OTS-058)
+model OtComplianceConfig {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  configType   OtComplianceConfigType
+  config       Json // type-specific settings
+  lastAuditAt  DateTime?
+  nextAuditDue DateTime?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([suiteId, configType])
+  @@index([suiteId])
+}
+
+// OT Emergency Policy — emergency OT policy (OTS-019)
+model OtEmergencyPolicy {
+  id      String  @id @default(cuid())
+  suiteId String  @unique
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  hasDedicatedEmergencyOt Boolean @default(false)
+  dedicatedTheatreSpaceId String?
+  availability            String  @default("24x7")
+  escalationRule          String  @default("QUEUE_WITH_ETA")
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// OT Go-Live Validation — validation run records (OTS-059)
+model OtGoLiveValidation {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  runByUserId    String
+  runAt          DateTime @default(now())
+  score          Int
+  totalChecks    Int
+  passedChecks   Int
+  blockersFailed Int
+  warningsFailed Int
+  results        Json // detailed check results
+
+  @@index([suiteId])
+}
+
+// OT Review Record — review audit trail (OTS-060, OTS-061)
+model OtReviewRecord {
+  id      String  @id @default(cuid())
+  suiteId String
+  suite   OtSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  reviewerId String
+  action     OtReviewAction
+  comments   String?
+  reviewedAt DateTime       @default(now())
+
+  @@index([suiteId])
 }
 
 // ---------------- Diagnostics Facilities (Infrastructure) ----------------

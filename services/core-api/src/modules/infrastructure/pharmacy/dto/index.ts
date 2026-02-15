@@ -12,3 +12,4 @@ export { BulkImportSuppliersDto } from "./bulk-import-suppliers.dto";
 export { CreateDrugInteractionDto, UpdateDrugInteractionDto } from "./create-drug-interaction.dto";
 export { CreateTherapeuticSubstitutionDto, UpdateTherapeuticSubstitutionDto } from "./create-therapeutic-substitution.dto";
 export { CreateDrugCategoryDto, UpdateDrugCategoryDto } from "./create-drug-category.dto";
+export { AddNarcoticsEntryDto } from "./add-narcotics-entry.dto";

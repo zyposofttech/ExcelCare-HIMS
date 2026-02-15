@@ -82,7 +82,10 @@ export default function MTPDashboardPage() {
   const [rows, setRows] = React.useState<any[]>([]);
   const [err, setErr] = React.useState<string | null>(null);
 
+
   const [activateOpen, setActivateOpen] = React.useState(false);
+  const [releaseOpen, setReleaseOpen] = React.useState(false);
+  const [releaseSession, setReleaseSession] = React.useState<any | null>(null);
 
   /* ---- Filtered list ---- */
   const filtered = React.useMemo(() => {
@@ -137,6 +140,10 @@ export default function MTPDashboardPage() {
     } catch (e: any) {
       toast({ variant: "destructive", title: "Deactivate failed", description: e?.message || "Deactivate failed" });
     }
+  }
+  async function handleOpenReleasePack(session: any) {
+    setReleaseSession(session);
+    setReleaseOpen(true);
   }
 
   return (
@@ -302,7 +309,20 @@ export default function MTPDashboardPage() {
                         <div className="flex items-center justify-end gap-2">
                           {isActive && canActivate ? (
                             <Button
-                              variant="secondary"
+                              variant="primary"
+                              size="sm"
+                              onClick={() => void handleOpenReleasePack(s)}
+                              title="Release emergency pack"
+                              aria-label="Release emergency pack"
+                            >
+                              Release Pack
+                            </Button>
+                          ) : null}
+
+                          {isActive && canActivate ? (
+
+                            <Button
+                              variant="warning"
                               size="sm"
                               onClick={() => void handleDeactivate(s.id)}
                               title="Deactivate MTP"
@@ -346,6 +366,19 @@ export default function MTPDashboardPage() {
         deniedMessage="Missing permission: BB_MTP_ACTIVATE"
         branchId={branchId ?? ""}
       />
+      <ReleasePackDialog
+  open={releaseOpen}
+  onClose={() => {
+    setReleaseOpen(false);
+    setReleaseSession(null);
+  }}
+  branchId={branchId ?? ""}
+  session={releaseSession}
+  canSubmit={canActivate}
+  deniedMessage="Missing permission: BB_MTP_ACTIVATE"
+  onReleased={() => refresh(false)}
+/>
+
     </AppShell>
   );
 }
@@ -516,3 +549,181 @@ function ActivateMTPDialog({
     </Dialog>
   );
 }
+function ReleasePackDialog({
+  open,
+  onClose,
+  onReleased,
+  canSubmit,
+  deniedMessage,
+  branchId,
+  session,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onReleased: () => void;
+  canSubmit: boolean;
+  deniedMessage: string;
+  branchId: string;
+  session: any | null;
+}) {
+  const { toast } = useToast();
+
+  const [saving, setSaving] = React.useState(false);
+  const [prbc, setPrbc] = React.useState("4");
+  const [ffp, setFfp] = React.useState("4");
+  const [issuedToWard, setIssuedToWard] = React.useState("");
+  const [issuedToPerson, setIssuedToPerson] = React.useState("");
+  const [transportTemp, setTransportTemp] = React.useState("");
+  const [notes, setNotes] = React.useState("MTP emergency uncrossmatched pack");
+
+  React.useEffect(() => {
+    if (!open) return;
+    setPrbc("4");
+    setFfp("4");
+    setIssuedToWard("");
+    setIssuedToPerson("");
+    setTransportTemp("");
+    setNotes("MTP emergency uncrossmatched pack");
+  }, [open]);
+
+  async function submit() {
+    if (!canSubmit) {
+      toast({ variant: "destructive", title: "Permission denied", description: deniedMessage });
+      return;
+    }
+    if (!branchId) {
+      toast({ variant: "destructive", title: "Missing branch", description: "Select a branch first." });
+      return;
+    }
+    if (!session?.id) {
+      toast({ variant: "destructive", title: "Missing session", description: "No MTP session selected." });
+      return;
+    }
+
+    const prbcUnits = Math.max(0, Number(prbc || 0));
+    const ffpUnits = Math.max(0, Number(ffp || 0));
+    if (prbcUnits + ffpUnits < 1) {
+      toast({ variant: "destructive", title: "Invalid counts", description: "Enter at least 1 unit to release." });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const payload: any = {
+        branchId,
+        prbcUnits,
+        ffpUnits,
+        issuedToWard: issuedToWard.trim() || undefined,
+        issuedToPerson: issuedToPerson.trim() || undefined,
+        transportBoxTemp: transportTemp ? Number(transportTemp) : undefined,
+        notes: notes.trim() || undefined,
+      };
+
+      const res: any = await apiFetch(`/api/blood-bank/issue/mtp/${session.id}/release-pack`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      const issued = Array.isArray(res?.issues) ? res.issues.length : 0;
+      toast({
+        variant: "success",
+        title: "Emergency pack released",
+        description: issued ? `Issued ${issued} unit(s) for MTP ${session.id}.` : `Pack released for MTP ${session.id}.`,
+      });
+
+      onClose();
+      onReleased();
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Release failed", description: e?.message || "Release failed" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : null)}>
+      <DialogContent className={drawerClassName("max-w-[720px]")}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Siren className="h-5 w-5 text-red-600" />
+            Release Emergency Pack
+          </DialogTitle>
+          <DialogDescription>
+            Uncrossmatched emergency release for an active MTP session. Default pack: 4 O-negative PRBC + 4 AB FFP.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4">
+          <div className="rounded-xl border border-zc-border bg-zc-panel/20 p-3">
+            <div className="text-xs text-zc-muted">MTP Session</div>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <span className="rounded-lg border border-zc-border bg-zc-accent/20 px-2 py-1 font-mono text-xs text-zc-text">
+                {session?.id ?? "-"}
+              </span>
+              {session?.patientName ? <span className="text-sm font-semibold text-zc-text">{session.patientName}</span> : null}
+              {session?.status ? <span>{statusBadge(session.status)}</span> : null}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>PRBC Units (O-negative)</Label>
+              <Input value={prbc} onChange={(e) => setPrbc(e.target.value)} placeholder="4" inputMode="numeric" />
+            </div>
+            <div className="grid gap-2">
+              <Label>FFP Units (AB)</Label>
+              <Input value={ffp} onChange={(e) => setFfp(e.target.value)} placeholder="4" inputMode="numeric" />
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Issued To Ward (optional)</Label>
+              <Input value={issuedToWard} onChange={(e) => setIssuedToWard(e.target.value)} placeholder="ER / OT / ICU" />
+            </div>
+            <div className="grid gap-2">
+              <Label>Issued To Person (optional)</Label>
+              <Input value={issuedToPerson} onChange={(e) => setIssuedToPerson(e.target.value)} placeholder="Staff name" />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Transport Box Temp °C (optional)</Label>
+              <Input value={transportTemp} onChange={(e) => setTransportTemp(e.target.value)} placeholder="e.g., 4.0" inputMode="decimal" />
+            </div>
+            <div className="grid gap-2">
+              <Label>Notes</Label>
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Reason / context" />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-100">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4" />
+              <div>
+                <div className="font-semibold">Safety gates enforced</div>
+                <div className="mt-0.5 text-xs leading-relaxed opacity-90">
+                  Only units with verified grouping, verified NON-REACTIVE TTI, valid expiry, and compliant cold-chain (no pending temp breach / overdue calibration) will be released.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="mt-4">
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={() => void submit()} disabled={saving}>
+            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Release Pack
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+

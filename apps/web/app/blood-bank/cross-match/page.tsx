@@ -129,14 +129,12 @@ function CrossMatchEditorModal({
   onSaved,
   canSubmit,
   deniedMessage,
-  branchId,
 }: {
   open: boolean;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   canSubmit: boolean;
   deniedMessage: string;
-  branchId: string;
 }) {
   const { toast } = useToast();
   const [busy, setBusy] = React.useState(false);
@@ -172,7 +170,6 @@ function CrossMatchEditorModal({
           bloodUnitId: form.bloodUnitId.trim(),
           method: form.method,
           result: form.result,
-          branchId,
         }),
       });
 
@@ -565,7 +562,6 @@ export default function CrossMatchPage() {
         onSaved={() => refresh(false)}
         canSubmit={canCreate}
         deniedMessage="Missing permission: BB_CROSSMATCH_CREATE"
-        branchId={branchId ?? ""}
       />
     </AppShell>
   );

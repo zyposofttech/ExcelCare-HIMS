@@ -7,6 +7,7 @@ import {
   IssueBloodDto, BedsideVerifyDto, StartTransfusionDto,
   RecordVitalsDto, EndTransfusionDto, ReportReactionDto,
   ReturnUnitDto, ActivateMTPDto,
+  ReleaseMtpPackDto,
 } from "./dto";
 
 @ApiTags("blood-bank/issue")
@@ -45,12 +46,13 @@ export class IssueController {
   @Post("issue")
   @Permissions(PERM.BB_ISSUE_CREATE)
   issue(@Req() req: any, @Body() dto: any) {
-    const issuedTo = String(dto?.issuedTo ?? dto?.issuedToPerson ?? "").trim() || "Unknown";
+    const issuedTo = String(dto?.issuedToPerson ?? dto?.issuedTo ?? "").trim();
     const payload: IssueBloodDto = {
       crossMatchId: String(dto?.crossMatchId ?? "").trim(),
-      issuedTo,
+      issuedToPerson: issuedTo || undefined,
       issuedToWard: dto?.issuedToWard ? String(dto.issuedToWard) : undefined,
-      transportTemp: this.optionalNumber(dto?.transportTemp ?? dto?.transportBoxTemp),
+      transportBoxTemp: this.optionalNumber(dto?.transportBoxTemp ?? dto?.transportTemp),
+      notes: dto?.notes ? String(dto.notes) : undefined,
     };
     return this.svc.issueBlood(this.principal(req), payload);
   }
@@ -65,10 +67,9 @@ export class IssueController {
   @Permissions(PERM.BB_TRANSFUSION_CREATE)
   startTransfusion(@Req() req: any, @Param("id") issueId: string, @Body() dto: any) {
     const payload: StartTransfusionDto = {
-      vitals: dto?.vitals ?? {
-        verifiedBy: dto?.verifiedBy ?? null,
-        startNotes: dto?.startNotes ?? null,
-      },
+      vitals: dto?.vitals ?? {},
+      verifiedBy: dto?.verifiedBy ? String(dto.verifiedBy) : undefined,
+      startNotes: dto?.startNotes ? String(dto.startNotes) : undefined,
     };
     return this.svc.startTransfusion(this.principal(req), issueId, payload);
   }
@@ -77,14 +78,13 @@ export class IssueController {
   @Permissions(PERM.BB_TRANSFUSION_CREATE)
   recordVitals(@Req() req: any, @Param("id") issueId: string, @Body() dto: any) {
     const payload: RecordVitalsDto = {
-      interval: dto?.interval ?? "15min",
-      vitals: dto?.vitals ?? {
-        temperature: dto?.temperature ?? null,
-        pulseRate: dto?.pulseRate ?? null,
-        bloodPressure: dto?.bloodPressure ?? null,
-        respiratoryRate: dto?.respiratoryRate ?? null,
-        notes: dto?.notes ?? null,
-      },
+      interval: dto?.interval ?? "AUTO",
+      vitals: dto?.vitals,
+      temperature: this.optionalNumber(dto?.temperature),
+      pulseRate: this.optionalNumber(dto?.pulseRate),
+      bloodPressure: dto?.bloodPressure ? String(dto.bloodPressure) : undefined,
+      respiratoryRate: this.optionalNumber(dto?.respiratoryRate),
+      notes: dto?.notes ? String(dto.notes) : undefined,
       volumeTransfused: this.optionalNumber(dto?.volumeTransfused),
     };
     return this.svc.recordVitals(this.principal(req), issueId, payload);
@@ -140,5 +140,22 @@ export class IssueController {
   @Permissions(PERM.BB_MTP_READ)
   getMTP(@Req() req: any, @Param("id") id: string) {
     return this.svc.getMTP(this.principal(req), id);
+  }
+
+  @Post("mtp/:id/release-pack")
+  @Post("issue/mtp/:id/release-pack")
+  @Permissions(PERM.BB_MTP_ACTIVATE)
+  releaseMtpPack(@Req() req: any, @Param("id") mtpId: string, @Body() dto: any) {
+    const payload: ReleaseMtpPackDto = {
+      branchId: dto?.branchId ? String(dto.branchId) : undefined,
+      prbcUnits: this.optionalNumber(dto?.prbcUnits ?? dto?.prbc ?? dto?.rbcUnits),
+      ffpUnits: this.optionalNumber(dto?.ffpUnits ?? dto?.ffp ?? dto?.plasmaUnits),
+      plateletUnits: this.optionalNumber(dto?.plateletUnits ?? dto?.pltUnits ?? dto?.platelets),
+      issuedToWard: dto?.issuedToWard ? String(dto.issuedToWard) : undefined,
+      issuedToPerson: dto?.issuedToPerson ? String(dto.issuedToPerson) : undefined,
+      transportBoxTemp: this.optionalNumber(dto?.transportBoxTemp ?? dto?.transportTemp),
+      notes: dto?.notes ? String(dto.notes) : undefined,
+    };
+    return this.svc.releaseMtpEmergencyPack(this.principal(req), mtpId, payload);
   }
 }

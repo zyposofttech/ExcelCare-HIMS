@@ -1870,6 +1870,11 @@ exports.Prisma.OtSuiteScalarFieldEnum = {
   name: 'name',
   status: 'status',
   config: 'config',
+  activatedAt: 'activatedAt',
+  activatedByUserId: 'activatedByUserId',
+  reviewStatus: 'reviewStatus',
+  lastValidationScore: 'lastValidationScore',
+  lastValidationAt: 'lastValidationAt',
   isActive: 'isActive',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
@@ -1898,6 +1903,33 @@ exports.Prisma.OtTheatreScalarFieldEnum = {
   isoClass: 'isoClass',
   meta: 'meta',
   specialtyCodes: 'specialtyCodes',
+  area: 'area',
+  ceilingHeight: 'ceilingHeight',
+  gasO2: 'gasO2',
+  gasO2Outlets: 'gasO2Outlets',
+  gasN2O: 'gasN2O',
+  gasN2OOutlets: 'gasN2OOutlets',
+  gasAir: 'gasAir',
+  gasAirOutlets: 'gasAirOutlets',
+  gasVacuum: 'gasVacuum',
+  gasVacuumOutlets: 'gasVacuumOutlets',
+  upsOutlets: 'upsOutlets',
+  isolatedPowerSupply: 'isolatedPowerSupply',
+  tempMin: 'tempMin',
+  tempMax: 'tempMax',
+  humidityMin: 'humidityMin',
+  humidityMax: 'humidityMax',
+  luxLevel: 'luxLevel',
+  emergencyLighting: 'emergencyLighting',
+  turnaroundTimeMin: 'turnaroundTimeMin',
+  cleaningTimeMin: 'cleaningTimeMin',
+  maxCasesPerDay: 'maxCasesPerDay',
+  defaultSlotMinor: 'defaultSlotMinor',
+  defaultSlotMajor: 'defaultSlotMajor',
+  defaultSlotComplex: 'defaultSlotComplex',
+  bufferEmergencyMin: 'bufferEmergencyMin',
+  isEmergencyEligible: 'isEmergencyEligible',
+  is24x7Emergency: 'is24x7Emergency',
   isActive: 'isActive',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
@@ -1909,6 +1941,12 @@ exports.Prisma.OtRecoveryBayScalarFieldEnum = {
   bedCount: 'bedCount',
   monitorCount: 'monitorCount',
   oxygenPoints: 'oxygenPoints',
+  suctionPoints: 'suctionPoints',
+  defaultRecoveryMinor: 'defaultRecoveryMinor',
+  defaultRecoveryMajor: 'defaultRecoveryMajor',
+  defaultRecoveryComplex: 'defaultRecoveryComplex',
+  nurseToPatientRatio: 'nurseToPatientRatio',
+  monitoringStationCount: 'monitoringStationCount',
   meta: 'meta',
   isActive: 'isActive',
   createdAt: 'createdAt',
@@ -1948,6 +1986,310 @@ exports.Prisma.OtEquipmentScalarFieldEnum = {
   isActive: 'isActive',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtSchedulingRuleScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  theatreSpaceId: 'theatreSpaceId',
+  dayOfWeek: 'dayOfWeek',
+  startTime: 'startTime',
+  endTime: 'endTime',
+  sessionType: 'sessionType',
+  lunchStart: 'lunchStart',
+  lunchEnd: 'lunchEnd',
+  specialtyCode: 'specialtyCode',
+  isEffectiveDated: 'isEffectiveDated',
+  effectiveFrom: 'effectiveFrom',
+  effectiveTo: 'effectiveTo',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtStaffAssignmentScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  staffId: 'staffId',
+  role: 'role',
+  defaultShift: 'defaultShift',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtSurgeonPrivilegeScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  theatreSpaceId: 'theatreSpaceId',
+  staffId: 'staffId',
+  specialtyCode: 'specialtyCode',
+  effectiveFrom: 'effectiveFrom',
+  effectiveTo: 'effectiveTo',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtAnesthetistPrivilegeScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  theatreSpaceId: 'theatreSpaceId',
+  staffId: 'staffId',
+  concurrentCaseLimit: 'concurrentCaseLimit',
+  effectiveFrom: 'effectiveFrom',
+  effectiveTo: 'effectiveTo',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtMinStaffingRuleScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  theatreSpaceId: 'theatreSpaceId',
+  surgeryCategory: 'surgeryCategory',
+  minSurgeons: 'minSurgeons',
+  minAnesthetists: 'minAnesthetists',
+  minScrubNurses: 'minScrubNurses',
+  minCirculatingNurses: 'minCirculatingNurses',
+  minOtTechnicians: 'minOtTechnicians',
+  minAnesthesiaTechnicians: 'minAnesthesiaTechnicians',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtZoneAccessRuleScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  spaceId: 'spaceId',
+  zone: 'zone',
+  allowedRoles: 'allowedRoles',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtStoreLinkScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  pharmacyStoreId: 'pharmacyStoreId',
+  linkType: 'linkType',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtConsumableTemplateScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  name: 'name',
+  surgeryCategory: 'surgeryCategory',
+  specialtyCode: 'specialtyCode',
+  items: 'items',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtImplantTrackingRuleScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  category: 'category',
+  mandatoryBarcodeScan: 'mandatoryBarcodeScan',
+  mandatoryBatchSerial: 'mandatoryBatchSerial',
+  mandatoryManufacturer: 'mandatoryManufacturer',
+  mandatoryPatientConsent: 'mandatoryPatientConsent',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtParLevelScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  itemName: 'itemName',
+  drugMasterId: 'drugMasterId',
+  minStock: 'minStock',
+  reorderLevel: 'reorderLevel',
+  reorderQty: 'reorderQty',
+  maxStock: 'maxStock',
+  isNeverOutOfStock: 'isNeverOutOfStock',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtSurgeryTypeDefaultScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  category: 'category',
+  minDurationMin: 'minDurationMin',
+  defaultDurationMin: 'defaultDurationMin',
+  maxDurationMin: 'maxDurationMin',
+  requiresIcuBooking: 'requiresIcuBooking',
+  requiresBloodReservation: 'requiresBloodReservation',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtChecklistTemplateScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  name: 'name',
+  phase: 'phase',
+  templateType: 'templateType',
+  items: 'items',
+  version: 'version',
+  isSystem: 'isSystem',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtCancellationPolicyScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  minNoticeHours: 'minNoticeHours',
+  cancellationAuthority: 'cancellationAuthority',
+  mandatoryReasonRequired: 'mandatoryReasonRequired',
+  reasons: 'reasons',
+  maxReschedulesPerCase: 'maxReschedulesPerCase',
+  priorityBoostOnReschedule: 'priorityBoostOnReschedule',
+  autoNotifyPatient: 'autoNotifyPatient',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtBookingApprovalConfigScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  defaultMode: 'defaultMode',
+  minorMode: 'minorMode',
+  majorMode: 'majorMode',
+  complexMode: 'complexMode',
+  emergencyMode: 'emergencyMode',
+  approvalTimeoutHours: 'approvalTimeoutHours',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtUtilizationTargetScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  metricCode: 'metricCode',
+  targetValue: 'targetValue',
+  alertThresholdLow: 'alertThresholdLow',
+  alertThresholdHigh: 'alertThresholdHigh',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtRecoveryProtocolScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  surgeryCategory: 'surgeryCategory',
+  monitoringFrequencyMin: 'monitoringFrequencyMin',
+  mandatoryVitals: 'mandatoryVitals',
+  minRecoveryDurationMin: 'minRecoveryDurationMin',
+  dischargeScoreThreshold: 'dischargeScoreThreshold',
+  escalationRules: 'escalationRules',
+  dischargeSignOffRole: 'dischargeSignOffRole',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtNotificationRuleScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  eventType: 'eventType',
+  recipientRoles: 'recipientRoles',
+  channels: 'channels',
+  timing: 'timing',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtServiceLinkScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  serviceItemId: 'serviceItemId',
+  specialtyCode: 'specialtyCode',
+  surgeryCategory: 'surgeryCategory',
+  defaultTheatreType: 'defaultTheatreType',
+  requiredEquipmentCategories: 'requiredEquipmentCategories',
+  snomedCode: 'snomedCode',
+  icd10PcsCode: 'icd10PcsCode',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtChargeComponentScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  componentType: 'componentType',
+  chargeModel: 'chargeModel',
+  serviceItemId: 'serviceItemId',
+  glCode: 'glCode',
+  gstApplicable: 'gstApplicable',
+  defaultRate: 'defaultRate',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtComplianceConfigScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  configType: 'configType',
+  config: 'config',
+  lastAuditAt: 'lastAuditAt',
+  nextAuditDue: 'nextAuditDue',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtEmergencyPolicyScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  hasDedicatedEmergencyOt: 'hasDedicatedEmergencyOt',
+  dedicatedTheatreSpaceId: 'dedicatedTheatreSpaceId',
+  availability: 'availability',
+  escalationRule: 'escalationRule',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.OtGoLiveValidationScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  runByUserId: 'runByUserId',
+  runAt: 'runAt',
+  score: 'score',
+  totalChecks: 'totalChecks',
+  passedChecks: 'passedChecks',
+  blockersFailed: 'blockersFailed',
+  warningsFailed: 'warningsFailed',
+  results: 'results'
+};
+
+exports.Prisma.OtReviewRecordScalarFieldEnum = {
+  id: 'id',
+  suiteId: 'suiteId',
+  reviewerId: 'reviewerId',
+  action: 'action',
+  comments: 'comments',
+  reviewedAt: 'reviewedAt'
 };
 
 exports.Prisma.DiagnosticSectionScalarFieldEnum = {
@@ -4607,6 +4949,94 @@ exports.OtEquipmentCategory = exports.$Enums.OtEquipmentCategory = {
   OTHER: 'OTHER'
 };
 
+exports.OtSessionType = exports.$Enums.OtSessionType = {
+  ELECTIVE: 'ELECTIVE',
+  EMERGENCY: 'EMERGENCY',
+  BOTH: 'BOTH'
+};
+
+exports.OtStaffRole = exports.$Enums.OtStaffRole = {
+  OT_IN_CHARGE: 'OT_IN_CHARGE',
+  OT_TECHNICIAN: 'OT_TECHNICIAN',
+  SCRUB_NURSE: 'SCRUB_NURSE',
+  CIRCULATING_NURSE: 'CIRCULATING_NURSE',
+  RECOVERY_NURSE: 'RECOVERY_NURSE',
+  OT_ATTENDANT: 'OT_ATTENDANT',
+  HOUSEKEEPING: 'HOUSEKEEPING',
+  ANESTHESIA_TECHNICIAN: 'ANESTHESIA_TECHNICIAN'
+};
+
+exports.OtSurgeryCategory = exports.$Enums.OtSurgeryCategory = {
+  MINOR: 'MINOR',
+  MAJOR: 'MAJOR',
+  COMPLEX: 'COMPLEX',
+  DAYCARE: 'DAYCARE'
+};
+
+exports.OtZoneType = exports.$Enums.OtZoneType = {
+  UNRESTRICTED: 'UNRESTRICTED',
+  SEMI_RESTRICTED: 'SEMI_RESTRICTED',
+  RESTRICTED: 'RESTRICTED'
+};
+
+exports.OtImplantCategory = exports.$Enums.OtImplantCategory = {
+  ORTHOPEDIC: 'ORTHOPEDIC',
+  CARDIAC: 'CARDIAC',
+  OPHTHALMIC: 'OPHTHALMIC',
+  GENERAL: 'GENERAL'
+};
+
+exports.OtChecklistPhase = exports.$Enums.OtChecklistPhase = {
+  SIGN_IN: 'SIGN_IN',
+  TIME_OUT: 'TIME_OUT',
+  SIGN_OUT: 'SIGN_OUT',
+  PRE_OP: 'PRE_OP',
+  SPECIALTY: 'SPECIALTY'
+};
+
+exports.OtCancellationAuthority = exports.$Enums.OtCancellationAuthority = {
+  SURGEON: 'SURGEON',
+  OT_IN_CHARGE: 'OT_IN_CHARGE',
+  ADMIN: 'ADMIN'
+};
+
+exports.OtBookingApprovalMode = exports.$Enums.OtBookingApprovalMode = {
+  DIRECT: 'DIRECT',
+  APPROVAL_REQUIRED: 'APPROVAL_REQUIRED',
+  AUTO_APPROVE_NOTIFY: 'AUTO_APPROVE_NOTIFY'
+};
+
+exports.OtChargeComponentType = exports.$Enums.OtChargeComponentType = {
+  THEATRE_CHARGE: 'THEATRE_CHARGE',
+  ANESTHESIA_CHARGE: 'ANESTHESIA_CHARGE',
+  SURGEON_FEE: 'SURGEON_FEE',
+  ASSISTANT_SURGEON_FEE: 'ASSISTANT_SURGEON_FEE',
+  MATERIAL_CHARGE: 'MATERIAL_CHARGE',
+  IMPLANT_CHARGE: 'IMPLANT_CHARGE',
+  MONITORING_CHARGE: 'MONITORING_CHARGE'
+};
+
+exports.OtChargeModel = exports.$Enums.OtChargeModel = {
+  PER_HOUR: 'PER_HOUR',
+  PER_SLAB: 'PER_SLAB',
+  FLAT: 'FLAT'
+};
+
+exports.OtComplianceConfigType = exports.$Enums.OtComplianceConfigType = {
+  WHO_CHECKLIST: 'WHO_CHECKLIST',
+  INFECTION_ZONE: 'INFECTION_ZONE',
+  FUMIGATION: 'FUMIGATION',
+  BIOMEDICAL_WASTE: 'BIOMEDICAL_WASTE',
+  FIRE_SAFETY: 'FIRE_SAFETY',
+  SSI_SURVEILLANCE: 'SSI_SURVEILLANCE'
+};
+
+exports.OtReviewAction = exports.$Enums.OtReviewAction = {
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+  CONDITIONAL: 'CONDITIONAL'
+};
+
 exports.DiagnosticSectionType = exports.$Enums.DiagnosticSectionType = {
   LAB: 'LAB',
   IMAGING: 'IMAGING',
@@ -5420,6 +5850,29 @@ exports.Prisma.ModelName = {
   OtRecoveryBay: 'OtRecoveryBay',
   OtTable: 'OtTable',
   OtEquipment: 'OtEquipment',
+  OtSchedulingRule: 'OtSchedulingRule',
+  OtStaffAssignment: 'OtStaffAssignment',
+  OtSurgeonPrivilege: 'OtSurgeonPrivilege',
+  OtAnesthetistPrivilege: 'OtAnesthetistPrivilege',
+  OtMinStaffingRule: 'OtMinStaffingRule',
+  OtZoneAccessRule: 'OtZoneAccessRule',
+  OtStoreLink: 'OtStoreLink',
+  OtConsumableTemplate: 'OtConsumableTemplate',
+  OtImplantTrackingRule: 'OtImplantTrackingRule',
+  OtParLevel: 'OtParLevel',
+  OtSurgeryTypeDefault: 'OtSurgeryTypeDefault',
+  OtChecklistTemplate: 'OtChecklistTemplate',
+  OtCancellationPolicy: 'OtCancellationPolicy',
+  OtBookingApprovalConfig: 'OtBookingApprovalConfig',
+  OtUtilizationTarget: 'OtUtilizationTarget',
+  OtRecoveryProtocol: 'OtRecoveryProtocol',
+  OtNotificationRule: 'OtNotificationRule',
+  OtServiceLink: 'OtServiceLink',
+  OtChargeComponent: 'OtChargeComponent',
+  OtComplianceConfig: 'OtComplianceConfig',
+  OtEmergencyPolicy: 'OtEmergencyPolicy',
+  OtGoLiveValidation: 'OtGoLiveValidation',
+  OtReviewRecord: 'OtReviewRecord',
   DiagnosticSection: 'DiagnosticSection',
   DiagnosticCategory: 'DiagnosticCategory',
   SpecimenType: 'SpecimenType',

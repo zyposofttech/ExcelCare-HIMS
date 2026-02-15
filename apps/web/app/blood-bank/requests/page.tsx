@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,7 +36,8 @@ type RequestRow = {
 };
 
 type RequestForm = {
-  patientId: string;
+  uhid: string;
+  patientName: string;
   requestedComponent: string;
   quantityUnits: string;
   urgency: string;
@@ -67,7 +69,8 @@ const URGENCY_OPTIONS = [
 /* ------------------------------------------------------------------ */
 
 const EMPTY_FORM: RequestForm = {
-  patientId: "",
+  uhid: "",
+  patientName: "",
   requestedComponent: "",
   quantityUnits: "",
   urgency: "",
@@ -172,7 +175,8 @@ function EditorModal({
     setErr(null);
     if (!canSubmit) return setErr(deniedMessage);
 
-    if (!form.patientId.trim()) return setErr("Patient ID / UHID is required");
+    if (!form.uhid.trim()) return setErr("UHID is required");
+    if (!form.patientName.trim()) return setErr("Patient name is required");
     if (!form.requestedComponent) return setErr("Requested component is required");
 
     const qty = Number(form.quantityUnits);
@@ -187,7 +191,8 @@ function EditorModal({
       await apiFetch("/api/blood-bank/requests", {
         method: "POST",
         body: JSON.stringify({
-          patientId: form.patientId.trim(),
+          uhid: form.uhid.trim(),
+          patientName: form.patientName.trim(),
           requestedComponent: form.requestedComponent,
           quantityUnits: qty,
           urgency: form.urgency,
@@ -252,13 +257,24 @@ function EditorModal({
           <div className="grid gap-3">
             <div className="text-sm font-semibold text-zc-text">Patient</div>
 
-            <div className="grid gap-2">
-              <Label>Patient ID / UHID</Label>
-              <Input
-                value={form.patientId}
-                onChange={(e) => set("patientId", e.target.value)}
-                placeholder="Enter patient UHID or ID"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>UHID</Label>
+                <Input
+                  value={form.uhid}
+                  onChange={(e) => set("uhid", e.target.value)}
+                  placeholder="e.g. UHID-000123"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label>Patient Name</Label>
+                <Input
+                  value={form.patientName}
+                  onChange={(e) => set("patientName", e.target.value)}
+                  placeholder="e.g. Ramesh Kumar"
+                />
+              </div>
             </div>
           </div>
 
@@ -363,8 +379,8 @@ export default function BloodRequestsPage() {
   const user = useAuthStore((s) => s.user);
   const { branchId } = useBranchContext();
 
-  const canRead = hasPerm(user, "BB_CROSSMATCH_READ");
-  const canCreate = hasPerm(user, "BB_CROSSMATCH_CREATE");
+  const canRead = hasPerm(user, "BB_REQUEST_READ");
+  const canCreate = hasPerm(user, "BB_REQUEST_CREATE");
 
   const [q, setQ] = React.useState("");
   const [loading, setLoading] = React.useState(false);
@@ -396,7 +412,10 @@ export default function BloodRequestsPage() {
     setErr(null);
     setLoading(true);
     try {
-      const data = await apiFetch<RequestRow[]>(`/api/blood-bank/requests?branchId=${branchId}`);
+      const url = branchId
+        ? `/api/blood-bank/requests?branchId=${encodeURIComponent(branchId)}`
+        : "/api/blood-bank/requests";
+      const data = await apiFetch<RequestRow[]>(url);
       const sorted = [...(data ?? [])].sort((a, b) => {
         const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -590,14 +609,16 @@ export default function BloodRequestsPage() {
 
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
-                        <Button
-                          variant="info"
-                          size="icon"
-                          title="View request details"
-                          aria-label="View request details"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                        <Link href={`/blood-bank/requests/${r.id}`} prefetch={false}>
+                          <Button
+                            variant="info"
+                            size="icon"
+                            title="View request details"
+                            aria-label="View request details"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </Link>
                       </div>
                     </td>
                   </tr>
@@ -614,8 +635,8 @@ export default function BloodRequestsPage() {
         onClose={() => setCreateOpen(false)}
         onSaved={() => refresh(false)}
         canSubmit={canCreate}
-        deniedMessage="Missing permission: BB_CROSSMATCH_CREATE"
-        branchId={branchId ?? ""}
+        deniedMessage="Missing permission: BB_REQUEST_CREATE"
+        branchId={branchId}
       />
     </AppShell>
   );

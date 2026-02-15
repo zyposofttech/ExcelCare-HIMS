@@ -6,3 +6,4 @@ export { EndTransfusionDto } from "./end-transfusion.dto";
 export { ReportReactionDto } from "./report-reaction.dto";
 export { ReturnUnitDto } from "./return-unit.dto";
 export { ActivateMTPDto } from "./activate-mtp.dto";
+export { ReleaseMtpPackDto } from "./release-mtp-pack.dto";

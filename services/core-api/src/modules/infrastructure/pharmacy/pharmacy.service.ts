@@ -2,6 +2,12 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import type { Principal } from "../../auth/access-policy.service";
 import { InfraContextService } from "../shared/infra-context.service";
 import type { CreatePharmacyStoreDto, UpdatePharmacyStoreDto } from "./dto";
+import {
+  assertCapabilitiesForStoreType,
+  assertLocationNodeInBranch,
+  assertNoStoreHierarchyCycle,
+  assertStaffIsPharmacistInBranch,
+} from "./pharmacy.validators";
 
 @Injectable()
 export class PharmacyService {
@@ -91,6 +97,25 @@ export class PharmacyService {
     const branchId = this.ctx.resolveBranchId(principal, branchIdParam ?? null);
     const storeCode = dto.storeCode.toUpperCase().trim();
 
+    const defaultCaps = (() => {
+      switch (dto.storeType) {
+        case "IP_PHARMACY":
+        case "OP_PHARMACY":
+        case "EMERGENCY":
+          return { canDispense: true, canReceiveStock: true, canReturnVendor: false };
+        case "MAIN":
+          return { canDispense: false, canReceiveStock: true, canReturnVendor: true };
+        case "OT_STORE":
+        case "ICU_STORE":
+        case "WARD_STORE":
+        case "NARCOTICS":
+        default:
+          return { canDispense: false, canReceiveStock: true, canReturnVendor: false };
+      }
+    })();
+
+    assertCapabilitiesForStoreType(dto.storeType, { is24x7: dto.is24x7, canDispense: dto.canDispense });
+
     // BR-001: Only 1 MAIN store per branch
     if (dto.storeType === "MAIN") {
       const existingMain = await this.ctx.prisma.pharmacyStore.findFirst({
@@ -107,11 +132,6 @@ export class PharmacyService {
       throw new BadRequestException("Non-MAIN stores must have a parent store assigned");
     }
 
-    // BR-004: Emergency must be 24x7
-    if (dto.storeType === "EMERGENCY" && dto.is24x7 === false) {
-      throw new BadRequestException("Emergency pharmacy must be flagged as 24x7");
-    }
-
     // Validate parent store belongs to same branch
     if (dto.parentStoreId) {
       const parent = await this.ctx.prisma.pharmacyStore.findFirst({
@@ -121,13 +141,16 @@ export class PharmacyService {
       if (!parent) throw new BadRequestException("Parent store not found in this branch");
     }
 
-    // Validate pharmacist exists
+    // Validate location node belongs to branch
+    if (dto.locationNodeId) {
+      await assertLocationNodeInBranch(this.ctx, dto.locationNodeId, branchId);
+    }
+
+    // Validate pharmacist exists, is a pharmacist, assigned to branch, and max 2 stores
     if (dto.pharmacistInChargeId) {
-      const staff = await this.ctx.prisma.staff.findFirst({
-        where: { id: dto.pharmacistInChargeId },
-        select: { id: true },
+      await assertStaffIsPharmacistInBranch(this.ctx, dto.pharmacistInChargeId, branchId, {
+        maxStoresPerBranch: 2,
       });
-      if (!staff) throw new BadRequestException("Pharmacist staff not found");
     }
 
     const created = await this.ctx.prisma.pharmacyStore.create({
@@ -142,10 +165,16 @@ export class PharmacyService {
         drugLicenseNumber: dto.drugLicenseNumber ?? null,
         drugLicenseExpiry: dto.drugLicenseExpiry ? new Date(dto.drugLicenseExpiry) : null,
         is24x7: dto.storeType === "EMERGENCY" ? true : (dto.is24x7 ?? false),
-        canDispense: dto.canDispense ?? false,
+
+        // Store-type safety: these types can never dispense.
+        canDispense: ["MAIN", "OT_STORE", "ICU_STORE", "WARD_STORE", "NARCOTICS"].includes(dto.storeType)
+          ? false
+          : (dto.canDispense ?? defaultCaps.canDispense),
+
         canIndent: dto.canIndent ?? true,
-        canReceiveStock: dto.canReceiveStock ?? false,
-        canReturnVendor: dto.canReturnVendor ?? false,
+        canReceiveStock: dto.canReceiveStock ?? defaultCaps.canReceiveStock,
+        canReturnVendor: dto.canReturnVendor ?? defaultCaps.canReturnVendor,
+
         operatingHours: dto.operatingHours ?? null,
         autoIndentEnabled: dto.autoIndentEnabled ?? false,
         status: "UNDER_SETUP" as any,
@@ -167,20 +196,47 @@ export class PharmacyService {
   async updateStore(principal: Principal, id: string, dto: UpdatePharmacyStoreDto) {
     const current = await this.ctx.prisma.pharmacyStore.findUnique({
       where: { id },
-      select: { id: true, branchId: true, storeType: true },
+      select: { id: true, branchId: true, storeType: true, parentStoreId: true, pharmacistInChargeId: true },
     });
     if (!current) throw new NotFoundException("Pharmacy store not found");
     const branchId = this.ctx.resolveBranchId(principal, current.branchId);
 
     // Validate parent if changing
-    if (dto.parentStoreId !== undefined && dto.parentStoreId) {
-      if (dto.parentStoreId === id) throw new BadRequestException("Store cannot be its own parent");
-      const parent = await this.ctx.prisma.pharmacyStore.findFirst({
-        where: { id: dto.parentStoreId, branchId },
-        select: { id: true },
-      });
-      if (!parent) throw new BadRequestException("Parent store not found in this branch");
+    if (dto.parentStoreId !== undefined) {
+      if (dto.parentStoreId) {
+        if (dto.parentStoreId === id) throw new BadRequestException("Store cannot be its own parent");
+        const parent = await this.ctx.prisma.pharmacyStore.findFirst({
+          where: { id: dto.parentStoreId, branchId },
+          select: { id: true },
+        });
+        if (!parent) throw new BadRequestException("Parent store not found in this branch");
+        await assertNoStoreHierarchyCycle(this.ctx, id, dto.parentStoreId, branchId);
+      } else {
+        // Setting parent to null is only allowed for MAIN store
+        if (String(current.storeType) !== "MAIN") {
+          throw new BadRequestException("Non-MAIN stores must have a parent store assigned");
+        }
+      }
     }
+
+    // Validate location node belongs to branch when provided
+    if (dto.locationNodeId !== undefined && dto.locationNodeId) {
+      await assertLocationNodeInBranch(this.ctx, dto.locationNodeId, branchId);
+    }
+
+    // Validate pharmacist when changing
+    if (dto.pharmacistInChargeId !== undefined && dto.pharmacistInChargeId) {
+      await assertStaffIsPharmacistInBranch(this.ctx, dto.pharmacistInChargeId, branchId, {
+        maxStoresPerBranch: 2,
+        ignoreStoreId: id,
+      });
+    }
+
+    // Enforce store-type capability constraints
+    assertCapabilitiesForStoreType(String(current.storeType), {
+      is24x7: dto.is24x7,
+      canDispense: dto.canDispense,
+    });
 
     const data: any = {};
     if (dto.storeName !== undefined) data.storeName = dto.storeName.trim();
@@ -190,7 +246,16 @@ export class PharmacyService {
     if (dto.drugLicenseNumber !== undefined) data.drugLicenseNumber = dto.drugLicenseNumber;
     if (dto.drugLicenseExpiry !== undefined) data.drugLicenseExpiry = dto.drugLicenseExpiry ? new Date(dto.drugLicenseExpiry) : null;
     if (dto.is24x7 !== undefined) data.is24x7 = dto.is24x7;
-    if (dto.canDispense !== undefined) data.canDispense = dto.canDispense;
+
+    if (dto.canDispense !== undefined) {
+      // Safety override for restricted store types
+      if (["MAIN", "OT_STORE", "ICU_STORE", "WARD_STORE", "NARCOTICS"].includes(String(current.storeType))) {
+        data.canDispense = false;
+      } else {
+        data.canDispense = dto.canDispense;
+      }
+    }
+
     if (dto.canIndent !== undefined) data.canIndent = dto.canIndent;
     if (dto.canReceiveStock !== undefined) data.canReceiveStock = dto.canReceiveStock;
     if (dto.canReturnVendor !== undefined) data.canReturnVendor = dto.canReturnVendor;
@@ -218,6 +283,7 @@ export class PharmacyService {
         id: true,
         branchId: true,
         storeType: true,
+        canDispense: true,
         drugLicenseNumber: true,
         pharmacistInChargeId: true,
         parentStoreId: true,
@@ -226,7 +292,7 @@ export class PharmacyService {
     if (!store) throw new NotFoundException("Pharmacy store not found");
     const branchId = this.ctx.resolveBranchId(principal, store.branchId);
 
-    // BR-005: Activation validation
+    // Activation validation
     if (status === "ACTIVE") {
       if (!store.drugLicenseNumber) {
         throw new BadRequestException("Cannot activate store without a valid drug license number");
@@ -234,9 +300,18 @@ export class PharmacyService {
       if (!store.pharmacistInChargeId) {
         throw new BadRequestException("Cannot activate store without a pharmacist-in-charge assigned");
       }
-      if (store.storeType !== "MAIN" && !store.parentStoreId) {
+
+      // Validate pharmacist eligibility
+      await assertStaffIsPharmacistInBranch(this.ctx, store.pharmacistInChargeId, branchId, {
+        maxStoresPerBranch: 2,
+        ignoreStoreId: id,
+      });
+
+      if (String(store.storeType) !== "MAIN" && !store.parentStoreId) {
         throw new BadRequestException("Cannot activate sub-store without a parent store");
       }
+
+      assertCapabilitiesForStoreType(String(store.storeType), { canDispense: store.canDispense });
     }
 
     const updated = await this.ctx.prisma.pharmacyStore.update({
@@ -256,11 +331,7 @@ export class PharmacyService {
     return updated;
   }
 
-  async listLicenseHistory(
-    principal: Principal,
-    storeId: string,
-    q: { page?: string; pageSize?: string },
-  ) {
+  async listLicenseHistory(principal: Principal, storeId: string, q: { page?: string; pageSize?: string }) {
     const store = await this.ctx.prisma.pharmacyStore.findUnique({
       where: { id: storeId },
       select: { id: true, branchId: true },

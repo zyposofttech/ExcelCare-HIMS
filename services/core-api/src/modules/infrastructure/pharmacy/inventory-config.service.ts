@@ -5,7 +5,11 @@ import {
 } from "@nestjs/common";
 import type { Principal } from "../../auth/access-policy.service";
 import { InfraContextService } from "../shared/infra-context.service";
-import type { SetInventoryConfigDto, CreateIndentMappingDto } from "./dto";
+import type {
+  AddNarcoticsEntryDto,
+  CreateIndentMappingDto,
+  SetInventoryConfigDto,
+} from "./dto";
 
 @Injectable()
 export class InventoryConfigService {
@@ -22,6 +26,7 @@ export class InventoryConfigService {
     principal: Principal,
     query: {
       storeId?: string | null;
+      drugId?: string | null;
       branchId?: string | null;
       page?: string | number | null;
       pageSize?: string | number | null;
@@ -46,6 +51,17 @@ export class InventoryConfigService {
       where.pharmacyStore = { branchId };
     }
 
+    if (query.drugId) {
+      const drug = await this.ctx.prisma.drugMaster.findFirst({
+        where: { id: query.drugId, branchId },
+        select: { id: true },
+      });
+      if (!drug) {
+        throw new BadRequestException("Invalid drugId for this branch");
+      }
+      where.drugMasterId = query.drugId;
+    }
+
     const page = Math.max(1, Number(query.page ?? 1));
     const pageSize = Math.min(500, Math.max(1, Number(query.pageSize ?? 100)));
     const skip = (page - 1) * pageSize;
@@ -65,10 +81,11 @@ export class InventoryConfigService {
               brandName: true,
               category: true,
               isNarcotic: true,
+              status: true,
             },
           },
           pharmacyStore: {
-            select: { id: true, storeCode: true, storeName: true },
+            select: { id: true, storeCode: true, storeName: true, status: true },
           },
         },
       }),
@@ -109,24 +126,26 @@ export class InventoryConfigService {
       );
     }
 
-    // Validate all drugs exist
+    // Validate all drugs exist in THIS branch
     const drugs = await this.ctx.prisma.drugMaster.findMany({
-      where: { id: { in: drugIds } },
+      where: { id: { in: drugIds }, branchId: bid },
       select: { id: true },
     });
     const validDrugIds = new Set(drugs.map((d) => d.id));
     const invalidDrugs = drugIds.filter((did) => !validDrugIds.has(did));
     if (invalidDrugs.length) {
       throw new BadRequestException(
-        `Invalid drug master IDs: ${invalidDrugs.join(", ")}`,
+        `Invalid drug master IDs (not found or different branch): ${invalidDrugs.join(", ")}`,
       );
     }
 
     // Validate min/max stock logic per entry
     for (const cfg of configs) {
       if (
-        cfg.minimumStock !== undefined && cfg.minimumStock !== null &&
-        cfg.maximumStock !== undefined && cfg.maximumStock !== null &&
+        cfg.minimumStock !== undefined &&
+        cfg.minimumStock !== null &&
+        cfg.maximumStock !== undefined &&
+        cfg.maximumStock !== null &&
         cfg.minimumStock > cfg.maximumStock
       ) {
         throw new BadRequestException(
@@ -185,13 +204,39 @@ export class InventoryConfigService {
     return { upserted: results.length, configs: results };
   }
 
+  async deleteInventoryConfig(principal: Principal, id: string) {
+    const row = await this.ctx.prisma.inventoryConfig.findUnique({
+      where: { id },
+      include: {
+        pharmacyStore: { select: { id: true, branchId: true, storeCode: true } },
+        drugMaster: { select: { id: true, drugCode: true } },
+      },
+    });
+    if (!row) throw new NotFoundException("Inventory config not found");
+
+    const bid = this.ctx.resolveBranchId(principal, row.pharmacyStore.branchId);
+
+    await this.ctx.prisma.inventoryConfig.delete({ where: { id } });
+
+    await this.ctx.audit.log({
+      branchId: bid,
+      actorUserId: principal.userId,
+      action: "PHARMACY_INVENTORY_CONFIG_DELETE",
+      entity: "InventoryConfig",
+      entityId: id,
+      meta: {
+        storeCode: row.pharmacyStore.storeCode,
+        drugCode: row.drugMaster.drugCode,
+      },
+    });
+
+    return { deleted: true, id };
+  }
+
   // ================================================================
   // INDENT MAPPING (store-to-store)
   // ================================================================
 
-  // ----------------------------------------------------------------
-  // List all indent mappings for a branch, include store names
-  // ----------------------------------------------------------------
   async listIndentMappings(principal: Principal, branchId?: string | null) {
     const bid = this.ctx.resolveBranchId(principal, branchId ?? null);
 
@@ -202,19 +247,27 @@ export class InventoryConfigService {
       orderBy: [{ createdAt: "desc" }],
       include: {
         requestingStore: {
-          select: { id: true, storeCode: true, storeName: true, storeType: true, status: true },
+          select: {
+            id: true,
+            storeCode: true,
+            storeName: true,
+            storeType: true,
+            status: true,
+          },
         },
         supplyingStore: {
-          select: { id: true, storeCode: true, storeName: true, storeType: true, status: true },
+          select: {
+            id: true,
+            storeCode: true,
+            storeName: true,
+            storeType: true,
+            status: true,
+          },
         },
       },
     });
   }
 
-  // ----------------------------------------------------------------
-  // Create indent mapping. Validate stores exist, same branch,
-  // no self-reference. Audit log.
-  // ----------------------------------------------------------------
   async createIndentMapping(
     principal: Principal,
     dto: CreateIndentMappingDto,
@@ -222,14 +275,12 @@ export class InventoryConfigService {
   ) {
     const bid = this.ctx.resolveBranchId(principal, branchId ?? null);
 
-    // No self-reference
     if (dto.requestingStoreId === dto.supplyingStoreId) {
       throw new BadRequestException(
         "A store cannot indent from itself. requestingStoreId and supplyingStoreId must be different.",
       );
     }
 
-    // Validate both stores exist in the same branch
     const [requestingStore, supplyingStore] = await Promise.all([
       this.ctx.prisma.pharmacyStore.findFirst({
         where: { id: dto.requestingStoreId, branchId: bid },
@@ -252,7 +303,6 @@ export class InventoryConfigService {
       );
     }
 
-    // Check for duplicate
     const existing = await this.ctx.prisma.storeIndentMapping.findUnique({
       where: {
         requestingStoreId_supplyingStoreId: {
@@ -301,14 +351,13 @@ export class InventoryConfigService {
     return mapping;
   }
 
-  // ----------------------------------------------------------------
-  // Delete indent mapping
-  // ----------------------------------------------------------------
   async deleteIndentMapping(principal: Principal, id: string) {
     const mapping = await this.ctx.prisma.storeIndentMapping.findUnique({
       where: { id },
       include: {
-        requestingStore: { select: { id: true, branchId: true, storeCode: true } },
+        requestingStore: {
+          select: { id: true, branchId: true, storeCode: true },
+        },
         supplyingStore: { select: { id: true, storeCode: true } },
       },
     });
@@ -337,9 +386,6 @@ export class InventoryConfigService {
   // NARCOTICS REGISTER (immutable entries)
   // ================================================================
 
-  // ----------------------------------------------------------------
-  // List narcotics register entries (paginated, filterable)
-  // ----------------------------------------------------------------
   async listNarcoticsRegister(
     principal: Principal,
     query: {
@@ -354,27 +400,31 @@ export class InventoryConfigService {
   ) {
     const branchId = this.ctx.resolveBranchId(principal, query.branchId ?? null);
 
-    const where: any = {
-      pharmacyStore: { branchId },
-    };
-
     if (query.storeId) {
-      where.pharmacyStoreId = query.storeId;
+      const store = await this.ctx.prisma.pharmacyStore.findFirst({
+        where: { id: query.storeId, branchId },
+        select: { id: true },
+      });
+      if (!store) throw new BadRequestException("Invalid storeId for this branch");
     }
 
     if (query.drugId) {
-      where.drugMasterId = query.drugId;
+      const drug = await this.ctx.prisma.drugMaster.findFirst({
+        where: { id: query.drugId, branchId },
+        select: { id: true },
+      });
+      if (!drug) throw new BadRequestException("Invalid drugId for this branch");
     }
 
-    // Date range filter on createdAt
+    const where: any = { pharmacyStore: { branchId } };
+
+    if (query.storeId) where.pharmacyStoreId = query.storeId;
+    if (query.drugId) where.drugMasterId = query.drugId;
+
     if (query.from || query.to) {
       where.createdAt = {};
-      if (query.from) {
-        where.createdAt.gte = new Date(query.from);
-      }
-      if (query.to) {
-        where.createdAt.lte = new Date(query.to);
-      }
+      if (query.from) where.createdAt.gte = new Date(query.from);
+      if (query.to) where.createdAt.lte = new Date(query.to);
     }
 
     const page = Math.max(1, Number(query.page ?? 1));
@@ -395,10 +445,11 @@ export class InventoryConfigService {
               genericName: true,
               brandName: true,
               scheduleClass: true,
+              isNarcotic: true,
             },
           },
           pharmacyStore: {
-            select: { id: true, storeCode: true, storeName: true },
+            select: { id: true, storeCode: true, storeName: true, storeType: true },
           },
           performedByUser: {
             select: { id: true, name: true },
@@ -411,58 +462,104 @@ export class InventoryConfigService {
     return { page, pageSize, total, rows };
   }
 
-  // ----------------------------------------------------------------
-  // Add an immutable narcotics register entry.
-  // Validates store is NARCOTICS type or drug isNarcotic.
-  // ----------------------------------------------------------------
   async addNarcoticsEntry(
     principal: Principal,
-    entry: {
-      pharmacyStoreId: string;
-      drugMasterId: string;
-      transactionType: string;
-      quantity: number | string;
-      batchNumber?: string | null;
-      balanceBefore: number | string;
-      balanceAfter: number | string;
-      witnessName?: string | null;
-      witnessSignature?: string | null;
-      notes?: string | null;
-    },
+    entry: AddNarcoticsEntryDto,
     branchId?: string | null,
   ) {
     const bid = this.ctx.resolveBranchId(principal, branchId ?? null);
 
-    // Validate store exists in this branch
     const store = await this.ctx.prisma.pharmacyStore.findFirst({
       where: { id: entry.pharmacyStoreId, branchId: bid },
-      select: { id: true, storeType: true, storeCode: true },
+      select: { id: true, storeType: true, status: true, storeCode: true },
     });
     if (!store) {
       throw new BadRequestException("Invalid pharmacyStoreId for this branch");
     }
-
-    // Validate drug exists
-    const drug = await this.ctx.prisma.drugMaster.findUnique({
-      where: { id: entry.drugMasterId },
-      select: { id: true, drugCode: true, isNarcotic: true, scheduleClass: true },
-    });
-    if (!drug) {
-      throw new BadRequestException("Invalid drugMasterId");
-    }
-
-    // Drug must be narcotic OR store must be NARCOTICS type
-    const isNarcoticsStore = String(store.storeType) === "NARCOTICS_VAULT";
-    if (!drug.isNarcotic && !isNarcoticsStore) {
+    if (String(store.storeType) !== "NARCOTICS") {
       throw new BadRequestException(
-        "Narcotics register entries require either a narcotic drug or a NARCOTICS_VAULT store type",
+        "Narcotics register entries can only be recorded in a NARCOTICS store",
+      );
+    }
+    if (String(store.status) !== "ACTIVE") {
+      throw new BadRequestException(
+        "Narcotics register store must be ACTIVE to add entries",
       );
     }
 
-    // Validate quantity is positive
+    const drug = await this.ctx.prisma.drugMaster.findFirst({
+      where: { id: entry.drugMasterId, branchId: bid },
+      select: {
+        id: true,
+        drugCode: true,
+        isNarcotic: true,
+        scheduleClass: true,
+        status: true,
+      },
+    });
+    if (!drug) {
+      throw new BadRequestException("Invalid drugMasterId for this branch");
+    }
+    if (String(drug.status) !== "ACTIVE") {
+      throw new BadRequestException(
+        "Only ACTIVE drugs can be used for narcotics register entries",
+      );
+    }
+    if (!drug.isNarcotic) {
+      throw new BadRequestException(
+        "Only narcotic/controlled drugs are allowed in the narcotics register",
+      );
+    }
+
+    const txType = String(entry.transactionType);
+    const allowed = new Set(["RECEIPT", "ISSUE", "WASTAGE", "ADJUSTMENT"]);
+    if (!allowed.has(txType)) throw new BadRequestException("Invalid transactionType");
+
     const quantity = Number(entry.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new BadRequestException("quantity must be a positive number");
+    }
+
+    const balanceBefore = Number(entry.balanceBefore);
+    const balanceAfter = Number(entry.balanceAfter);
+    if (!Number.isFinite(balanceBefore) || balanceBefore < 0) {
+      throw new BadRequestException("balanceBefore must be a non-negative number");
+    }
+    if (!Number.isFinite(balanceAfter) || balanceAfter < 0) {
+      throw new BadRequestException("balanceAfter must be a non-negative number");
+    }
+
+    // Balance integrity (deterministic)
+    if (txType === "RECEIPT") {
+      const expected = balanceBefore + quantity;
+      if (Math.abs(expected - balanceAfter) > 1e-9) {
+        throw new BadRequestException(
+          "For RECEIPT, balanceAfter must equal balanceBefore + quantity",
+        );
+      }
+    } else if (txType === "ISSUE" || txType === "WASTAGE") {
+      const expected = balanceBefore - quantity;
+      if (expected < 0) {
+        throw new BadRequestException("Insufficient balance for this transaction");
+      }
+      if (Math.abs(expected - balanceAfter) > 1e-9) {
+        throw new BadRequestException(
+          "For ISSUE/WASTAGE, balanceAfter must equal balanceBefore - quantity",
+        );
+      }
+    } else if (txType === "ADJUSTMENT") {
+      if (!entry.notes || !String(entry.notes).trim()) {
+        throw new BadRequestException("notes is required for ADJUSTMENT entries");
+      }
+    }
+
+    // Witness enforcement (minimum compliance gate)
+    if (["WASTAGE", "ADJUSTMENT"].includes(txType)) {
+      if (!entry.witnessName || !String(entry.witnessName).trim()) {
+        throw new BadRequestException(
+          "witnessName is required for WASTAGE/ADJUSTMENT entries",
+        );
+      }
     }
 
     const record = await this.ctx.prisma.narcoticsRegister.create({
@@ -472,8 +569,8 @@ export class InventoryConfigService {
         transactionType: entry.transactionType as any,
         quantity,
         batchNumber: entry.batchNumber?.trim() || null,
-        balanceBefore: Number(entry.balanceBefore),
-        balanceAfter: Number(entry.balanceAfter),
+        balanceBefore,
+        balanceAfter,
         witnessName: entry.witnessName?.trim() || null,
         witnessSignature: entry.witnessSignature?.trim() || null,
         notes: entry.notes?.trim() || null,

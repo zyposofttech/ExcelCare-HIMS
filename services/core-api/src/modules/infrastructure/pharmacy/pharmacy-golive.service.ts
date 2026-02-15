@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import type { Principal } from "../../auth/access-policy.service";
 import { InfraContextService } from "../shared/infra-context.service";
 
@@ -32,21 +28,18 @@ export class PharmacyGoLiveService {
     const now = new Date();
     const results: GoLiveCheckResult[] = [];
 
-    // -------- Pre-fetch data in parallel for efficiency --------
     const [
       allStores,
-      activeStores,
       dispensingStores,
       activeDrugCount,
       publishedFormulary,
       interactionCount,
-      narcoticsVaultStores,
-      scheduleXDrugCount,
+      narcoticsStoresActive,
+      narcoticDrugCount,
       supplierCount,
       indentMappingCount,
       top100DrugIds,
     ] = await Promise.all([
-      // All pharmacy stores for this branch
       this.ctx.prisma.pharmacyStore.findMany({
         where: { branchId: bid },
         select: {
@@ -55,52 +48,38 @@ export class PharmacyGoLiveService {
           storeName: true,
           storeType: true,
           status: true,
+          canDispense: true,
           drugLicenseNumber: true,
           drugLicenseExpiry: true,
           pharmacistInChargeId: true,
           parentStoreId: true,
         },
       }),
-      // ACTIVE stores
-      this.ctx.prisma.pharmacyStore.count({
-        where: { branchId: bid, status: "ACTIVE" as any },
-      }),
-      // Dispensing stores
       this.ctx.prisma.pharmacyStore.count({
         where: { branchId: bid, canDispense: true, status: "ACTIVE" as any },
       }),
-      // Active drugs
       this.ctx.prisma.drugMaster.count({
         where: { branchId: bid, status: "ACTIVE" as any },
       }),
-      // Published formulary
       this.ctx.prisma.formulary.findFirst({
         where: { branchId: bid, status: "PUBLISHED" as any },
         select: { id: true, version: true, publishedAt: true },
       }),
-      // Drug interactions count
       this.ctx.prisma.drugInteraction.count({
-        where: {
-          drugA: { branchId: bid },
-        },
+        where: { drugA: { branchId: bid } },
       }),
-      // Narcotics vault stores
       this.ctx.prisma.pharmacyStore.count({
-        where: { branchId: bid, storeType: "NARCOTICS_VAULT" as any },
+        where: { branchId: bid, storeType: "NARCOTICS" as any, status: "ACTIVE" as any },
       }),
-      // Schedule X drugs (narcotic/controlled)
       this.ctx.prisma.drugMaster.count({
         where: { branchId: bid, status: "ACTIVE" as any, isNarcotic: true },
       }),
-      // Supplier count
       this.ctx.prisma.pharmSupplier.count({
         where: { branchId: bid, status: "ACTIVE" as any },
       }),
-      // Indent mapping count
       this.ctx.prisma.storeIndentMapping.count({
         where: { requestingStore: { branchId: bid } },
       }),
-      // Top 100 drugs by code for inventory level check
       this.ctx.prisma.drugMaster.findMany({
         where: { branchId: bid, status: "ACTIVE" as any },
         orderBy: [{ drugCode: "asc" }],
@@ -120,9 +99,10 @@ export class PharmacyGoLiveService {
       description: "At least 1 pharmacy store configured",
       severity: "BLOCKER",
       passed: totalStores >= 1,
-      details: totalStores >= 1
-        ? `${totalStores} pharmacy store(s) configured`
-        : "No pharmacy stores found. Create at least one pharmacy store.",
+      details:
+        totalStores >= 1
+          ? `${totalStores} pharmacy store(s) configured`
+          : "No pharmacy stores found. Create at least one pharmacy store.",
     });
 
     // ================================================================
@@ -143,40 +123,105 @@ export class PharmacyGoLiveService {
 
     // ================================================================
     // PH-GL-003: Every ACTIVE store has valid drug license (BLOCKER)
+    // - must have license number
+    // - must have expiry date
+    // - expiry must be >= today
     // ================================================================
-    const storesWithoutLicense = activeStoresList.filter(
+    const storesWithoutLicenseNumber = activeStoresList.filter(
       (s) => !s.drugLicenseNumber || !s.drugLicenseNumber.trim(),
     );
+    const storesWithoutExpiry = activeStoresList.filter((s) => !s.drugLicenseExpiry);
+    const storesExpired = activeStoresList.filter((s) => {
+      if (!s.drugLicenseExpiry) return false;
+      return new Date(s.drugLicenseExpiry).getTime() < now.getTime();
+    });
+
+    const licenseBlockers = [
+      ...new Set([
+        ...storesWithoutLicenseNumber.map((s) => s.storeCode),
+        ...storesWithoutExpiry.map((s) => s.storeCode),
+        ...storesExpired.map((s) => s.storeCode),
+      ]),
+    ];
+
     results.push({
       checkId: "PH-GL-003",
       description: "Every ACTIVE store has valid drug license",
       severity: "BLOCKER",
-      passed: storesWithoutLicense.length === 0 && activeStoresList.length > 0,
+      passed: licenseBlockers.length === 0 && activeStoresList.length > 0,
       details:
-        storesWithoutLicense.length > 0
-          ? `${storesWithoutLicense.length} ACTIVE store(s) missing drug license: ${storesWithoutLicense.map((s) => s.storeCode).join(", ")}`
+        licenseBlockers.length > 0
+          ? `Invalid license setup for ${licenseBlockers.length} ACTIVE store(s): ${licenseBlockers.join(", ")}`
           : activeStoresList.length === 0
             ? "No ACTIVE stores to validate"
-            : "All ACTIVE stores have drug licenses",
+            : "All ACTIVE stores have license number + expiry and are not expired",
     });
 
     // ================================================================
-    // PH-GL-004: Every ACTIVE store has pharmacist-in-charge (BLOCKER)
+    // PH-GL-004: Every ACTIVE store has eligible pharmacist-in-charge (BLOCKER)
+    // Eligibility:
+    // - staff exists
+    // - staff.status ACTIVE
+    // - staff.staffType PHARMACIST
+    // - staff is assigned to branch (primaryBranchId == branch OR has active assignment)
     // ================================================================
-    const storesWithoutPharmacist = activeStoresList.filter(
-      (s) => !s.pharmacistInChargeId,
+    const pharmacistIds = this.ctx.uniq(
+      activeStoresList.map((s) => s.pharmacistInChargeId).filter(Boolean) as string[],
     );
+
+    const [pharmacistStaff, pharmacistAssignments] = await Promise.all([
+      pharmacistIds.length
+        ? this.ctx.prisma.staff.findMany({
+            where: { id: { in: pharmacistIds } },
+            select: { id: true, status: true, staffType: true, primaryBranchId: true },
+          })
+        : Promise.resolve([]),
+      pharmacistIds.length
+        ? this.ctx.prisma.staffAssignment.findMany({
+            where: {
+              staffId: { in: pharmacistIds },
+              branchId: bid,
+              isActive: true,
+              status: "ACTIVE" as any,
+              approvalStatus: "APPROVED" as any,
+            },
+            select: { staffId: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const staffById = new Map(pharmacistStaff.map((s) => [s.id, s]));
+    const assignedSet = new Set(pharmacistAssignments.map((a) => a.staffId));
+
+    const invalidPharmacistStores = activeStoresList
+      .filter((s) => !s.pharmacistInChargeId)
+      .map((s) => s.storeCode);
+
+    const ineligibleStores = activeStoresList
+      .filter((s) => s.pharmacistInChargeId)
+      .filter((store) => {
+        const staff = staffById.get(store.pharmacistInChargeId!);
+        if (!staff) return true;
+        if (String(staff.status) !== "ACTIVE") return true;
+        if (String(staff.staffType) !== "PHARMACIST") return true;
+        const inBranch = staff.primaryBranchId === bid || assignedSet.has(staff.id);
+        return !inBranch;
+      })
+      .map((s) => s.storeCode);
+
+    const pharmacistFailures = [...invalidPharmacistStores, ...ineligibleStores];
+
     results.push({
       checkId: "PH-GL-004",
       description: "Every ACTIVE store has pharmacist-in-charge",
       severity: "BLOCKER",
-      passed: storesWithoutPharmacist.length === 0 && activeStoresList.length > 0,
+      passed: pharmacistFailures.length === 0 && activeStoresList.length > 0,
       details:
-        storesWithoutPharmacist.length > 0
-          ? `${storesWithoutPharmacist.length} ACTIVE store(s) missing pharmacist-in-charge: ${storesWithoutPharmacist.map((s) => s.storeCode).join(", ")}`
+        pharmacistFailures.length > 0
+          ? `Pharmacist-in-charge missing/ineligible for ${pharmacistFailures.length} ACTIVE store(s): ${pharmacistFailures.join(", ")}`
           : activeStoresList.length === 0
             ? "No ACTIVE stores to validate"
-            : "All ACTIVE stores have a pharmacist-in-charge assigned",
+            : "All ACTIVE stores have eligible pharmacist-in-charge assigned",
     });
 
     // ================================================================
@@ -203,7 +248,7 @@ export class PharmacyGoLiveService {
       passed: dispensingStores >= 1,
       details:
         dispensingStores >= 1
-          ? `${dispensingStores} dispensing-enabled store(s) configured`
+          ? `${dispensingStores} dispensing-enabled ACTIVE store(s) configured`
           : "No ACTIVE stores with canDispense=true found. At least one dispensing store is required.",
     });
 
@@ -235,20 +280,20 @@ export class PharmacyGoLiveService {
     });
 
     // ================================================================
-    // PH-GL-009: Narcotics vault configured if Schedule X drugs in master (WARNING)
+    // PH-GL-009: Narcotics store configured if narcotic drugs exist (WARNING)
     // ================================================================
-    const needsVault = scheduleXDrugCount > 0;
-    const vaultConfigured = narcoticsVaultStores > 0;
+    const needsNarcoticsStore = narcoticDrugCount > 0;
+    const narcoticsStoreOk = narcoticsStoresActive > 0;
     results.push({
       checkId: "PH-GL-009",
-      description: "Narcotics vault configured if Schedule X drugs in master",
+      description: "Narcotics store configured if narcotic drugs exist",
       severity: "WARNING",
-      passed: !needsVault || vaultConfigured,
-      details: !needsVault
-        ? "No Schedule X (narcotic) drugs in master. Narcotics vault not required."
-        : vaultConfigured
-          ? `${narcoticsVaultStores} narcotics vault store(s) configured for ${scheduleXDrugCount} narcotic drug(s)`
-          : `${scheduleXDrugCount} narcotic drug(s) found but no NARCOTICS_VAULT store configured`,
+      passed: !needsNarcoticsStore || narcoticsStoreOk,
+      details: !needsNarcoticsStore
+        ? "No narcotic drugs in master. Narcotics store not required."
+        : narcoticsStoreOk
+          ? `${narcoticsStoresActive} ACTIVE NARCOTICS store(s) configured for ${narcoticDrugCount} narcotic drug(s)`
+          : `${narcoticDrugCount} narcotic drug(s) found but no ACTIVE NARCOTICS store configured`,
     });
 
     // ================================================================
@@ -266,29 +311,33 @@ export class PharmacyGoLiveService {
     });
 
     // ================================================================
-    // PH-GL-011: Inventory levels set for top 100 drugs (WARNING)
+    // PH-GL-011: Inventory levels set for top 100 drugs in MAIN store (WARNING)
     // ================================================================
+    const top100Target = Math.min(100, top100DrugIds.length);
     let inventoryConfigCount = 0;
-    if (top100DrugIds.length > 0) {
+
+    if (mainStore && top100Target > 0) {
       inventoryConfigCount = await this.ctx.prisma.inventoryConfig.count({
         where: {
+          pharmacyStoreId: mainStore.id,
           drugMasterId: { in: top100DrugIds.map((d) => d.id) },
-          pharmacyStore: { branchId: bid },
         },
       });
     }
-    const top100Target = Math.min(100, top100DrugIds.length);
+
     results.push({
       checkId: "PH-GL-011",
       description: "Inventory levels set for top 100 drugs",
       severity: "WARNING",
-      passed: inventoryConfigCount >= top100Target && top100Target > 0,
+      passed: top100Target === 0 || (mainStore ? inventoryConfigCount >= top100Target : false),
       details:
         top100Target === 0
           ? "No active drugs in master to set inventory levels for"
-          : inventoryConfigCount >= top100Target
-            ? `Inventory configs set for ${inventoryConfigCount} of top ${top100Target} drugs`
-            : `Only ${inventoryConfigCount} of top ${top100Target} drugs have inventory configs. Configure stock levels for the remaining.`,
+          : !mainStore
+            ? "Cannot validate inventory levels: no ACTIVE MAIN store (PH-GL-002 failed)"
+            : inventoryConfigCount >= top100Target
+              ? `MAIN store inventory configs set for ${inventoryConfigCount} of top ${top100Target} drugs`
+              : `Only ${inventoryConfigCount} of top ${top100Target} drugs have inventory configs in MAIN store. Configure stock levels for the remaining.`,
     });
 
     // ================================================================
@@ -308,13 +357,13 @@ export class PharmacyGoLiveService {
     });
 
     // ================================================================
-    // PH-GL-013: Drug-to-charge-master mapping (skip - external dependency) (WARNING)
+    // PH-GL-013: Drug-to-charge-master mapping (external dependency) (WARNING)
     // ================================================================
     results.push({
       checkId: "PH-GL-013",
       description: "Drug-to-charge-master mapping (external dependency)",
       severity: "WARNING",
-      passed: true, // Skip - external dependency
+      passed: true,
       details:
         "Skipped: This check depends on the billing/charge-master module integration. Verify manually.",
     });
@@ -325,9 +374,9 @@ export class PharmacyGoLiveService {
     const ninetyDaysFromNow = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
     const storesExpiringSoon = activeStoresList.filter((s) => {
       if (!s.drugLicenseExpiry) return false;
-      const expiry = new Date(s.drugLicenseExpiry);
-      return expiry.getTime() <= ninetyDaysFromNow.getTime();
+      return new Date(s.drugLicenseExpiry).getTime() <= ninetyDaysFromNow.getTime();
     });
+
     results.push({
       checkId: "PH-GL-014",
       description: "Drug license expiry > 90 days from now",
@@ -335,37 +384,44 @@ export class PharmacyGoLiveService {
       passed: storesExpiringSoon.length === 0,
       details:
         storesExpiringSoon.length > 0
-          ? `${storesExpiringSoon.length} store(s) with drug license expiring within 90 days: ${storesExpiringSoon.map((s) => `${s.storeCode} (expires ${new Date(s.drugLicenseExpiry!).toISOString().split("T")[0]})`).join(", ")}`
+          ? `${storesExpiringSoon.length} store(s) with drug license expiring within 90 days: ${storesExpiringSoon
+              .map(
+                (s) =>
+                  `${s.storeCode} (expires ${new Date(s.drugLicenseExpiry!).toISOString().split("T")[0]})`,
+              )
+              .join(", ")}`
           : "All ACTIVE store drug licenses are valid for more than 90 days",
     });
 
     // ================================================================
-    // PH-GL-015: ABC-VED classification done for >= 50% drugs (INFO)
+    // PH-GL-015: ABC-VED classification done for >= 50% active drugs (INFO)
+    // Count UNIQUE drugs having abc/ved set in any inventory config
     // ================================================================
-    let classifiedCount = 0;
+    let classifiedDrugCount = 0;
     if (activeDrugCount > 0) {
-      classifiedCount = await this.ctx.prisma.inventoryConfig.count({
+      const groups = await this.ctx.prisma.inventoryConfig.groupBy({
+        by: ["drugMasterId"],
         where: {
           pharmacyStore: { branchId: bid },
-          OR: [
-            { abcClass: { not: null } },
-            { vedClass: { not: null } },
-          ],
+          drugMaster: { branchId: bid, status: "ACTIVE" as any },
+          OR: [{ abcClass: { not: null } }, { vedClass: { not: null } }],
         },
       });
+      classifiedDrugCount = groups.length;
     }
+
     const classificationTarget = Math.ceil(activeDrugCount * 0.5);
     results.push({
       checkId: "PH-GL-015",
       description: "ABC-VED classification done for >= 50% drugs",
       severity: "INFO",
-      passed: activeDrugCount === 0 || classifiedCount >= classificationTarget,
+      passed: activeDrugCount === 0 || classifiedDrugCount >= classificationTarget,
       details:
         activeDrugCount === 0
           ? "No active drugs to classify"
-          : classifiedCount >= classificationTarget
-            ? `${classifiedCount} drug(s) classified (target: ${classificationTarget} = 50% of ${activeDrugCount})`
-            : `Only ${classifiedCount} drug(s) classified out of required ${classificationTarget} (50% of ${activeDrugCount}). Set ABC/VED classes in inventory config.`,
+          : classifiedDrugCount >= classificationTarget
+            ? `${classifiedDrugCount} drug(s) classified (target: ${classificationTarget} = 50% of ${activeDrugCount})`
+            : `Only ${classifiedDrugCount} drug(s) classified out of required ${classificationTarget} (50% of ${activeDrugCount}). Set ABC/VED classes in inventory config.`,
     });
 
     return results;
