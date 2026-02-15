@@ -1128,8 +1128,44 @@ export function AppShell({
 
   // Role-based navigation filtering (single menu with role-aware visibility)
   const navGroupsForUser = React.useMemo<NavGroup[]>(() => {
-    return filterNavGroupsForUser(NAV_GROUPS, user);
-  }, [user]);
+    const groups = filterNavGroupsForUser(NAV_GROUPS, user);
+
+    // Dynamic OT sub-page injection: when viewing a specific OT suite,
+    // expand the "OT Setup" sidebar group with suite-specific sub-page links.
+    const otMatch = pathname.match(/^\/infrastructure\/ot\/([^/]+)/);
+    if (otMatch) {
+      const suiteId = otMatch[1];
+      const base = `/infrastructure/ot/${suiteId}`;
+      const otSubPages: NavChildLink[] = [
+        { label: "OT Suites", href: "/infrastructure/ot" },
+        { label: "Suite Overview", href: base },
+        { label: "Spaces", href: `${base}/spaces` },
+        { label: "Theatres", href: `${base}/theatres` },
+        { label: "Equipment", href: `${base}/equipment` },
+        { label: "Staff & Access", href: `${base}/staff-access` },
+        { label: "Store & Consumables", href: `${base}/store-consumables` },
+        { label: "Scheduling", href: `${base}/scheduling` },
+        { label: "Billing", href: `${base}/billing` },
+        { label: "Compliance", href: `${base}/compliance` },
+        { label: "Validation", href: `${base}/validation` },
+        { label: "AI Copilot", href: `${base}/copilot`, badge: { label: "AI", tone: "new" } },
+      ];
+      for (const g of groups) {
+        for (const node of g.items) {
+          if (node.children) {
+            node.children = node.children.map((child) => {
+              if (isChildGroup(child) && child.label === "OT Setup") {
+                return { ...child, children: otSubPages };
+              }
+              return child;
+            });
+          }
+        }
+      }
+    }
+
+    return groups;
+  }, [user, pathname]);
 
   // Guard: keep users inside their workspace (defense-in-depth; proxy/middleware should also enforce this)
   React.useEffect(() => {
