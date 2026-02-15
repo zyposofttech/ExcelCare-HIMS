@@ -651,6 +651,7 @@ const ROUTE_RULES: Array<{ root: string; anyPrefixes: string[] }> = [
       "BILLING_SETUP_",
       "BILLING_",
       "BB_",
+      "ot.",
     ],
   },
 
