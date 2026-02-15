@@ -6,14 +6,36 @@ import { Badge } from "@/components/ui/badge";
 import { DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 
+import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
-import { Settings2 } from "lucide-react";
+import { AlertTriangle, Settings2 } from "lucide-react";
 
 import type { DiagnosticKind, ResultDataType, ServicePointType } from "./types";
 
 /* =========================================================
    Small UI helpers shared across diagnostics pages
    ========================================================= */
+
+/**
+ * Guard component shown when branchId is not selected.
+ * The AppShell header always has a branch selector; this message
+ * tells the user to pick one before the page can load data.
+ */
+export function NoBranchGuard() {
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-amber-200/70 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-900/20">
+          <AlertTriangle className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+        </div>
+        <div className="text-base font-semibold text-zc-text">No Branch Selected</div>
+        <div className="max-w-sm text-sm text-zc-muted">
+          Please select a branch from the header to view and manage diagnostics configuration.
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export function Field({
   label,

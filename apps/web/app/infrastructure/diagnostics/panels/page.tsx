@@ -19,7 +19,7 @@ import { ArrowUp, ArrowDown, Plus, X } from "lucide-react";
 
 import type { DiagnosticItemRow, PanelItemRow, SectionRow } from "../_shared/types";
 import { safeArray, normalizeCode, validateCode, validateName } from "../_shared/utils";
-import { Field, ModalHeader, modalClassName } from "../_shared/components";
+import { Field, ModalHeader, NoBranchGuard, modalClassName } from "../_shared/components";
 
 /* =========================================================
    Panels page – compose panel items from the catalog
@@ -27,6 +27,17 @@ import { Field, ModalHeader, modalClassName } from "../_shared/components";
 
 export default function PanelsPage() {
   const { branchId } = useBranchContext();
+
+  return (
+    <AppShell title="Diagnostics - Panels">
+      <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
+        {branchId ? <PanelsContent branchId={branchId} /> : <NoBranchGuard />}
+      </RequirePerm>
+    </AppShell>
+  );
+}
+
+function PanelsContent({ branchId }: { branchId: string }) {
   const { toast } = useToast();
 
   const [loading, setLoading] = React.useState(false);
@@ -130,88 +141,86 @@ export default function PanelsPage() {
   }
 
   return (
-    <AppShell title="Diagnostics - Panels">
-      <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Panels</CardTitle>
-            <CardDescription>Compose panel items from the catalog.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="mb-3 flex justify-end">
-              <Button onClick={() => setCreatePanelOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" /> Create Panel
-              </Button>
-            </div>
-            {err ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{err}</div> : null}
-            <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Panel">
-                  <Select value={panelId} onValueChange={setPanelId} disabled={loading}>
-                    <SelectTrigger className="h-10"><SelectValue placeholder="Select panel" /></SelectTrigger>
+    <>
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Panels</CardTitle>
+          <CardDescription>Compose panel items from the catalog.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="mb-3 flex justify-end">
+            <Button onClick={() => setCreatePanelOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Create Panel
+            </Button>
+          </div>
+          {err ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{err}</div> : null}
+          <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Panel">
+                <Select value={panelId} onValueChange={setPanelId} disabled={loading}>
+                  <SelectTrigger className="h-10"><SelectValue placeholder="Select panel" /></SelectTrigger>
+                  <SelectContent className="max-h-[280px] overflow-y-auto">
+                    {panels.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.name} ({p.code})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Add item">
+                <div className="flex gap-2">
+                  <Select value={addItemId} onValueChange={setAddItemId}>
+                    <SelectTrigger className="h-10"><SelectValue placeholder="Select item" /></SelectTrigger>
                     <SelectContent className="max-h-[280px] overflow-y-auto">
-                      {panels.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name} ({p.code})</SelectItem>
+                      <SelectItem value="none">Select item</SelectItem>
+                      {allItems.filter((i) => i.id !== panelId).map((i) => (
+                        <SelectItem key={i.id} value={i.id}>{i.name} ({i.code})</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </Field>
-                <Field label="Add item">
+                  <Button variant="outline" onClick={addItem} disabled={!panelId || addItemId === "none"}>
+                    Add
+                  </Button>
+                </div>
+              </Field>
+            </div>
+          </div>
+          <Separator className="my-4" />
+          <div className="grid gap-2">
+            {panelItems.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No panel items added.</div>
+            ) : (
+              panelItems.map((p, idx) => (
+                <div key={`${p.itemId}-${idx}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-zc-text">{p.item?.name || p.itemId}</div>
+                    <div className="text-xs text-zc-muted">{p.item?.code || "ITEM"}</div>
+                  </div>
                   <div className="flex gap-2">
-                    <Select value={addItemId} onValueChange={setAddItemId}>
-                      <SelectTrigger className="h-10"><SelectValue placeholder="Select item" /></SelectTrigger>
-                      <SelectContent className="max-h-[280px] overflow-y-auto">
-                        <SelectItem value="none">Select item</SelectItem>
-                        {allItems.filter((i) => i.id !== panelId).map((i) => (
-                          <SelectItem key={i.id} value={i.id}>{i.name} ({i.code})</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button variant="outline" onClick={addItem} disabled={!panelId || addItemId === "none"}>
-                      Add
-                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => move(idx, -1)}><ArrowUp className="h-4 w-4" /></Button>
+                    <Button variant="outline" size="sm" onClick={() => move(idx, 1)}><ArrowDown className="h-4 w-4" /></Button>
+                    <Button variant="destructive" size="sm" onClick={() => remove(idx)}><X className="h-4 w-4" /></Button>
                   </div>
-                </Field>
-              </div>
-            </div>
-            <Separator className="my-4" />
-            <div className="grid gap-2">
-              {panelItems.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">No panel items added.</div>
-              ) : (
-                panelItems.map((p, idx) => (
-                  <div key={`${p.itemId}-${idx}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-zc-text">{p.item?.name || p.itemId}</div>
-                      <div className="text-xs text-zc-muted">{p.item?.code || "ITEM"}</div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => move(idx, -1)}><ArrowUp className="h-4 w-4" /></Button>
-                      <Button variant="outline" size="sm" onClick={() => move(idx, 1)}><ArrowDown className="h-4 w-4" /></Button>
-                      <Button variant="destructive" size="sm" onClick={() => remove(idx)}><X className="h-4 w-4" /></Button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="mt-4 flex justify-end">
-              <Button onClick={savePanel} disabled={!panelId || saving}>
-                Save panel
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-        <CreatePanelDialog
-          open={createPanelOpen}
-          onOpenChange={setCreatePanelOpen}
-          branchId={branchId}
-          onCreated={async (newId) => {
-            await loadLists();
-            setPanelId(newId);
-          }}
-        />
-      </RequirePerm>
-    </AppShell>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button onClick={savePanel} disabled={!panelId || saving}>
+              Save panel
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      <CreatePanelDialog
+        open={createPanelOpen}
+        onOpenChange={setCreatePanelOpen}
+        branchId={branchId}
+        onCreated={async (newId) => {
+          await loadLists();
+          setPanelId(newId);
+        }}
+      />
+    </>
   );
 }
 

@@ -18,6 +18,7 @@ import { cn } from "@/lib/cn";
 import { useToast } from "@/components/ui/use-toast";
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import { safeArray } from "../_shared/utils";
+import { NoBranchGuard } from "../_shared/components";
 
 import { RefreshCw } from "lucide-react";
 
@@ -75,6 +76,17 @@ type SectionKey = "readiness" | "panels" | "tubes" | "gaps" | "loinc" | "lookup"
 
 export default function CopilotPage() {
   const { branchId } = useBranchContext();
+
+  return (
+    <AppShell title="Diagnostics - AI Copilot">
+      <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
+        {branchId ? <CopilotContent branchId={branchId} /> : <NoBranchGuard />}
+      </RequirePerm>
+    </AppShell>
+  );
+}
+
+function CopilotContent({ branchId }: { branchId: string }) {
   const { toast } = useToast();
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
@@ -271,458 +283,454 @@ export default function CopilotPage() {
   }
 
   return (
-    <AppShell title="Diagnostics - AI Copilot">
-      <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">AI Copilot</CardTitle>
-            <CardDescription>Intelligent suggestions for LOINC/SNOMED mapping, gap analysis, and compliance checks.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {err ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{err}</div> : null}
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">AI Copilot</CardTitle>
+        <CardDescription>Intelligent suggestions for LOINC/SNOMED mapping, gap analysis, and compliance checks.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {err ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{err}</div> : null}
 
-            {/* Section switcher */}
-            <div className="mb-4 flex flex-wrap gap-2">
-              {([
-                { key: "readiness" as const, label: "Readiness Score" },
-                { key: "panels" as const, label: "Panel Suggestions" },
-                { key: "tubes" as const, label: "Tube Consolidation" },
-                { key: "gaps" as const, label: "Gap Analysis" },
-                { key: "loinc" as const, label: "LOINC Auto-Map" },
-                { key: "lookup" as const, label: "Code Lookup" },
-              ]).map((s) => (
-                <Button
-                  key={s.key}
-                  variant={activeSection === s.key ? "primary" : "outline"}
-                  size="sm"
-                  onClick={() => setActiveSection(s.key)}
-                >
-                  {s.label}
-                </Button>
-              ))}
+        {/* Section switcher */}
+        <div className="mb-4 flex flex-wrap gap-2">
+          {([
+            { key: "readiness" as const, label: "Readiness Score" },
+            { key: "panels" as const, label: "Panel Suggestions" },
+            { key: "tubes" as const, label: "Tube Consolidation" },
+            { key: "gaps" as const, label: "Gap Analysis" },
+            { key: "loinc" as const, label: "LOINC Auto-Map" },
+            { key: "lookup" as const, label: "Code Lookup" },
+          ]).map((s) => (
+            <Button
+              key={s.key}
+              variant={activeSection === s.key ? "primary" : "outline"}
+              size="sm"
+              onClick={() => setActiveSection(s.key)}
+            >
+              {s.label}
+            </Button>
+          ))}
+        </div>
+
+        {/* Readiness Score */}
+        {activeSection === "readiness" ? (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-semibold">Readiness Score</div>
+              <Button variant="outline" size="sm" onClick={() => loadReadinessScore()} disabled={loading} className="gap-2">
+                <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Refresh
+              </Button>
             </div>
 
-            {/* Readiness Score */}
-            {activeSection === "readiness" ? (
+            {readiness ? (
               <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-sm font-semibold">Readiness Score</div>
-                  <Button variant="outline" size="sm" onClick={() => loadReadinessScore()} disabled={loading} className="gap-2">
-                    <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Refresh
-                  </Button>
+                {/* Overall score display */}
+                <div className="mb-4 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-shrink-0">
+                      <div className={cn("text-4xl font-bold", scoreColor(readiness.percentage))}>
+                        {readiness.percentage}%
+                      </div>
+                      <div className="text-xs text-zc-muted mt-1">
+                        {readiness.score} / {readiness.maxScore} points
+                      </div>
+                    </div>
+                    <div className="flex-1">
+                      <div className="h-3 w-full rounded-full bg-gray-100 overflow-hidden">
+                        <div
+                          className={cn("h-full rounded-full transition-all", scoreBg(readiness.percentage))}
+                          style={{ width: `${readiness.percentage}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                {readiness ? (
-                  <div>
-                    {/* Overall score display */}
-                    <div className="mb-4 rounded-xl border border-zc-border bg-zc-panel/10 p-4">
-                      <div className="flex items-center gap-4">
-                        <div className="flex-shrink-0">
-                          <div className={cn("text-4xl font-bold", scoreColor(readiness.percentage))}>
-                            {readiness.percentage}%
-                          </div>
-                          <div className="text-xs text-zc-muted mt-1">
-                            {readiness.score} / {readiness.maxScore} points
-                          </div>
+                {/* Breakdown */}
+                <div className="text-sm font-semibold mb-2">Breakdown</div>
+                <div className="grid gap-2">
+                  {safeArray<ReadinessBreakdown>(readiness.breakdown).map((b, idx) => {
+                    const bPct = b.maxPoints > 0 ? Math.round((b.points / b.maxPoints) * 100) : 0;
+                    return (
+                      <div key={idx} className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-semibold">{b.category}</span>
+                          <span className={cn("text-xs font-semibold", scoreColor(bPct))}>
+                            {b.points} / {b.maxPoints}
+                          </span>
                         </div>
-                        <div className="flex-1">
-                          <div className="h-3 w-full rounded-full bg-gray-100 overflow-hidden">
-                            <div
-                              className={cn("h-full rounded-full transition-all", scoreBg(readiness.percentage))}
-                              style={{ width: `${readiness.percentage}%` }}
-                            />
-                          </div>
+                        <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden mb-1">
+                          <div
+                            className={cn("h-full rounded-full transition-all", scoreBg(bPct))}
+                            style={{ width: `${bPct}%` }}
+                          />
                         </div>
+                        <div className="text-xs text-zc-muted">{b.detail}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : loading ? (
+              <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">
+                Loading readiness score...
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Panel Suggestions */}
+        {activeSection === "panels" ? (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-semibold">Panel Suggestions ({panelSuggestions.length})</div>
+              <Button variant="outline" size="sm" onClick={() => loadPanelSuggestions()} disabled={loading} className="gap-2">
+                <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Refresh
+              </Button>
+            </div>
+
+            {panelSuggestions.length === 0 ? (
+              <div className={cn(
+                "rounded-xl border border-dashed p-4 text-sm",
+                panelsLoaded
+                  ? "border-emerald-300 bg-emerald-50/40 text-emerald-700"
+                  : "border-zc-border text-zc-muted",
+              )}>
+                {panelsLoaded
+                  ? "No new panel suggestions found. Your panels look well configured."
+                  : loading
+                    ? "Analyzing items and generating panel suggestions..."
+                    : "Click Refresh to analyze items."}
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {panelSuggestions.map((ps, idx) => (
+                  <div key={idx} className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                    <div className="text-sm font-semibold mb-2">{ps.panelName}</div>
+
+                    {/* Members */}
+                    <div className="mb-2">
+                      <div className="text-xs font-semibold text-zc-muted mb-1">Suggested Members</div>
+                      <div className="flex flex-wrap gap-1">
+                        {safeArray<string>(ps.members).map((m, mIdx) => (
+                          <span key={mIdx} className="inline-flex items-center rounded-full border border-zc-border bg-white px-2 py-0.5 text-[11px]">
+                            {m}
+                          </span>
+                        ))}
                       </div>
                     </div>
 
-                    {/* Breakdown */}
-                    <div className="text-sm font-semibold mb-2">Breakdown</div>
-                    <div className="grid gap-2">
-                      {safeArray<ReadinessBreakdown>(readiness.breakdown).map((b, idx) => {
-                        const bPct = b.maxPoints > 0 ? Math.round((b.points / b.maxPoints) * 100) : 0;
-                        return (
-                          <div key={idx} className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="text-sm font-semibold">{b.category}</span>
-                              <span className={cn("text-xs font-semibold", scoreColor(bPct))}>
-                                {b.points} / {b.maxPoints}
-                              </span>
-                            </div>
-                            <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden mb-1">
-                              <div
-                                className={cn("h-full rounded-full transition-all", scoreBg(bPct))}
-                                style={{ width: `${bPct}%` }}
-                              />
-                            </div>
-                            <div className="text-xs text-zc-muted">{b.detail}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : loading ? (
-                  <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">
-                    Loading readiness score...
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            {/* Panel Suggestions */}
-            {activeSection === "panels" ? (
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-sm font-semibold">Panel Suggestions ({panelSuggestions.length})</div>
-                  <Button variant="outline" size="sm" onClick={() => loadPanelSuggestions()} disabled={loading} className="gap-2">
-                    <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Refresh
-                  </Button>
-                </div>
-
-                {panelSuggestions.length === 0 ? (
-                  <div className={cn(
-                    "rounded-xl border border-dashed p-4 text-sm",
-                    panelsLoaded
-                      ? "border-emerald-300 bg-emerald-50/40 text-emerald-700"
-                      : "border-zc-border text-zc-muted",
-                  )}>
-                    {panelsLoaded
-                      ? "No new panel suggestions found. Your panels look well configured."
-                      : loading
-                        ? "Analyzing items and generating panel suggestions..."
-                        : "Click Refresh to analyze items."}
-                  </div>
-                ) : (
-                  <div className="grid gap-3">
-                    {panelSuggestions.map((ps, idx) => (
-                      <div key={idx} className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-                        <div className="text-sm font-semibold mb-2">{ps.panelName}</div>
-
-                        {/* Members */}
-                        <div className="mb-2">
-                          <div className="text-xs font-semibold text-zc-muted mb-1">Suggested Members</div>
-                          <div className="flex flex-wrap gap-1">
-                            {safeArray<string>(ps.members).map((m, mIdx) => (
-                              <span key={mIdx} className="inline-flex items-center rounded-full border border-zc-border bg-white px-2 py-0.5 text-[11px]">
-                                {m}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Matched existing */}
-                        {safeArray(ps.matchedExisting).length > 0 ? (
-                          <div className="mb-2">
-                            <div className="text-xs font-semibold text-emerald-700 mb-1">Already in Catalog</div>
-                            <div className="flex flex-wrap gap-1">
-                              {safeArray<string>(ps.matchedExisting).map((m, mIdx) => (
-                                <span key={mIdx} className="inline-flex items-center rounded-full border border-emerald-200/70 bg-emerald-50/80 px-2 py-0.5 text-[11px] text-emerald-700">
-                                  {m}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {/* Missing */}
-                        {safeArray(ps.missing).length > 0 ? (
-                          <div>
-                            <div className="text-xs font-semibold text-amber-700 mb-1">Missing from Catalog</div>
-                            <div className="flex flex-wrap gap-1">
-                              {safeArray<string>(ps.missing).map((m, mIdx) => (
-                                <span key={mIdx} className="inline-flex items-center rounded-full border border-amber-200/70 bg-amber-50/80 px-2 py-0.5 text-[11px] text-amber-700">
-                                  {m}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
-
-            {/* Tube Consolidation */}
-            {activeSection === "tubes" ? (
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-sm font-semibold">Tube Consolidation ({tubeGroups.length} groups)</div>
-                  <Button variant="outline" size="sm" onClick={() => loadTubeConsolidation()} disabled={loading} className="gap-2">
-                    <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Refresh
-                  </Button>
-                </div>
-
-                {tubeGroups.length === 0 ? (
-                  <div className={cn(
-                    "rounded-xl border border-dashed p-4 text-sm",
-                    loading
-                      ? "border-zc-border text-zc-muted"
-                      : "border-emerald-300 bg-emerald-50/40 text-emerald-700",
-                  )}>
-                    {loading
-                      ? "Loading tube consolidation data..."
-                      : "No tube groups found. Ensure specimens are configured with containers."}
-                  </div>
-                ) : (
-                  <div className="grid gap-3">
-                    {tubeGroups.map((g, idx) => (
-                      <div key={idx} className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-sm font-semibold">{g.container}</span>
-                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600 uppercase">
-                            {g.specimenName}
-                          </span>
-                          <span className="ml-auto text-xs text-zc-muted">
-                            {safeArray(g.tests).length} test{safeArray(g.tests).length !== 1 ? "s" : ""}
-                          </span>
-                        </div>
+                    {/* Matched existing */}
+                    {safeArray(ps.matchedExisting).length > 0 ? (
+                      <div className="mb-2">
+                        <div className="text-xs font-semibold text-emerald-700 mb-1">Already in Catalog</div>
                         <div className="flex flex-wrap gap-1">
-                          {safeArray<string>(g.tests).map((t, tIdx) => (
-                            <span key={tIdx} className="inline-flex items-center rounded-full border border-sky-200/70 bg-sky-50/80 px-2 py-0.5 text-[11px] text-sky-700">
-                              {t}
+                          {safeArray<string>(ps.matchedExisting).map((m, mIdx) => (
+                            <span key={mIdx} className="inline-flex items-center rounded-full border border-emerald-200/70 bg-emerald-50/80 px-2 py-0.5 text-[11px] text-emerald-700">
+                              {m}
                             </span>
                           ))}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
+                    ) : null}
 
-            {/* Gap Analysis */}
-            {activeSection === "gaps" ? (
-              <div>
-                {stats ? (
-                  <div className="mb-4 grid gap-3 md:grid-cols-4">
-                    <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-                      <div className="text-xs text-zc-muted">Total Items</div>
-                      <div className="mt-1 text-2xl font-semibold">{stats.totalItems}</div>
-                    </div>
-                    <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-                      <div className="text-xs text-zc-muted">LOINC Coverage</div>
-                      <div className={cn("mt-1 text-2xl font-semibold", stats.loincCoverage >= 80 ? "text-emerald-600" : "text-amber-600")}>
-                        {stats.loincCoverage}%
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-                      <div className="text-xs text-zc-muted">With LOINC</div>
-                      <div className="mt-1 text-2xl font-semibold">{stats.itemsWithLoinc}</div>
-                    </div>
-                    <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-                      <div className="text-xs text-zc-muted">With Templates</div>
-                      <div className="mt-1 text-2xl font-semibold">{stats.itemsWithTemplates}</div>
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-sm font-semibold">Configuration Gaps ({gaps.length})</div>
-                  <Button variant="outline" size="sm" onClick={() => loadGaps()} disabled={loading} className="gap-2">
-                    <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Refresh
-                  </Button>
-                </div>
-
-                <div className="grid gap-2">
-                  {gaps.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50/40 p-4 text-sm text-emerald-700">
-                      No configuration gaps detected. Configuration looks complete.
-                    </div>
-                  ) : (
-                    gaps.map((g, idx) => (
-                      <div key={idx} className={cn(
-                        "rounded-xl border p-3",
-                        g.severity === "high"
-                          ? "border-rose-200/70 bg-rose-50/60"
-                          : g.severity === "medium"
-                            ? "border-amber-200/70 bg-amber-50/60"
-                            : "border-blue-200/70 bg-blue-50/60",
-                      )}>
-                        <div className="flex items-center gap-2">
-                          <span className={cn(
-                            "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
-                            g.severity === "high"
-                              ? "bg-rose-100 text-rose-700"
-                              : g.severity === "medium"
-                                ? "bg-amber-100 text-amber-700"
-                                : "bg-blue-100 text-blue-700",
-                          )}>
-                            {g.severity}
-                          </span>
-                          <span className={cn(
-                            "text-[10px] font-semibold uppercase rounded-full px-2 py-0.5 bg-gray-100 text-gray-600",
-                          )}>
-                            {g.category}
-                          </span>
-                          <span className="text-sm font-semibold">{g.title}</span>
+                    {/* Missing */}
+                    {safeArray(ps.missing).length > 0 ? (
+                      <div>
+                        <div className="text-xs font-semibold text-amber-700 mb-1">Missing from Catalog</div>
+                        <div className="flex flex-wrap gap-1">
+                          {safeArray<string>(ps.missing).map((m, mIdx) => (
+                            <span key={mIdx} className="inline-flex items-center rounded-full border border-amber-200/70 bg-amber-50/80 px-2 py-0.5 text-[11px] text-amber-700">
+                              {m}
+                            </span>
+                          ))}
                         </div>
-                        <div className="mt-1 text-xs text-zc-muted">{g.detail}</div>
                       </div>
-                    ))
-                  )}
-                </div>
+                    ) : null}
+                  </div>
+                ))}
               </div>
-            ) : null}
+            )}
+          </div>
+        ) : null}
 
-            {/* LOINC Auto-Map */}
-            {activeSection === "loinc" ? (
-              <div>
-                <div className="mb-4 flex items-center justify-between">
-                  <div className="text-sm text-zc-muted">
-                    {mappings.length} items can be auto-mapped. {skipped.length} skipped (no match found).
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => loadLoincMappings()} disabled={loading} className="gap-2">
-                      <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Refresh
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={applySelected}
-                      disabled={applying || selectedMappings.size === 0}
-                    >
-                      Apply Selected ({selectedMappings.size})
-                    </Button>
-                  </div>
-                </div>
+        {/* Tube Consolidation */}
+        {activeSection === "tubes" ? (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-semibold">Tube Consolidation ({tubeGroups.length} groups)</div>
+              <Button variant="outline" size="sm" onClick={() => loadTubeConsolidation()} disabled={loading} className="gap-2">
+                <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Refresh
+              </Button>
+            </div>
 
-                {mappings.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50/40 p-4 text-sm text-emerald-700">
-                    All items already have LOINC codes or no matches found.
-                  </div>
-                ) : (
-                  <div className="grid gap-2">
-                    {mappings.map((m) => (
-                      <div key={m.itemId} className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-                        <input
-                          type="checkbox"
-                          checked={selectedMappings.has(m.itemId)}
-                          onChange={(e) => {
-                            const next = new Set(selectedMappings);
-                            if (e.target.checked) next.add(m.itemId);
-                            else next.delete(m.itemId);
-                            setSelectedMappings(next);
-                          }}
-                          className="h-4 w-4 rounded border-gray-300"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-semibold">{m.name}</div>
-                          <div className="text-xs text-zc-muted">
-                            LOINC: <span className="font-mono text-zc-text">{m.loincCode}</span> - {m.display}
-                          </div>
-                        </div>
-                        <span className={cn(
-                          "text-xs font-semibold rounded-full px-2 py-0.5",
-                          m.confidence >= 0.9 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
-                        )}>
-                          {Math.round(m.confidence * 100)}%
+            {tubeGroups.length === 0 ? (
+              <div className={cn(
+                "rounded-xl border border-dashed p-4 text-sm",
+                loading
+                  ? "border-zc-border text-zc-muted"
+                  : "border-emerald-300 bg-emerald-50/40 text-emerald-700",
+              )}>
+                {loading
+                  ? "Loading tube consolidation data..."
+                  : "No tube groups found. Ensure specimens are configured with containers."}
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {tubeGroups.map((g, idx) => (
+                  <div key={idx} className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-sm font-semibold">{g.container}</span>
+                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600 uppercase">
+                        {g.specimenName}
+                      </span>
+                      <span className="ml-auto text-xs text-zc-muted">
+                        {safeArray(g.tests).length} test{safeArray(g.tests).length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {safeArray<string>(g.tests).map((t, tIdx) => (
+                        <span key={tIdx} className="inline-flex items-center rounded-full border border-sky-200/70 bg-sky-50/80 px-2 py-0.5 text-[11px] text-sky-700">
+                          {t}
                         </span>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                )}
-
-                {skipped.length > 0 ? (
-                  <div className="mt-4">
-                    <div className="text-sm font-semibold text-zc-muted mb-2">Skipped (no match)</div>
-                    <div className="text-xs text-zc-muted">{skipped.join(", ")}</div>
-                  </div>
-                ) : null}
+                ))}
               </div>
-            ) : null}
+            )}
+          </div>
+        ) : null}
 
-            {/* Code Lookup */}
-            {activeSection === "lookup" ? (
-              <div>
-                <div className="mb-4 flex gap-2">
-                  <Input
-                    value={lookupName}
-                    onChange={(e) => setLookupName(e.target.value)}
-                    placeholder="Enter test name (e.g. CBC, Hemoglobin, X-Ray Chest)"
-                    className="flex-1"
-                    onKeyDown={(e) => { if (e.key === "Enter") void runLookup(); }}
-                  />
-                  <Button onClick={() => void runLookup()} disabled={loading || !lookupName.trim()}>
-                    Search
-                  </Button>
+        {/* Gap Analysis */}
+        {activeSection === "gaps" ? (
+          <div>
+            {stats ? (
+              <div className="mb-4 grid gap-3 md:grid-cols-4">
+                <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                  <div className="text-xs text-zc-muted">Total Items</div>
+                  <div className="mt-1 text-2xl font-semibold">{stats.totalItems}</div>
                 </div>
-
-                {loincResults.length > 0 ? (
-                  <div className="mb-4">
-                    <div className="text-sm font-semibold mb-2">LOINC Suggestions</div>
-                    <div className="grid gap-2">
-                      {loincResults.map((r: any, idx: number) => (
-                        <div key={idx} className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-                          <div>
-                            <div className="text-sm font-mono font-semibold">{r.code}</div>
-                            <div className="text-xs text-zc-muted">{r.display}</div>
-                          </div>
-                          <span className={cn(
-                            "text-xs font-semibold rounded-full px-2 py-0.5",
-                            r.confidence >= 0.9 ? "bg-emerald-100 text-emerald-700" : r.confidence >= 0.7 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600",
-                          )}>
-                            {Math.round(r.confidence * 100)}%
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                  <div className="text-xs text-zc-muted">LOINC Coverage</div>
+                  <div className={cn("mt-1 text-2xl font-semibold", stats.loincCoverage >= 80 ? "text-emerald-600" : "text-amber-600")}>
+                    {stats.loincCoverage}%
                   </div>
-                ) : null}
-
-                {snomedResults.length > 0 ? (
-                  <div className="mb-4">
-                    <div className="text-sm font-semibold mb-2">SNOMED Suggestions</div>
-                    <div className="grid gap-2">
-                      {snomedResults.map((r: any, idx: number) => (
-                        <div key={idx} className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
-                          <div>
-                            <div className="text-sm font-mono font-semibold">{r.code}</div>
-                            <div className="text-xs text-zc-muted">{r.display}</div>
-                          </div>
-                          <span className={cn(
-                            "text-xs font-semibold rounded-full px-2 py-0.5",
-                            r.confidence >= 0.9 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
-                          )}>
-                            {Math.round(r.confidence * 100)}%
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {pcpndtResult ? (
-                  <div className="mb-4">
-                    <div className="text-sm font-semibold mb-2">PCPNDT Detection</div>
-                    <div className={cn(
-                      "rounded-xl border p-3",
-                      pcpndtResult.requiresPcpndt
-                        ? "border-rose-200/70 bg-rose-50/60"
-                        : "border-emerald-200/70 bg-emerald-50/40",
-                    )}>
-                      <div className="text-sm font-semibold">
-                        {pcpndtResult.requiresPcpndt ? "PCPNDT Flag Required" : "No PCPNDT requirement detected"}
-                      </div>
-                      {pcpndtResult.matchedKeyword ? (
-                        <div className="text-xs text-zc-muted mt-1">
-                          Matched keyword: <span className="font-mono">{pcpndtResult.matchedKeyword}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-
-                {lookupName && loincResults.length === 0 && snomedResults.length === 0 && !loading ? (
-                  <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">
-                    No results found. Try a different test name.
-                  </div>
-                ) : null}
+                </div>
+                <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                  <div className="text-xs text-zc-muted">With LOINC</div>
+                  <div className="mt-1 text-2xl font-semibold">{stats.itemsWithLoinc}</div>
+                </div>
+                <div className="rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                  <div className="text-xs text-zc-muted">With Templates</div>
+                  <div className="mt-1 text-2xl font-semibold">{stats.itemsWithTemplates}</div>
+                </div>
               </div>
             ) : null}
-          </CardContent>
-        </Card>
-      </RequirePerm>
-    </AppShell>
+
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-semibold">Configuration Gaps ({gaps.length})</div>
+              <Button variant="outline" size="sm" onClick={() => loadGaps()} disabled={loading} className="gap-2">
+                <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Refresh
+              </Button>
+            </div>
+
+            <div className="grid gap-2">
+              {gaps.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50/40 p-4 text-sm text-emerald-700">
+                  No configuration gaps detected. Configuration looks complete.
+                </div>
+              ) : (
+                gaps.map((g, idx) => (
+                  <div key={idx} className={cn(
+                    "rounded-xl border p-3",
+                    g.severity === "high"
+                      ? "border-rose-200/70 bg-rose-50/60"
+                      : g.severity === "medium"
+                        ? "border-amber-200/70 bg-amber-50/60"
+                        : "border-blue-200/70 bg-blue-50/60",
+                  )}>
+                    <div className="flex items-center gap-2">
+                      <span className={cn(
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
+                        g.severity === "high"
+                          ? "bg-rose-100 text-rose-700"
+                          : g.severity === "medium"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-blue-100 text-blue-700",
+                      )}>
+                        {g.severity}
+                      </span>
+                      <span className={cn(
+                        "text-[10px] font-semibold uppercase rounded-full px-2 py-0.5 bg-gray-100 text-gray-600",
+                      )}>
+                        {g.category}
+                      </span>
+                      <span className="text-sm font-semibold">{g.title}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-zc-muted">{g.detail}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {/* LOINC Auto-Map */}
+        {activeSection === "loinc" ? (
+          <div>
+            <div className="mb-4 flex items-center justify-between">
+              <div className="text-sm text-zc-muted">
+                {mappings.length} items can be auto-mapped. {skipped.length} skipped (no match found).
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => loadLoincMappings()} disabled={loading} className="gap-2">
+                  <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Refresh
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={applySelected}
+                  disabled={applying || selectedMappings.size === 0}
+                >
+                  Apply Selected ({selectedMappings.size})
+                </Button>
+              </div>
+            </div>
+
+            {mappings.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50/40 p-4 text-sm text-emerald-700">
+                All items already have LOINC codes or no matches found.
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                {mappings.map((m) => (
+                  <div key={m.itemId} className="flex items-center gap-3 rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedMappings.has(m.itemId)}
+                      onChange={(e) => {
+                        const next = new Set(selectedMappings);
+                        if (e.target.checked) next.add(m.itemId);
+                        else next.delete(m.itemId);
+                        setSelectedMappings(next);
+                      }}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold">{m.name}</div>
+                      <div className="text-xs text-zc-muted">
+                        LOINC: <span className="font-mono text-zc-text">{m.loincCode}</span> - {m.display}
+                      </div>
+                    </div>
+                    <span className={cn(
+                      "text-xs font-semibold rounded-full px-2 py-0.5",
+                      m.confidence >= 0.9 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
+                    )}>
+                      {Math.round(m.confidence * 100)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {skipped.length > 0 ? (
+              <div className="mt-4">
+                <div className="text-sm font-semibold text-zc-muted mb-2">Skipped (no match)</div>
+                <div className="text-xs text-zc-muted">{skipped.join(", ")}</div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Code Lookup */}
+        {activeSection === "lookup" ? (
+          <div>
+            <div className="mb-4 flex gap-2">
+              <Input
+                value={lookupName}
+                onChange={(e) => setLookupName(e.target.value)}
+                placeholder="Enter test name (e.g. CBC, Hemoglobin, X-Ray Chest)"
+                className="flex-1"
+                onKeyDown={(e) => { if (e.key === "Enter") void runLookup(); }}
+              />
+              <Button onClick={() => void runLookup()} disabled={loading || !lookupName.trim()}>
+                Search
+              </Button>
+            </div>
+
+            {loincResults.length > 0 ? (
+              <div className="mb-4">
+                <div className="text-sm font-semibold mb-2">LOINC Suggestions</div>
+                <div className="grid gap-2">
+                  {loincResults.map((r: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                      <div>
+                        <div className="text-sm font-mono font-semibold">{r.code}</div>
+                        <div className="text-xs text-zc-muted">{r.display}</div>
+                      </div>
+                      <span className={cn(
+                        "text-xs font-semibold rounded-full px-2 py-0.5",
+                        r.confidence >= 0.9 ? "bg-emerald-100 text-emerald-700" : r.confidence >= 0.7 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600",
+                      )}>
+                        {Math.round(r.confidence * 100)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {snomedResults.length > 0 ? (
+              <div className="mb-4">
+                <div className="text-sm font-semibold mb-2">SNOMED Suggestions</div>
+                <div className="grid gap-2">
+                  {snomedResults.map((r: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between rounded-xl border border-zc-border bg-zc-panel/10 p-3">
+                      <div>
+                        <div className="text-sm font-mono font-semibold">{r.code}</div>
+                        <div className="text-xs text-zc-muted">{r.display}</div>
+                      </div>
+                      <span className={cn(
+                        "text-xs font-semibold rounded-full px-2 py-0.5",
+                        r.confidence >= 0.9 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
+                      )}>
+                        {Math.round(r.confidence * 100)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {pcpndtResult ? (
+              <div className="mb-4">
+                <div className="text-sm font-semibold mb-2">PCPNDT Detection</div>
+                <div className={cn(
+                  "rounded-xl border p-3",
+                  pcpndtResult.requiresPcpndt
+                    ? "border-rose-200/70 bg-rose-50/60"
+                    : "border-emerald-200/70 bg-emerald-50/40",
+                )}>
+                  <div className="text-sm font-semibold">
+                    {pcpndtResult.requiresPcpndt ? "PCPNDT Flag Required" : "No PCPNDT requirement detected"}
+                  </div>
+                  {pcpndtResult.matchedKeyword ? (
+                    <div className="text-xs text-zc-muted mt-1">
+                      Matched keyword: <span className="font-mono">{pcpndtResult.matchedKeyword}</span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {lookupName && loincResults.length === 0 && snomedResults.length === 0 && !loading ? (
+              <div className="rounded-xl border border-dashed border-zc-border p-4 text-sm text-zc-muted">
+                No results found. Try a different test name.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }

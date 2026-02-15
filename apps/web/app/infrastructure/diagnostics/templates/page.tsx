@@ -40,7 +40,7 @@ import { Plus, RefreshCw, Pencil, Search, Trash2 } from "lucide-react";
 import type { DiagnosticItemRow, TemplateRow, TemplateKind } from "../_shared/types";
 import { TEMPLATE_KINDS } from "../_shared/constants";
 import { safeArray, validateName } from "../_shared/utils";
-import { Field, ModalHeader, modalClassName } from "../_shared/components";
+import { Field, ModalHeader, NoBranchGuard, modalClassName } from "../_shared/components";
 
 /* =========================================================
    TemplateDialog
@@ -399,7 +399,7 @@ export default function ReportTemplatesPage() {
   return (
     <AppShell title="Diagnostics - Report Templates">
       <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
-        <TemplatesContent branchId={branchId} />
+        {branchId ? <TemplatesContent branchId={branchId} /> : <NoBranchGuard />}
       </RequirePerm>
     </AppShell>
   );

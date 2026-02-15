@@ -20,6 +20,8 @@ import { apiFetch } from "@/lib/api";
 import { useBranchContext } from "@/lib/branch/useBranchContext";
 import { cn } from "@/lib/cn";
 
+import { NoBranchGuard } from "../_shared/components";
+
 import {
   AlertTriangle,
   CheckCircle2,
@@ -470,7 +472,7 @@ function CheckRow({
         <Button
           size="sm"
           variant={check.severity === "BLOCKER" ? "primary" : "outline"}
-          onClick={() => router.push(fixRoute(fix))}
+          onClick={() => router.push(fixRoute(fix) as any)}
           className="gap-2 print:hidden"
         >
           Fix <ChevronRight className="h-4 w-4" />
@@ -709,10 +711,10 @@ export default function GoLiveCheckPage() {
   const { branchId } = useBranchContext();
 
   return (
-    <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
-      <AppShell title="Diagnostics - Go-Live Check">
-        <GoLiveContent branchId={branchId} />
-      </AppShell>
-    </RequirePerm>
+    <AppShell title="Diagnostics - Go-Live Check">
+      <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
+        {branchId ? <GoLiveContent branchId={branchId} /> : <NoBranchGuard />}
+      </RequirePerm>
+    </AppShell>
   );
 }

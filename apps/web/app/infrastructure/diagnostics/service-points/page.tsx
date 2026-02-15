@@ -54,6 +54,7 @@ import {
   ModalHeader,
   modalClassName,
   toneForServicePointType,
+  NoBranchGuard,
 } from "../_shared/components";
 
 /* =========================================================
@@ -66,7 +67,7 @@ export default function ServicePointsPage() {
   return (
     <AppShell title="Diagnostics - Service Points">
       <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
-        <ServicePointsContent branchId={branchId} />
+        {branchId ? <ServicePointsContent branchId={branchId} /> : <NoBranchGuard />}
       </RequirePerm>
     </AppShell>
   );
