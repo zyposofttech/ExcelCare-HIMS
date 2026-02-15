@@ -68,6 +68,7 @@ import {
 import {
   Field,
   ModalHeader,
+  NoBranchGuard,
   drawerClassName,
 } from "../_shared/components";
 
@@ -1175,7 +1176,7 @@ export default function DiagnosticsPacksPage() {
   return (
     <AppShell title="Diagnostics - Quick Start">
       <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
-        <PacksContent branchId={branchId} />
+        {branchId ? <PacksContent branchId={branchId} /> : <NoBranchGuard />}
       </RequirePerm>
     </AppShell>
   );

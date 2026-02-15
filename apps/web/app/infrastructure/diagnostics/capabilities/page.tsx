@@ -55,7 +55,7 @@ import type {
 } from "../_shared/types";
 import { MODALITIES } from "../_shared/constants";
 import { safeArray, normalizeEquipmentList, toInt } from "../_shared/utils";
-import { Field, ModalHeader, modalClassName } from "../_shared/components";
+import { Field, ModalHeader, NoBranchGuard, modalClassName } from "../_shared/components";
 
 /* =========================================================
    Capabilities (Routing Rules) Page
@@ -67,7 +67,7 @@ export default function CapabilitiesPage() {
   return (
     <AppShell title="Diagnostics - Routing Rules">
       <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
-        <CapabilitiesContent branchId={branchId} />
+        {branchId ? <CapabilitiesContent branchId={branchId} /> : <NoBranchGuard />}
       </RequirePerm>
     </AppShell>
   );

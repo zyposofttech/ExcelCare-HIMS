@@ -65,6 +65,7 @@ import {
 
 import {
   Field,
+  NoBranchGuard,
   ToneBadge,
   ModalHeader,
   drawerClassName,
@@ -81,7 +82,7 @@ export default function CatalogPage() {
   return (
     <AppShell title="Diagnostics - Test Library">
       <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
-        <CatalogTab branchId={branchId} />
+        {branchId ? <CatalogTab branchId={branchId} /> : <NoBranchGuard />}
       </RequirePerm>
     </AppShell>
   );

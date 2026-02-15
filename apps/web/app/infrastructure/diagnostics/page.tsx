@@ -286,8 +286,35 @@ function SummaryCard({
 // Page
 
 export default function DiagnosticsOverviewPage() {
-  const { toast } = useToast();
   const { branchId } = useBranchContext();
+
+  return (
+    <AppShell title="Infrastructure - Diagnostics">
+      <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
+        {branchId ? <OverviewContent branchId={branchId} /> : <NoBranchGuard />}
+      </RequirePerm>
+    </AppShell>
+  );
+}
+
+function NoBranchGuard() {
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-amber-200/70 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-900/20">
+          <AlertTriangle className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+        </div>
+        <div className="text-base font-semibold text-zc-text">No Branch Selected</div>
+        <div className="max-w-sm text-sm text-zc-muted">
+          Please select a branch from the header to view and manage diagnostics configuration.
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OverviewContent({ branchId }: { branchId: string }) {
+  const { toast } = useToast();
 
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -301,7 +328,6 @@ export default function DiagnosticsOverviewPage() {
 
   const loadSummary = React.useCallback(
     async (showToast = false) => {
-      if (!branchId) return;
       const seq = ++reqSeq.current;
       setError(null);
       setLoading(true);
@@ -384,8 +410,6 @@ export default function DiagnosticsOverviewPage() {
   const isGoLiveReady = goLiveBlockers === 0 && goLiveScore >= 80;
 
   return (
-    <AppShell title="Infrastructure - Diagnostics">
-      <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
         <div className="grid gap-6">
           {/* Header */}
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -530,7 +554,5 @@ export default function DiagnosticsOverviewPage() {
             </CardContent>
           </Card>
         </div>
-      </RequirePerm>
-    </AppShell>
   );
 }

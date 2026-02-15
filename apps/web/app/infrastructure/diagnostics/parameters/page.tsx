@@ -53,6 +53,7 @@ import {
 } from "../_shared/utils";
 import {
   Field,
+  NoBranchGuard,
   ToneBadge,
   ModalHeader,
   modalClassName,
@@ -565,7 +566,7 @@ export default function ResultSchemaPage() {
   return (
     <AppShell title="Diagnostics - Result Schema">
       <RequirePerm perm="INFRA_DIAGNOSTICS_READ">
-        <LabParamsContent branchId={branchId} />
+        {branchId ? <LabParamsContent branchId={branchId} /> : <NoBranchGuard />}
       </RequirePerm>
     </AppShell>
   );
