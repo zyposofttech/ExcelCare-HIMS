@@ -160,6 +160,7 @@ function PackDialog({
       if (editing) {
         await apiFetch(`/api/infrastructure/diagnostics/packs/${encodeURIComponent(editing.id)}`, {
           method: "PUT",
+          branch: "none",
           body: JSON.stringify({
             name: name.trim(),
             labType: labType === "none" ? null : labType,
@@ -170,6 +171,7 @@ function PackDialog({
       } else {
         await apiFetch("/api/infrastructure/diagnostics/packs", {
           method: "POST",
+          branch: "none",
           body: JSON.stringify({
             code: normalizeCode(code),
             name: name.trim(),
@@ -459,6 +461,7 @@ function PackVersionDialog({
       if (editing) {
         await apiFetch(`/api/infrastructure/diagnostics/packs/versions/${encodeURIComponent(editing.id)}`, {
           method: "PUT",
+          branch: "none",
           body: JSON.stringify({
             status,
             notes: notes.trim() || null,
@@ -468,6 +471,7 @@ function PackVersionDialog({
       } else {
         await apiFetch(`/api/infrastructure/diagnostics/packs/${encodeURIComponent(packId)}/versions`, {
           method: "POST",
+          branch: "none",
           body: JSON.stringify({
             version: version.trim() ? Number.parseInt(version, 10) : undefined,
             status,
@@ -837,7 +841,7 @@ function PacksContent({ branchId }: { branchId: string }) {
     setLoading(true);
     setErr(null);
     try {
-      const rows = await apiFetch<DiagnosticPackRow[]>("/api/infrastructure/diagnostics/packs");
+      const rows = await apiFetch<DiagnosticPackRow[]>("/api/infrastructure/diagnostics/packs", { branch: "none" });
       setPacks(safeArray(rows));
       if (!packId && rows?.[0]?.id) setPackId(rows[0].id);
     } catch (e: any) {
@@ -856,7 +860,7 @@ function PacksContent({ branchId }: { branchId: string }) {
     setLoading(true);
     setErr(null);
     try {
-      const rows = await apiFetch<DiagnosticPackVersionRow[]>(`/api/infrastructure/diagnostics/packs/${encodeURIComponent(id)}/versions`);
+      const rows = await apiFetch<DiagnosticPackVersionRow[]>(`/api/infrastructure/diagnostics/packs/${encodeURIComponent(id)}/versions`, { branch: "none" });
       const list = safeArray(rows);
       setVersions(list);
       const active = list.find((v) => v.status === "ACTIVE") || list[0];
